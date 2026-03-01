@@ -12,31 +12,21 @@ aikit is a unified CLI for managing AI development assets — **Skills**, **Rule
 
 Every AI coding IDE has its own way of handling rules and configurations:
 
-| IDE            | Rules                             | MCP                | Commands                |
-| -------------- | --------------------------------- | ------------------ | ----------------------- |
-| Cursor         | `.cursor/rules/*.mdc`             | `.cursor/mcp.json` | `.cursor/commands/*.md` |
-| Claude Code    | `CLAUDE.md`                       | `.mcp.json`        | `.claude/commands/*.md` |
-| GitHub Copilot | `.github/copilot-instructions.md` | —                  | —                       |
-| Windsurf       | `.windsurf/rules/*.md`            | —                  | —                       |
+| IDE            | Rules                             | MCP                  | Commands                |
+| -------------- | --------------------------------- | -------------------- | ----------------------- |
+| Cursor         | `.cursor/rules/*.mdc`             | `.cursor/mcp.json`   | `.cursor/commands/*.md` |
+| Claude Code    | `CLAUDE.md`                       | `.mcp.json`          | `.claude/commands/*.md` |
+| GitHub Copilot | `.github/copilot-instructions.md` | `.vscode/mcp.json`   | —                       |
+| Windsurf       | `.windsurf/rules/*.md`            | `.windsurf/mcp.json` | —                       |
+| Codex          | `AGENTS.md`                       | `.codex/config.toml` | —                       |
 
 This creates three problems:
 
-1. **Hard to share** — The same rule ("respond in Chinese") looks different in every IDE. You can't just copy files around.
+1. **Hard to share** — The same rule (e.g. "follow team coding standards") is stored in different formats across IDEs. You can't just copy files around.
 2. **Hard to collaborate** — Rules accumulate on individual machines. New team members have no way to get them.
-3. **Hard to reuse** — Community best practices have no standard way to be collected and distributed.
+3. **Hard to reuse** — Great skills and configs from the community have no standard way to be collected and distributed.
 
 **aikit solves this** with one config file (`.aikit.yaml`) and one sync command. Write rules once in a standard format, and aikit converts them to each IDE's native format automatically.
-
-## Features
-
-- **Multi-IDE sync** — Cursor, Claude Code, GitHub Copilot, Windsurf (more coming)
-- **4 asset types** — Skills, Rules, MCP configs, Commands
-- **Standard format** — `asset.yaml` for rules/MCP/commands, `SKILL.md` for skills (compatible with [Agent Skills](https://github.com/nicepkg/agent-skills) ecosystem)
-- **Global catalog** — Personal asset collection at `~/.aikit/catalog.yaml`, reusable across projects
-- **Team sharing** — Commit `.aikit.yaml` to Git, teammates run `aikit sync` to get everything
-- **Multi-device sync** — Sync your global catalog to a private Git repo with `aikit catalog sync`
-- **Interactive TUI** — All commands support interactive selection when no flags are specified
-- **Publish** — Push local assets to a public remote repo with `aikit publish`
 
 ## Installation
 
@@ -46,6 +36,10 @@ This creates three problems:
 go install github.com/silenceper/aikit@latest
 ```
 
+### From releases
+
+Download the pre-built binary for your platform from the [Releases](https://github.com/silenceper/aikit/releases) page.
+
 ### From source
 
 ```bash
@@ -54,90 +48,155 @@ cd aikit
 make install
 ```
 
-### From releases
+## Usage Scenarios
 
-Download the pre-built binary for your platform from the [Releases](https://github.com/silenceper/aikit/releases) page.
+### Scenario 1: Multi-IDE sync & team sharing via `.aikit.yaml`
 
-## Quick Start
+The core workflow — add skills, rules, and MCP configs to your project, sync them to all IDEs, and share with your team by committing one file.
 
-### 1. Initialize a project
+**Set up your project:**
 
 ```bash
-cd your-project
+cd my-project
 aikit init
 ```
 
-This creates `.aikit.yaml` in your project directory.
-
-### 2. Add assets from a remote repository
+**Add assets (interactive or by flag):**
 
 ```bash
-# Add a specific skill
-aikit add vercel-labs/agent-skills --skill vercel-deploy
+# Interactive — discover and select from a remote repo
+aikit add vercel-labs/agent-skills
 
-# Add a rule
-aikit add silenceper/ai-assets --rule respond-in-chinese
-
-# Add an MCP config
-aikit add silenceper/ai-assets --mcp playwright
-
-# Or run without flags for interactive selection
-aikit add silenceper/ai-assets
+# Or specify exactly what you need
+aikit add vercel-labs/agent-skills --skill code-review
+aikit add your-org/shared-assets --rule api-conventions
+aikit add your-org/shared-assets --mcp playwright
 ```
 
-### 3. Sync to your IDEs
+**Sync to all your IDEs at once:**
 
 ```bash
-# Interactive — select which IDEs to sync to
 aikit sync
-
-# Or specify targets directly
-aikit sync --target cursor --target claude-code
 ```
 
-aikit reads `.aikit.yaml`, fetches assets from remote sources, and installs them into each IDE's native format:
+aikit reads `.aikit.yaml` and installs everything into each IDE's native format:
 
-- Skills → symlinked to `.cursor/skills/`, `.claude/skills/`, etc.
-- Rules → converted to `.mdc` (Cursor), merged into `CLAUDE.md` (Claude Code), etc.
-- MCP → merged into `.cursor/mcp.json`, `.mcp.json`, etc.
-- Commands → written to `.cursor/commands/`, `.claude/commands/`, etc.
+- Skills → symlinked to `.cursor/skills/`, `.claude/skills/`, `.codex/skills/`, etc.
+- Rules → `.mdc` (Cursor), `CLAUDE.md` (Claude Code), `AGENTS.md` (Codex), etc.
+- MCP → `.cursor/mcp.json`, `.mcp.json`, `.codex/config.toml`, etc.
+- Commands → `.cursor/commands/`, `.claude/commands/`, etc.
 
-### 4. Commit and share
+**Share with your team — just commit `.aikit.yaml`:**
 
 ```bash
 git add .aikit.yaml
-git commit -m "add AI dev assets"
+git commit -m "add AI dev environment"
+git push
 ```
 
-Your teammates clone the repo and run:
+When a teammate clones the project:
 
 ```bash
+git clone git@github.com:your-org/my-project.git
+cd my-project
+aikit sync    # Done — full AI dev environment restored
+```
+
+**Clone another project's AI setup into yours:**
+
+If you find a project with a great `.aikit.yaml` (on GitHub or locally), you can directly import it:
+
+```bash
+# From a remote repo that contains .aikit.yaml
+aikit init --from your-org/reference-project
+
+# From a local file
+aikit init --from ../other-project/.aikit.yaml
+
+# Then sync
 aikit sync
 ```
 
-Done — everyone has the same AI rules, skills, and configs.
+This makes it easy to bootstrap new projects from a proven template.
 
-## Global Catalog
+### Scenario 2: Publish & share your assets with the community
 
-The global catalog (`~/.aikit/catalog.yaml`) is your personal collection of assets, reusable across all projects.
+Created a useful skill or rule? Publish it to a remote Git repo so anyone can use it.
+
+**Example: you wrote a skill in `.cursor/skills/deploy-checker/`**
 
 ```bash
-# Register assets from a remote repo
-aikit catalog add silenceper/ai-assets
+# Publish to your public asset repo
+aikit publish --remote your-name/ai-assets --skill deploy-checker
+```
 
-# List your catalog
+aikit copies the skill to the remote repo and pushes. Now anyone can use it:
+
+```bash
+# Others add your skill to their project
+aikit add your-name/ai-assets --skill deploy-checker
+aikit sync
+```
+
+You can also publish rules and commands:
+
+```bash
+aikit publish --remote your-name/ai-assets --rule api-conventions
+```
+
+### Scenario 3: Global catalog — collect, organize, reuse
+
+The global catalog (`~/.aikit/catalog.yaml`) is your personal library of AI assets, collected from anywhere and reusable across all your projects.
+
+**Discover and collect:**
+
+```bash
+# Found a great asset repo? Add it to your catalog (interactive selection)
+aikit catalog add vercel-labs/agent-skills
+
+# Or add a specific asset
+aikit catalog add your-org/shared-assets --rule api-conventions
+```
+
+**Browse your collection:**
+
+```bash
 aikit catalog list
+```
 
-# Add from catalog to current project (interactive)
+```
+Skills:
+  AI Tools
+    - code-review — Automated code review assistant (source: vercel-labs/agent-skills)
+    - vercel-deploy — Deploy to Vercel (source: vercel-labs/agent-skills)
+
+Rules:
+  Team Standards
+    - api-conventions — API design conventions (source: your-org/shared-assets)
+```
+
+**Use in any project — pick from your catalog:**
+
+```bash
+cd new-project
+aikit init
+
+# Interactive: browse your catalog and select what this project needs
 aikit add
 
-# Remove from catalog (interactive)
+aikit sync
+```
+
+**Manage your catalog:**
+
+```bash
+# Remove assets you no longer need (interactive)
 aikit catalog remove
 
-# Update cached remote assets
+# Update all cached remote assets to latest
 aikit catalog update
 
-# Sync catalog across devices via a private Git repo
+# Sync your catalog across multiple devices via a private Git repo
 aikit catalog sync --remote git@github.com:you/my-aikit-catalog.git
 ```
 
@@ -145,7 +204,7 @@ aikit catalog sync --remote git@github.com:you/my-aikit-catalog.git
 
 ### Skill (`SKILL.md`)
 
-Compatible with the [Agent Skills](https://github.com/nicepkg/agent-skills) ecosystem:
+Compatible with the [Agent Skills](https://github.com/vercel-labs/agent-skills) ecosystem:
 
 ```markdown
 ---
@@ -162,11 +221,12 @@ Review code for bugs, security issues, and style violations.
 ```yaml
 kind: rule
 metadata:
-  name: respond-in-chinese
-  description: "Always respond in Chinese"
+  name: coding-standards
+  description: "Enforce team coding standards and best practices"
 spec:
   content_file: content.md
-  always_apply: true
+  globs: ["**/*.go", "**/*.ts"]
+  always_apply: false
 ```
 
 ### MCP (`asset.yaml`)
@@ -201,22 +261,23 @@ project:
   targets:
     - cursor
     - claude-code
+    - codex
 assets:
   skills:
     - source: vercel-labs/agent-skills
-      name: vercel-deploy
+      name: code-review
   rules:
-    - source: silenceper/ai-assets
-      name: respond-in-chinese
+    - source: your-org/shared-assets
+      name: api-conventions
   mcps:
-    - source: silenceper/ai-assets
+    - source: your-org/shared-assets
       name: playwright
   commands:
-    - source: silenceper/ai-assets
+    - source: your-org/shared-assets
       name: review
 local_rules:
   - name: project-conventions
-    content: "Follow our team coding standards..."
+    content: "Follow our internal API naming conventions: use camelCase for JSON fields..."
     always_apply: true
 ```
 
@@ -224,7 +285,7 @@ local_rules:
 
 ```
 aikit
-├── init [--from <source>]              # Initialize project (or import from remote)
+├── init [--from <source>]              # Initialize project (from remote repo or local file)
 ├── add [<source>] [flags]              # Add asset to project
 ├── remove [flags]                      # Remove asset from project
 ├── list                                # List project assets
@@ -234,12 +295,12 @@ aikit
 │   ├── add <source> [flags]            # Register assets to global catalog
 │   ├── remove [flags]                  # Remove from global catalog
 │   ├── list                            # List catalog entries
-│   ├── update [<source>]               # Update cached remote assets
+│   ├── update [<source>]              # Update cached remote assets
 │   └── sync [--remote <repo>]          # Multi-device catalog sync
 └── version                             # Print version info
 ```
 
-All commands that accept `--skill/--rule/--mcp/--command` flags will fall back to interactive selection when no flags are provided.
+All commands that accept `--skill/--rule/--mcp/--command` flags will fall back to **interactive selection** when no flags are provided.
 
 ## Development
 

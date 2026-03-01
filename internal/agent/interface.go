@@ -21,6 +21,7 @@ func All() []Agent {
 		&ClaudeCode{},
 		&Copilot{},
 		&Windsurf{},
+		&Codex{},
 	}
 }
 
