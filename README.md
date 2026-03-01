@@ -6,7 +6,7 @@
 [![Release](https://github.com/silenceper/aikit/actions/workflows/release.yml/badge.svg)](https://github.com/silenceper/aikit/releases)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-aikit is a unified CLI for managing AI development assets — **Skills**, **Rules**, **MCP configs**, and **Commands** — across multiple AI coding IDEs. Declare everything in a single `.aikit.yaml`, commit it with your project, and let every team member reproduce the same AI-powered dev environment with one command.
+aikit is a unified CLI for managing AI development assets — **Skills**, **Rules**, **MCP configs**, and **Commands** — across multiple AI coding IDEs. Collect and organize your favorite assets in a personal catalog, publish your own creations to share with the community, and declare everything in a single `.aikit.yaml` so every team member can reproduce the same AI-powered dev environment with one command.
 
 ## Why aikit?
 
