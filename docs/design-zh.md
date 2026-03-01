@@ -129,14 +129,14 @@ description: Generates topic ideas for a personal AI technical blog...
 几乎所有 AI 编码 IDE 都有「规则/指令」机制，用于指导 AI 的行为，但格式各不相同：
 
 
-| IDE            | 规则格式                           | 存放位置                                  | 文件范围控制   |
-| -------------- | ------------------------------ | ------------------------------------- | -------- |
-| Cursor         | `.mdc`（frontmatter + markdown） | `.cursor/rules/*.mdc`                 | 支持 globs |
-| Claude Code    | 纯 markdown                     | `CLAUDE.md`（项目根目录及子目录）                | 靠目录层级控制  |
-| GitHub Copilot | 纯 markdown                     | `.github/copilot-instructions.md`     | 不支持      |
-| Windsurf       | 纯文本 / 规则文件                     | `.windsurfrules` 或 `.windsurf/rules/` | 部分支持     |
-| Cline          | 纯文本                            | `.clinerules`                         | 不支持      |
-| Trae           | 规则文件                           | `.trae/rules/`                        | 部分支持     |
+| IDE            | 规则格式                         | 存放位置                               | 文件范围控制   |
+| -------------- | -------------------------------- | -------------------------------------- | -------------- |
+| Cursor         | `.mdc`（frontmatter + markdown） | `.cursor/rules/*.mdc`                  | 支持 globs     |
+| Claude Code    | 纯 markdown                      | `CLAUDE.md`（项目根目录及子目录）      | 靠目录层级控制 |
+| GitHub Copilot | 纯 markdown                      | `.github/copilot-instructions.md`      | 不支持         |
+| Windsurf       | 纯文本 / 规则文件                | `.windsurfrules` 或 `.windsurf/rules/` | 部分支持       |
+| Cline          | 纯文本                           | `.clinerules`                          | 不支持         |
+| Trae           | 规则文件                         | `.trae/rules/`                         | 部分支持       |
 
 
 aikit 定义统一的规则标准格式，由适配器自动转换为各平台格式：
@@ -172,13 +172,13 @@ spec:
 aikit 管理统一的 rule 标准格式，sync 时由各 Agent 适配器转换为目标 IDE 的原生格式。`CLAUDE.md`、`AGENTS.md` 等都只是输出格式之一，不是特殊存在：
 
 
-| 目标 IDE         | 输出格式                                  | 输出方式            | globs 处理            |
-| -------------- | ------------------------------------- | --------------- | ------------------- |
-| Cursor         | `.cursor/rules/xxx.mdc`               | 每条 rule 一个文件    | 写入 frontmatter，原生支持 |
-| Claude Code    | `CLAUDE.md`                           | 多条 rule 合并为一个文件 | 转为文本注释              |
-| GitHub Copilot | `.github/copilot-instructions.md`     | 多条 rule 合并      | 转为文本注释              |
-| Windsurf       | `.windsurfrules` / `.windsurf/rules/` | 单/多文件           | 部分版本支持              |
-| AGENTS.md 兼容   | `AGENTS.md`                           | 多条 rule 合并      | 通过子目录放置控制范围         |
+| 目标 IDE       | 输出格式                              | 输出方式                 | globs 处理                 |
+| -------------- | ------------------------------------- | ------------------------ | -------------------------- |
+| Cursor         | `.cursor/rules/xxx.mdc`               | 每条 rule 一个文件       | 写入 frontmatter，原生支持 |
+| Claude Code    | `CLAUDE.md`                           | 多条 rule 合并为一个文件 | 转为文本注释               |
+| GitHub Copilot | `.github/copilot-instructions.md`     | 多条 rule 合并           | 转为文本注释               |
+| Windsurf       | `.windsurfrules` / `.windsurf/rules/` | 单/多文件                | 部分版本支持               |
+| AGENTS.md 兼容 | `AGENTS.md`                           | 多条 rule 合并           | 通过子目录放置控制范围     |
 
 
 **合并文件的 sync 策略（CLAUDE.md / AGENTS.md / copilot-instructions.md）：**
@@ -248,8 +248,8 @@ platform_overrides:
 多个 IDE 支持自定义斜杠命令（`/command-name`），本质是命名的 prompt 模板，用户输入命令名即可触发预设的提示词：
 
 
-| IDE         | 命令机制           | 存放位置                    |
-| ----------- | -------------- | ----------------------- |
+| IDE         | 命令机制          | 存放位置                |
+| ----------- | ----------------- | ----------------------- |
 | Cursor      | 自定义 `/command` | `.cursor/commands/*.md` |
 | Claude Code | 自定义 `/command` | `.claude/commands/*.md` |
 
@@ -284,11 +284,11 @@ spec:
 各平台适配策略：
 
 
-| 目标 IDE      | 输出格式        | 输出位置                         |
-| ----------- | ----------- | ---------------------------- |
-| Cursor      | markdown 文件 | `.cursor/commands/review.md` |
-| Claude Code | markdown 文件 | `.claude/commands/review.md` |
-| 不支持的 IDE    | 跳过（不生成）     | -                            |
+| 目标 IDE     | 输出格式       | 输出位置                     |
+| ------------ | -------------- | ---------------------------- |
+| Cursor       | markdown 文件  | `.cursor/commands/review.md` |
+| Claude Code  | markdown 文件  | `.claude/commands/review.md` |
+| 不支持的 IDE | 跳过（不生成） | -                            |
 
 
 command 与 rule 的区别：rule 是**被动**生效的（AI 自动遵循），command 是**主动**触发的（用户输入 `/review` 才执行）。
@@ -298,13 +298,13 @@ command 与 rule 的区别：rule 是**被动**生效的（AI 自动遵循），
 aikit 不要求远程仓库遵循特定的「资产仓库规范」。`aikit catalog add` 和 `aikit add` 在扫描远程仓库时，通过以下规则自动发现资产：
 
 
-| 发现方式             | 识别条件                               | 资产类型                     |
-| ---------------- | ---------------------------------- | ------------------------ |
-| `SKILL.md` 文件    | 目录中存在 `SKILL.md`（兼容 npx skills 规范） | Skill                    |
-| `asset.yaml` 文件  | 文件中有 `kind: rule`                  | Rule                     |
-| `asset.yaml` 文件  | 文件中有 `kind: mcp`                   | MCP                      |
-| `asset.yaml` 文件  | 文件中有 `kind: command`               | Command                  |
-| `.aikit.yaml` 文件 | 仓库根目录存在 `.aikit.yaml`              | 整套项目配置（用于 `init --from`） |
+| 发现方式           | 识别条件                                      | 资产类型                           |
+| ------------------ | --------------------------------------------- | ---------------------------------- |
+| `SKILL.md` 文件    | 目录中存在 `SKILL.md`（兼容 npx skills 规范） | Skill                              |
+| `asset.yaml` 文件  | 文件中有 `kind: rule`                         | Rule                               |
+| `asset.yaml` 文件  | 文件中有 `kind: mcp`                          | MCP                                |
+| `asset.yaml` 文件  | 文件中有 `kind: command`                      | Command                            |
+| `.aikit.yaml` 文件 | 仓库根目录存在 `.aikit.yaml`                  | 整套项目配置（用于 `init --from`） |
 
 
 扫描是递归的，仓库内的任意层级目录都会被检查。这意味着以下仓库结构 aikit 都能识别：
@@ -910,13 +910,13 @@ aikit catalog update                         # 重建远程资产缓存
 ### 与 Homebrew Tap 的对比
 
 
-| 维度         | Homebrew Tap                              | aikit                              |
-| ---------- | ----------------------------------------- | ---------------------------------- |
-| 分享载体       | 独立 tap 仓库 + `brew tap` 命令                 | `.aikit.yaml` 随项目提交                |
-| 使用方式       | `brew tap user/repo` → `brew install pkg` | `aikit sync` 或 `aikit init --from` |
-| 是否需要预注册    | 是（必须先 tap）                                | 否（sync 自动 fetch 缺失资产）              |
-| 是否需要 clone | -                                         | 否（`init --from` 直接从远程读取配置）         |
-| 适合场景       | 分发独立软件包                                   | 分享项目级 AI 开发配置                      |
+| 维度           | Homebrew Tap                              | aikit                                  |
+| -------------- | ----------------------------------------- | -------------------------------------- |
+| 分享载体       | 独立 tap 仓库 + `brew tap` 命令           | `.aikit.yaml` 随项目提交               |
+| 使用方式       | `brew tap user/repo` → `brew install pkg` | `aikit sync` 或 `aikit init --from`    |
+| 是否需要预注册 | 是（必须先 tap）                          | 否（sync 自动 fetch 缺失资产）         |
+| 是否需要 clone | -                                         | 否（`init --from` 直接从远程读取配置） |
+| 适合场景       | 分发独立软件包                            | 分享项目级 AI 开发配置                 |
 
 
 aikit 的方案更轻量：不需要额外的 tap 注册步骤，`.aikit.yaml` 自描述、自包含。两种使用路径都不需要手动操作：
@@ -956,7 +956,7 @@ MVP 支持的 agent（按优先级）：
 
 ### 完整 Agent 目录对照表（参考 npx skills 生态，aikit MVP 以本小节上方列表为准）
 
-| Agent          | `--agent` flag   | 项目级 Skills 路径       | 全局 Skills 路径                  |
+| Agent          | `--agent` flag   | 项目级 Skills 路径  | 全局 Skills 路径              |
 | -------------- | ---------------- | ------------------- | ----------------------------- |
 | Cursor         | `cursor`         | `.cursor/skills/`   | `~/.cursor/skills/`           |
 | Claude Code    | `claude-code`    | `.claude/skills/`   | `~/.claude/skills/`           |
