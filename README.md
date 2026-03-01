@@ -81,12 +81,12 @@ aikit sync
 
 aikit reads `.aikit.yaml` and installs everything into each IDE's native format:
 
-- Skills → symlinked to `.cursor/skills/`, `.claude/skills/`, `.codex/skills/`, etc.
+- Skills → installed to `.cursor/skills/`, `.claude/skills/`, `.codex/skills/`, etc. (symlink preferred, copy as fallback)
 - Rules → `.mdc` (Cursor), `CLAUDE.md` (Claude Code), `AGENTS.md` (Codex), etc.
 - MCP → `.cursor/mcp.json`, `.mcp.json`, `.codex/config.toml`, etc.
 - Commands → `.cursor/commands/`, `.claude/commands/`, etc.
 
-**Share with your team — just commit `.aikit.yaml`:**
+**Share with your team — commit `.aikit.yaml` to your repo:**
 
 ```bash
 git add .aikit.yaml
@@ -94,30 +94,31 @@ git commit -m "add AI dev environment"
 git push
 ```
 
-When a teammate clones the project:
+Teammates working on the same project just run:
 
 ```bash
-git clone git@github.com:your-org/my-project.git
-cd my-project
-aikit sync    # Done — full AI dev environment restored
+aikit sync    # Assets installed to all their IDEs
 ```
 
-**Clone another project's AI setup into yours:**
+**Import another project's AI setup (interactive):**
 
-If you find a project with a great `.aikit.yaml` (on GitHub or locally), you can directly import it:
+Found a project or team repo with a great `.aikit.yaml`? Import it and **pick only the assets you need**:
 
 ```bash
-# From a remote repo that contains .aikit.yaml
+# From a remote repo
 aikit init --from your-org/reference-project
+# → Shows all assets in that config
+# → You interactively select which ones to include
+# → Creates your local .aikit.yaml with only selected assets
 
 # From a local file
 aikit init --from ../other-project/.aikit.yaml
 
-# Then sync
+# Then sync to your IDEs
 aikit sync
 ```
 
-This makes it easy to bootstrap new projects from a proven template.
+This makes it easy to bootstrap new projects from a team template — without blindly copying everything.
 
 ### Scenario 2: Publish & share your assets with the community
 

@@ -55,6 +55,19 @@ func SaveProject(dir string, cfg *ProjectConfig) error {
 	return os.WriteFile(path, data, 0644)
 }
 
+// LoadProjectFile loads a ProjectConfig from an arbitrary file path.
+func LoadProjectFile(path string) (*ProjectConfig, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var cfg ProjectConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+	return &cfg, nil
+}
+
 // ProjectPath returns the path to .aikit.yaml in dir.
 func ProjectPath(dir string) string {
 	if dir == "" {
