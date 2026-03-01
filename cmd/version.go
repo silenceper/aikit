@@ -6,7 +6,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const version = "0.1.0"
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
 
 func init() {
 	rootCmd.AddCommand(versionCmd)
@@ -16,6 +20,6 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print aikit version",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("aikit version", version)
+		fmt.Printf("aikit version %s (commit: %s, built: %s)\n", version, commit, date)
 	},
 }

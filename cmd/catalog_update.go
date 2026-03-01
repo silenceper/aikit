@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/silenceper/aikit/internal/asset"
 	"github.com/silenceper/aikit/internal/source"
 	"github.com/silenceper/aikit/pkg/config"
 	"github.com/spf13/cobra"
@@ -36,29 +37,31 @@ func runCatalogUpdate(cmd *cobra.Command, args []string) error {
 		fmt.Println("Updated cache for", args[0])
 		return nil
 	}
-	// Update all: load catalog, for each remote source run pull
 	cfg, err := config.LoadCatalog()
 	if err != nil {
 		return err
 	}
 	seen := make(map[string]bool)
-	for _, e := range cfg.Skills {
-		if e.Source != "" && e.Source != config.LocalSourceID() && !seen[e.Source] {
-			seen[e.Source] = true
-			subdir := source.NormalizeSource(e.Source)
-			dest := filepath.Join(cacheDir, subdir)
-			_ = source.CloneOrFetch(e.Source, dest)
-			fmt.Println("Updated", e.Source)
+	allEntries := make([]asset.CatalogEntry, 0, len(cfg.Skills)+len(cfg.Rules)+len(cfg.Mcps)+len(cfg.Commands))
+	allEntries = append(allEntries, cfg.Skills...)
+	allEntries = append(allEntries, cfg.Rules...)
+	allEntries = append(allEntries, cfg.Mcps...)
+	allEntries = append(allEntries, cfg.Commands...)
+	for _, e := range allEntries {
+		if e.Source == "" || e.Source == config.LocalSourceID() || seen[e.Source] {
+			continue
 		}
+		seen[e.Source] = true
+		subdir := source.NormalizeSource(e.Source)
+		dest := filepath.Join(cacheDir, subdir)
+		if err := source.CloneOrFetch(e.Source, dest); err != nil {
+			fmt.Printf("  Warning: failed to update %s: %v\n", e.Source, err)
+			continue
+		}
+		fmt.Println("Updated", e.Source)
 	}
-	for _, e := range cfg.Mcps {
-		if e.Source != "" && e.Source != config.LocalSourceID() && !seen[e.Source] {
-			seen[e.Source] = true
-			subdir := source.NormalizeSource(e.Source)
-			dest := filepath.Join(cacheDir, subdir)
-			_ = source.CloneOrFetch(e.Source, dest)
-			fmt.Println("Updated", e.Source)
-		}
+	if len(seen) == 0 {
+		fmt.Println("No remote sources to update.")
 	}
 	return nil
 }

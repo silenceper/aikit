@@ -1,11 +1,17 @@
 package agent
 
+import "github.com/silenceper/aikit/internal/asset"
+
 // Agent defines the interface that each IDE adapter must implement.
 type Agent interface {
 	Name() string
 	Detect(projectDir string) bool
 	ProjectSkillDir() string
-	InstallSkill(srcDir, skillName string) error
+	InstallSkill(projectDir, srcDir, skillName string) error
+	InstallRule(projectDir string, rule asset.RuleData) error
+	InstallMCP(projectDir string, mcp asset.MCPData) error
+	InstallCommand(projectDir string, cmd asset.CommandData) error
+	SupportsCommand() bool
 }
 
 // All returns all known agent adapters.

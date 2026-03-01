@@ -9,7 +9,7 @@ import (
 
 var rootCmd = &cobra.Command{
 	Use:   "aikit",
-	Short: "Share your AI rules. Sync with your team.",
+	Short: "Manage AI dev assets. Sync once, align everyone.",
 	Long: `aikit lets you share and sync AI dev assets (Skills, Rules, MCP, Commands)
 so your team stays aligned. One .aikit.yaml, one aikit sync—everyone gets the same setup.
 See https://github.com/silenceper/aikit`,

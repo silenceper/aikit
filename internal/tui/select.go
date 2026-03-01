@@ -127,6 +127,41 @@ func SelectCatalogItems(items []CatalogItem) ([]CatalogItem, error) {
 	return out, nil
 }
 
+// SelectCatalogItemsToRemove shows a multi-select prompt for choosing assets to remove.
+func SelectCatalogItemsToRemove(items []CatalogItem) ([]CatalogItem, error) {
+	if len(items) == 0 {
+		return nil, fmt.Errorf("no assets to remove")
+	}
+
+	var options []huh.Option[int]
+	for i, item := range items {
+		label := fmt.Sprintf("[%s] %s", item.Kind, item.Name)
+		if item.Source != "" {
+			label += fmt.Sprintf(" (source: %s)", item.Source)
+		}
+		options = append(options, huh.NewOption(label, i))
+	}
+
+	var selected []int
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewMultiSelect[int]().
+				Title("Select assets to remove").
+				Options(options...).
+				Value(&selected),
+		),
+	)
+	if err := form.Run(); err != nil {
+		return nil, err
+	}
+
+	var out []CatalogItem
+	for _, idx := range selected {
+		out = append(out, items[idx])
+	}
+	return out, nil
+}
+
 // InputGroup prompts the user for a group name.
 func InputGroup(defaultValue string) (string, error) {
 	var group string

@@ -30,3 +30,5 @@ Thumbs.db
 .env.local
 /.*
 !/.gitignore
+!.github
+!.goreleaser.yaml

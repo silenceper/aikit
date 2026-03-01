@@ -23,8 +23,12 @@ const (
 	localSourceID = "_local"
 )
 
-// AikitHome returns the aikit home directory (e.g. ~/.aikit).
+// AikitHome returns the aikit home directory.
+// Honors AIKIT_HOME env var; defaults to ~/.aikit.
 func AikitHome() (string, error) {
+	if v := os.Getenv("AIKIT_HOME"); v != "" {
+		return v, nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
@@ -52,6 +56,33 @@ func CacheDir() (string, error) {
 
 // LocalSourceID is the source value for locally registered assets.
 func LocalSourceID() string { return localSourceID }
+
+// LocalSkillDir returns the path to ~/.aikit/skills/.
+func LocalSkillDir() (string, error) {
+	home, err := AikitHome()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, "skills"), nil
+}
+
+// LocalRuleDir returns the path to ~/.aikit/rules/.
+func LocalRuleDir() (string, error) {
+	home, err := AikitHome()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, "rules"), nil
+}
+
+// LocalCommandDir returns the path to ~/.aikit/commands/.
+func LocalCommandDir() (string, error) {
+	home, err := AikitHome()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, "commands"), nil
+}
 
 // LoadCatalog loads ~/.aikit/catalog.yaml. Returns nil config if file does not exist.
 func LoadCatalog() (*CatalogConfig, error) {

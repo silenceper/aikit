@@ -12,7 +12,7 @@ import (
 // cacheDir is the full path to the cache subdir (e.g. ~/.aikit/cache/silenceper/ai-assets).
 // source can be shorthand, HTTPS, or SSH URL.
 func CloneOrFetch(source, cacheDir string) error {
-	repoURL := toGitURL(source)
+	repoURL := ToGitURL(source)
 	_, err := os.Stat(filepath.Join(cacheDir, ".git"))
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -23,7 +23,8 @@ func CloneOrFetch(source, cacheDir string) error {
 	return fetch(cacheDir)
 }
 
-func toGitURL(source string) string {
+// ToGitURL converts a source string (shorthand, HTTPS, SSH) to a full Git URL.
+func ToGitURL(source string) string {
 	source = strings.TrimSpace(source)
 	if strings.HasPrefix(source, "https://") || strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "git@") {
 		return source

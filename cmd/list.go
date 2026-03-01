@@ -8,6 +8,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
+func init() {
+	rootCmd.AddCommand(listCmd)
+	listCmd.Flags().StringVarP(&listProjectDir, "dir", "C", ".", "Project directory")
+}
 
 var listCmd = &cobra.Command{
 	Use:   "list",
@@ -17,17 +21,11 @@ var listCmd = &cobra.Command{
 
 var listProjectDir string
 
-func init() {
-	rootCmd.AddCommand(listCmd)
-	listCmd.Flags().StringVarP(&listProjectDir, "dir", "C", ".", "Project directory")
-}
-
 func runList(cmd *cobra.Command, args []string) error {
 	cfg, err := config.LoadProject(listProjectDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			fmt.Fprintln(os.Stderr, "No .aikit.yaml found in the current directory. Run 'aikit init' first.")
-			os.Exit(1)
+			return fmt.Errorf("no .aikit.yaml found; run 'aikit init' first")
 		}
 		return err
 	}
@@ -37,16 +35,30 @@ func runList(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Println("\nAssets:")
 	for _, s := range cfg.Assets.Skills {
-		fmt.Printf("  skill   %s (source: %s)\n", s.Name, s.Source)
+		fmt.Printf("  skill    %s (source: %s)\n", s.Name, s.Source)
 	}
 	for _, r := range cfg.Assets.Rules {
-		fmt.Printf("  rule   %s (source: %s)\n", r.Name, r.Source)
+		fmt.Printf("  rule     %s (source: %s)\n", r.Name, r.Source)
 	}
 	for _, m := range cfg.Assets.Mcps {
-		fmt.Printf("  mcp    %s (source: %s)\n", m.Name, m.Source)
+		fmt.Printf("  mcp      %s (source: %s)\n", m.Name, m.Source)
 	}
 	for _, c := range cfg.Assets.Commands {
-		fmt.Printf("  command %s (source: %s)\n", c.Name, c.Source)
+		fmt.Printf("  command  %s (source: %s)\n", c.Name, c.Source)
+	}
+	if len(cfg.LocalRules) > 0 {
+		fmt.Printf("\nLocal Rules: %d\n", len(cfg.LocalRules))
+		for _, lr := range cfg.LocalRules {
+			name := lr.Name
+			if name == "" {
+				name = "(unnamed)"
+			}
+			fmt.Printf("  rule     %s (inline)\n", name)
+		}
+	}
+	total := len(cfg.Assets.Skills) + len(cfg.Assets.Rules) + len(cfg.Assets.Mcps) + len(cfg.Assets.Commands)
+	if total == 0 && len(cfg.LocalRules) == 0 {
+		fmt.Println("  (no assets configured)")
 	}
 	return nil
 }

@@ -343,6 +343,7 @@ aikit
 ├── remove --skill/--rule/--mcp/--command <name>   # 从项目 .aikit.yaml 移除资产
 ├── list                                  # 列出当前项目的资产
 ├── sync [--target <agent>...]            # 同步到目标 agent（如 cursor, claude-code）
+├── publish --remote <repo> [flags]       # 发布项目中本地创建的资产到远程仓库
 ├── diff                                  # 预览 sync 会做什么变更
 ├── import <path>                         # 导入现有 IDE 配置为 aikit 标准格式
 ├── catalog                               # 全局资产目录管理
@@ -350,8 +351,7 @@ aikit
 │   ├── remove --skill/--rule/--mcp/--command <name>  # 从全局目录移除
 │   ├── list [--type skill|rule|mcp|command]          # 列出全局目录（按分组显示）
 │   ├── update [<source>]                 # 更新已缓存的远程资产（git pull）
-│   └── publish --remote <repo> [flags]   # 推送本地资产到指定远程仓库
-├── config agents                         # 列出检测到的 agent
+│   └── sync [--remote <repo>]            # 同步全局目录到远程仓库（多设备同步）
 └── version
 ```
 
@@ -474,41 +474,40 @@ $ aikit catalog add silenceper/ai-assets --skill ai-tech-topic-radar
 ✅ 已更新
 ```
 
-#### `aikit catalog publish` - 推送本地资产到远程仓库
+#### `aikit publish` - 发布项目本地资产到远程仓库
 
-将本地注册的资产（`source: _local`）推送到指定的远程 Git 仓库，实现资产共享：
+`aikit publish` 是**顶级命令**（不在 catalog 下），用于将当前项目中用户创建的本地资产发布到远程仓库。
+
+**发现逻辑：** 扫描项目中所有 IDE 的 skill 目录（`.cursor/skills/`、`.claude/skills/` 等），排除 symlink（那些是 `aikit sync` 安装的），剩下的就是用户本地创建的资产。
 
 ```bash
-# 指定资产推送
-aikit catalog publish --remote silenceper/my-ai-assets --skill my-skill
+# 指定资产发布
+aikit publish --remote silenceper/my-ai-assets --skill my-skill
 
-# 不指定资产名 → 交互式选择要推送的本地资产
-aikit catalog publish --remote silenceper/my-ai-assets
+# 不指定资产名 → 交互式选择
+aikit publish --remote silenceper/my-ai-assets
 ```
 
 **交互式选择（不指定资产名时）：**
 
 ```
-$ aikit catalog publish --remote silenceper/my-ai-assets
+$ aikit publish --remote silenceper/my-ai-assets
 
-📤 以下本地资产可推送:
+Found 2 local skill(s) in project
 
-? 选择要推送的资产 (空格选择，回车确认):
-  [x] my-skill (skill) — 自定义 skill
-  [x] security-check (command) — 安全漏洞扫描
-  [ ] review (command) — 代码安全审查
+? Select skills to publish (空格选择，回车确认):
+  [x] my-skill — 自定义 skill
+  [ ] draft-skill — 草稿，暂不发布
 
-  skills/my-skill/SKILL.md            ← 新增
-  commands/security-check/asset.yaml  ← 新增
-  commands/security-check/content.md  ← 新增
+Pushing to silenceper/my-ai-assets...
+  Published skill: my-skill
+  Updated .aikit.yaml source references.
+  Updated catalog source references.
 
-? 确认推送? (Y/n)
-
-✅ 已推送 2 个资产到 silenceper/my-ai-assets
-   catalog 中 source 已更新为远程地址
+1 skill(s) published to silenceper/my-ai-assets
 ```
 
-publish 后，catalog.yaml 中对应资产的 source 自动从 `_local` 更新为远程仓库地址：
+publish 后，`.aikit.yaml` 和 `catalog.yaml` 中对应资产的 source 自动更新为远程仓库地址：
 
 ```yaml
 # publish 前
@@ -761,27 +760,27 @@ commands:
 ```
 ~/.aikit/
 ├── catalog.yaml      # 全局资产目录（aikit catalog add 写入，aikit init 读取）
-└── cache/            # 资产文件缓存
+├── skills/           # 本地创建的 skill（aikit catalog add . 写入）
+│   └── my-skill/
+│       └── SKILL.md
+├── rules/            # 本地创建的 rule
+├── commands/         # 本地创建的 command
+│   └── security-check/
+│       ├── asset.yaml
+│       └── content.md
+└── cache/            # 远程仓库 clone 缓存（可通过 catalog update 重建）
     ├── silenceper/
     │   └── ai-assets/          # 远程仓库按 owner/repo 组织
     │       ├── skills/
-    │       ├── rules/
-    │       ├── mcps/
     │       └── commands/
-    ├── vercel-labs/
-    │   └── agent-skills/
-    │       └── skills/
-    └── _local/                 # 本地注册的资产（aikit catalog add . 写入）
-        ├── skills/
-        │   └── my-skill/
-        │       └── SKILL.md
-        └── commands/
-            └── security-check/
-                ├── asset.yaml
-                └── content.md
+    └── vercel-labs/
+        └── agent-skills/
+            └── skills/
 ```
 
-缓存规则：远程资产按 `source` 规范化为目录——GitHub shorthand 对应 `owner/repo`；完整 URL 则从 URL 解析出 org/repo 或生成稳定目录名，保证同一 source 始终落同一缓存目录。本地资产固定放在 `_local/`。`aikit catalog publish` 将 `_local/` 下选中文件推送到指定远程仓库，并将 catalog 中对应条目的 `source` 更新为远程地址。publish 使用系统已有 git 认证（SSH 或 HTTPS），无需在 aikit 内配置。
+缓存规则：远程资产按 `source` 规范化为目录——GitHub shorthand 对应 `owner/repo`；完整 URL 则从 URL 解析出 org/repo 或生成稳定目录名，保证同一 source 始终落同一缓存目录。本地资产存放在 `~/.aikit/skills/`、`~/.aikit/rules/`、`~/.aikit/commands/` 等顶级目录。
+
+`aikit catalog sync` 可将 `catalog.yaml` 和本地资产文件同步到私有远程仓库，实现多设备间的全局收藏同步。`aikit publish` 则将项目中用户创建的资产发布到公开仓库供他人使用。两者使用系统已有 git 认证（SSH 或 HTTPS），无需在 aikit 内配置。
 
 ## 7. 资产分享机制
 
@@ -867,31 +866,45 @@ aikit catalog add someone/my-ai-assets
 aikit add someone/my-ai-assets --skill code-review
 ```
 
-**场景 4：发布本地资产供团队使用**
+**场景 4：发布项目中本地创建的资产**
 
-注册本地资产后推送到远程仓库：
+用户在项目中创建了 skill，发布到远程仓库供团队使用：
 
 ```
 开发者
 ────────
-# 1. 注册本地资产到全局目录
-aikit catalog add . --skill my-skill
-aikit catalog add ./commands --command security-check
-
-# 2. 推送到远程（交互式选择要推送的资产）
-aikit catalog publish --remote silenceper/my-ai-assets
-  → skills/my-skill/SKILL.md          推送到远程
-  → commands/security-check/...       推送到远程
-  → catalog 中 source 更新为 silenceper/my-ai-assets
+# 在项目的 .cursor/skills/ 中创建了 my-skill
+# 直接发布到远程（扫描 IDE 目录，排除 symlink，交互式选择）
+aikit publish --remote silenceper/my-ai-assets
+  → 发现 my-skill（非 symlink，用户创建）
+  → 推送到 silenceper/my-ai-assets
+  → .aikit.yaml 和 catalog 中 source 更新为 silenceper/my-ai-assets
 
 其他人
 ────────
 # 方式 A：收藏到 catalog
 aikit catalog add silenceper/my-ai-assets
-  → 自动发现 my-skill、security-check 等资产
+  → 自动发现 my-skill 等资产
 
 # 方式 B：直接添加到项目
 aikit add silenceper/my-ai-assets --skill my-skill
+```
+
+**场景 5：多设备同步个人全局收藏**
+
+将全局 catalog 和本地资产同步到私有仓库，实现跨设备一致体验：
+
+```
+设备 A
+────────
+aikit catalog add vercel-labs/agent-skills   # 注册远程资产
+aikit catalog add . --skill my-local-skill   # 注册本地资产
+aikit catalog sync --remote user/my-catalog  # 首次设置并同步（私有仓库）
+
+设备 B
+────────
+aikit catalog sync --remote user/my-catalog  # 拉取全部（catalog.yaml + 本地资产文件）
+aikit catalog update                         # 重建远程资产缓存
 ```
 
 ### 与 Homebrew Tap 的对比
@@ -993,22 +1006,21 @@ aikit/
 │   ├── sync.go
 │   ├── diff.go
 │   ├── import_cmd.go
-│   ├── catalog.go                # catalog 子命令（add/remove/list/update/publish）
-│   └── config.go
+│   ├── publish.go                # 发布项目本地资产到远程仓库
+│   └── catalog.go                # catalog 子命令（add/remove/list/update/sync）
 ├── internal/
 │   ├── asset/                    # 资产模型
 │   │   ├── types.go              # Skill, Rule, MCP, Command
 │   │   └── registry.go           # 本地注册表 (YAML)
 │   ├── catalog/                  # 全局资产目录管理
-│   │   ├── catalog.go            # Catalog CRUD（读写 ~/.aikit/catalog.yaml）
-│   │   └── publish.go            # 本地资产推送到远程仓库
+│   │   └── catalog.go            # Catalog CRUD（读写 ~/.aikit/catalog.yaml）
 │   ├── wizard/                   # 交互式向导（基于 charmbracelet/huh）
 │   │   ├── wizard.go             # 向导主流程编排
 │   │   ├── agent_select.go       # IDE/Agent 多选（含自动检测预选）
 │   │   └── asset_select.go       # Skills/MCP 分组多选
 │   ├── agent/                    # Agent 适配器
 │   │   ├── interface.go          # Agent interface
-│   │   ├── detector.go           # 自动检测已安装 agent
+│   │   ├── util.go               # 文件复制工具
 │   │   ├── cursor.go
 │   │   ├── claude.go
 │   │   ├── copilot.go
@@ -1049,7 +1061,8 @@ aikit/
 - `aikit catalog add <source>` 交互式注册资产到全局目录（远程仓库 + 本地目录）
 - `aikit catalog list` 列出全局目录中的资产（按分组显示）
 - `aikit catalog update` 更新已缓存资产
-- `aikit catalog publish --remote <repo>` 推送本地资产到指定远程仓库
+- `aikit catalog sync --remote <repo>` 同步全局目录到私有远程仓库（多设备同步）
+- `aikit publish --remote <repo>` 发布项目本地资产到远程仓库
 - Skill 发现逻辑（兼容 Agent Skills 规范的目录搜索）
 - `aikit init` 交互式向导（internal/wizard/）：
   - 项目名称输入（自动推断）
@@ -1061,7 +1074,7 @@ aikit/
 - `aikit remove` 从项目移除资产
 - `aikit list` 列出当前项目资产
 - `aikit sync` 同步到 Cursor + Claude Code（缺失资产自动从远程 source 拉取）
-- Agent 检测 + Cursor adapter + Claude Code adapter
+- Cursor + Claude Code + Windsurf + Copilot adapter
 - `.aikit.yaml` 分享机制：clone 项目后 `aikit sync` 一键还原 AI 开发环境
 
 ### Phase 2 - Rules 跨平台同步
