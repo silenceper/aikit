@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="images/logo.png" alt="aikit logo" width="120">
+</p>
+
 # Introducing aikit — Manage Your AI Coding Assets. Sync Once, Align Everyone.
 
 If you're using AI-powered IDEs like Cursor, Claude Code, GitHub Copilot, Windsurf, or Codex, you've probably run into the same frustration: every IDE stores rules, skills, MCP configs, and commands in its own format, in its own directories. Your carefully crafted prompts and configurations are locked into one tool, scattered across machines, and impossible to share cleanly.

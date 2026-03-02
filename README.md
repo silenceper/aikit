@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/images/logo.png" alt="aikit logo" width="120">
+</p>
+
 # aikit
 
 **Manage AI dev assets. Sync once, align everyone.**
