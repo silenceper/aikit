@@ -30,6 +30,13 @@ This creates three problems:
 
 ## Installation
 
+### Homebrew (macOS / Linux)
+
+```bash
+brew tap silenceper/tap
+brew install aikit
+```
+
 ### From Go
 
 ```bash

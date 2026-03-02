@@ -44,6 +44,19 @@ changelog:
       - "^ci:"
       - "^chore:"
 
+brews:
+  - repository:
+      owner: silenceper
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: "https://github.com/silenceper/aikit"
+    description: "Manage AI dev assets. Sync once, align everyone."
+    license: "Apache-2.0"
+    install: |
+      bin.install "aikit"
+    test: |
+      system "#{bin}/aikit", "version"
+
 release:
   github:
     owner: silenceper

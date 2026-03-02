@@ -165,7 +165,10 @@ aikit is that standard layer. It's like `package.json` for your AI dev environme
 ## Get Started
 
 ```bash
-# Install
+# Install via Homebrew
+brew tap silenceper/tap && brew install aikit
+
+# Or via Go
 go install github.com/silenceper/aikit@latest
 
 # Collect some skills
