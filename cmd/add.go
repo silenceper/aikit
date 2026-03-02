@@ -186,16 +186,16 @@ func addFromCatalogInteractive(cfg *config.ProjectConfig) error {
 	}
 	var items []tui.CatalogItem
 	for _, e := range cat.Skills {
-		items = append(items, tui.CatalogItem{Kind: "skill", Name: e.Name, Source: e.Source, Desc: e.Description})
+		items = append(items, tui.CatalogItem{Kind: "skill", Name: e.Name, Source: e.Source, Desc: e.Description, Group: e.Group})
 	}
 	for _, e := range cat.Rules {
-		items = append(items, tui.CatalogItem{Kind: "rule", Name: e.Name, Source: e.Source, Desc: e.Description})
+		items = append(items, tui.CatalogItem{Kind: "rule", Name: e.Name, Source: e.Source, Desc: e.Description, Group: e.Group})
 	}
 	for _, e := range cat.Mcps {
-		items = append(items, tui.CatalogItem{Kind: "mcp", Name: e.Name, Source: e.Source, Desc: e.Description})
+		items = append(items, tui.CatalogItem{Kind: "mcp", Name: e.Name, Source: e.Source, Desc: e.Description, Group: e.Group})
 	}
 	for _, e := range cat.Commands {
-		items = append(items, tui.CatalogItem{Kind: "command", Name: e.Name, Source: e.Source, Desc: e.Description})
+		items = append(items, tui.CatalogItem{Kind: "command", Name: e.Name, Source: e.Source, Desc: e.Description, Group: e.Group})
 	}
 	if len(items) == 0 {
 		fmt.Println("Catalog is empty. Use 'aikit catalog add <source>' to register assets first.")

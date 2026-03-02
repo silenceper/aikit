@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/silenceper/aikit/internal/source"
+	"github.com/silenceper/aikit/internal/tui"
 	"github.com/silenceper/aikit/pkg/config"
 	"github.com/spf13/cobra"
 )
@@ -81,25 +82,55 @@ func runCatalogSync(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Fetch + rebase on top of remote
-	fmt.Println("Syncing with remote...")
+	fmt.Println("Fetching remote...")
 	catalogGitQuiet(aikitHome, "fetch", "origin")
-	if catalogGitQuiet(aikitHome, "rev-parse", "origin/main") == nil {
-		if err := catalogGit(aikitHome, "rebase", "--allow-empty", "--strategy-option=theirs", "origin/main"); err != nil {
-			// Abort failed rebase and try a simpler merge
-			catalogGitQuiet(aikitHome, "rebase", "--abort")
-			fmt.Println("  Rebase conflict, falling back to merge...")
-			if err := catalogGit(aikitHome, "merge", "--allow-unrelated-histories", "-X", "ours", "origin/main", "-m", "aikit: merge remote catalog"); err != nil {
-				return fmt.Errorf("merge failed: %w", err)
-			}
+
+	remoteExists := catalogGitQuiet(aikitHome, "rev-parse", "origin/main") == nil
+
+	if !remoteExists {
+		fmt.Println("Remote is empty, pushing local catalog...")
+		if err := catalogGit(aikitHome, "push", "-u", "origin", "main"); err != nil {
+			return fmt.Errorf("git push failed: %w", err)
 		}
-	} else {
-		fmt.Println("  Remote is empty, skipping pull.")
+		fmt.Println("\nCatalog synced successfully.")
+		return nil
 	}
 
-	// Push
+	hasDiff := catalogGitQuiet(aikitHome, "diff", "--quiet", "HEAD", "origin/main") != nil
+	if !hasDiff {
+		fmt.Println("\nAlready up to date.")
+		return nil
+	}
+
+	choice, err := tui.SelectSyncStrategy()
+	if err != nil {
+		return err
+	}
+
+	switch choice {
+	case "merge":
+		fmt.Println("Merging local and remote...")
+		if err := catalogGit(aikitHome, "merge", "--allow-unrelated-histories", "origin/main", "-m", "aikit: merge remote catalog"); err != nil {
+			return fmt.Errorf("merge failed (conflicts may need manual resolution in %s): %w", aikitHome, err)
+		}
+	case "local":
+		fmt.Println("Overwriting remote with local content...")
+	case "remote":
+		fmt.Println("Overwriting local with remote content...")
+		if err := catalogGit(aikitHome, "reset", "--hard", "origin/main"); err != nil {
+			return fmt.Errorf("reset to remote failed: %w", err)
+		}
+	case "cancel":
+		fmt.Println("Sync cancelled.")
+		return nil
+	}
+
 	fmt.Println("Pushing to remote...")
-	if err := catalogGit(aikitHome, "push", "-u", "origin", "main"); err != nil {
+	pushArgs := []string{"push", "-u", "origin", "main"}
+	if choice == "local" {
+		pushArgs = []string{"push", "--force", "-u", "origin", "main"}
+	}
+	if err := catalogGit(aikitHome, pushArgs...); err != nil {
 		return fmt.Errorf("git push failed: %w", err)
 	}
 

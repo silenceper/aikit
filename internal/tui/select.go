@@ -86,6 +86,7 @@ type CatalogItem struct {
 	Name      string
 	Source    string
 	Desc      string
+	Group     string
 	InCatalog bool
 }
 
@@ -100,6 +101,9 @@ func SelectCatalogItems(items []CatalogItem) ([]CatalogItem, error) {
 	var preselected []int
 	for i, item := range items {
 		label := fmt.Sprintf("[%s] %s", item.Kind, item.Name)
+		if item.Group != "" {
+			label += fmt.Sprintf(" (%s)", item.Group)
+		}
 		if item.Desc != "" {
 			desc := item.Desc
 			if len(desc) > 50 {
@@ -143,6 +147,9 @@ func SelectCatalogItemsToRemove(items []CatalogItem) ([]CatalogItem, error) {
 	var options []huh.Option[int]
 	for i, item := range items {
 		label := fmt.Sprintf("[%s] %s", item.Kind, item.Name)
+		if item.Group != "" {
+			label += fmt.Sprintf(" (%s)", item.Group)
+		}
 		if item.Source != "" {
 			label += fmt.Sprintf(" (source: %s)", item.Source)
 		}
@@ -167,6 +174,29 @@ func SelectCatalogItemsToRemove(items []CatalogItem) ([]CatalogItem, error) {
 		out = append(out, items[idx])
 	}
 	return out, nil
+}
+
+// SelectSyncStrategy prompts the user to choose a catalog sync strategy
+// when local and remote content differ.
+func SelectSyncStrategy() (string, error) {
+	var choice string
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("Remote repository already has content that differs from local.\nHow would you like to sync?").
+				Options(
+					huh.NewOption("Merge        — merge local and remote (conflicts need manual resolution)", "merge"),
+					huh.NewOption("Local wins   — overwrite remote with local content", "local"),
+					huh.NewOption("Remote wins  — overwrite local with remote content", "remote"),
+					huh.NewOption("Cancel       — abort sync", "cancel"),
+				).
+				Value(&choice),
+		),
+	)
+	if err := form.Run(); err != nil {
+		return "", err
+	}
+	return choice, nil
 }
 
 // InputGroup prompts the user for a group name.
