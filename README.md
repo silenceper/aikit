@@ -210,7 +210,17 @@ aikit catalog update
 
 # Sync your catalog across multiple devices via a private Git repo
 aikit catalog sync --remote git@github.com:you/my-aikit-catalog.git
+
+# Subsequent syncs (remote is remembered)
+aikit catalog sync
 ```
+
+When local and remote content differ, aikit prompts you to choose a sync strategy interactively:
+
+- **Merge** — merge local and remote (default; conflicts need manual resolution)
+- **Local wins** — overwrite remote with local content
+- **Remote wins** — overwrite local with remote content
+- **Cancel** — abort sync
 
 **Web UI — visual catalog management:**
 
