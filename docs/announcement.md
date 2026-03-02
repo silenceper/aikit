@@ -159,7 +159,7 @@ aikit is that standard layer. It's like `package.json` for your AI dev environme
 - **Publish to remote** — Push your local skills, rules, and commands to any Git repo with `aikit publish`. Anyone can use them.
 - **Personal catalog** — Collect skills and configs from anywhere, reuse across projects.
 - **Web UI** — Visual catalog management with `aikit catalog ui`.
-- **Standard asset format** — Skills (SKILL.md), Rules, MCPs, Commands — all in one unified spec compatible with the [Agent Skills](https://github.com/vercel-labs/agent-skills) ecosystem.
+- **Standard asset format** — A unified spec for Rules, MCPs, and Commands (`asset.yaml`), plus native support for the [Agent Skills](https://docs.anthropic.com/en/docs/agents-and-tools/agent-skills/overview) `SKILL.md` format — so you can directly use skills from that ecosystem.
 - **Single binary** — Go binary with embedded frontend. No runtime dependencies.
 
 ## Get Started

@@ -228,7 +228,7 @@ Options: `--host` (default `localhost`), `--port` / `-p` (default `9001`).
 
 ### Skill (`SKILL.md`)
 
-Compatible with the [Agent Skills](https://github.com/vercel-labs/agent-skills) ecosystem:
+Compatible with the [Agent Skills](https://docs.anthropic.com/en/docs/agents-and-tools/agent-skills/overview) ecosystem:
 
 ```markdown
 ---
