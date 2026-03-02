@@ -35,14 +35,16 @@ var catalogAddCmd = &cobra.Command{
 var catalogAddSkill, catalogAddRule, catalogAddMcp, catalogAddCommand, catalogAddGroup string
 
 func runCatalogAdd(cmd *cobra.Command, args []string) error {
-	if len(args) == 0 {
-		return fmt.Errorf("provide a source: remote (user/repo or URL) or local path (e.g. .)")
-	}
-	src := args[0]
 	group := catalogAddGroup
 	if group == "" {
 		group = "Ungrouped"
 	}
+
+	if len(args) == 0 {
+		return catalogAddFromLocal(group)
+	}
+
+	src := args[0]
 
 	repoDir, resolvedSrc, err := resolveSourceDir(src)
 	if err != nil {
@@ -70,6 +72,138 @@ func runCatalogAdd(cmd *cobra.Command, args []string) error {
 
 	// No specific flag — discover all assets and show interactive selection
 	return catalogAddInteractive(repoDir, resolvedSrc, group)
+}
+
+// catalogAddFromLocal scans IDE directories in the current project (like publish),
+// marks items already in catalog as pre-selected, and registers selected ones.
+func catalogAddFromLocal(group string) error {
+	projectDir, err := filepath.Abs(".")
+	if err != nil {
+		return err
+	}
+
+	allItems := discoverPublishableAssets(projectDir)
+	if len(allItems) == 0 {
+		fmt.Println("No local assets found in IDE directories.")
+		return nil
+	}
+
+	cat, err := config.LoadCatalog()
+	if err != nil {
+		return err
+	}
+	inCatalog := make(map[string]bool)
+	for _, e := range cat.Skills {
+		inCatalog["skill:"+e.Name] = true
+	}
+	for _, e := range cat.Rules {
+		inCatalog["rule:"+e.Name] = true
+	}
+	for _, e := range cat.Mcps {
+		inCatalog["mcp:"+e.Name] = true
+	}
+	for _, e := range cat.Commands {
+		inCatalog["command:"+e.Name] = true
+	}
+
+	itemMap := make(map[string]publishItem)
+	var items []tui.CatalogItem
+	for _, item := range allItems {
+		key := item.Kind + ":" + item.Name
+		itemMap[key] = item
+		items = append(items, tui.CatalogItem{
+			Kind:      item.Kind,
+			Name:      item.Name,
+			Source:    "local",
+			InCatalog: inCatalog[key],
+		})
+	}
+
+	fmt.Printf("Found %d asset(s) in project\n", len(items))
+	selected, err := tui.SelectCatalogItems(items)
+	if err != nil {
+		return err
+	}
+	if len(selected) == 0 {
+		fmt.Println("Nothing selected.")
+		return nil
+	}
+
+	groupName, err := tui.InputGroup(group)
+	if err != nil {
+		return err
+	}
+
+	src := config.LocalSourceID()
+	registered := 0
+	for _, item := range selected {
+		entry := asset.CatalogEntry{Name: item.Name, Source: src, Description: item.Desc, Group: groupName}
+		var addFn func(asset.CatalogEntry) error
+		switch item.Kind {
+		case "skill":
+			addFn = catalog.AddSkill
+		case "rule":
+			addFn = catalog.AddRule
+		case "mcp":
+			addFn = catalog.AddMCP
+		case "command":
+			addFn = catalog.AddCommand
+		default:
+			continue
+		}
+		if err := addFn(entry); err != nil {
+			return err
+		}
+
+		key := item.Kind + ":" + item.Name
+		if pi, ok := itemMap[key]; ok {
+			if err := copyPublishItemToLocal(pi); err != nil {
+				fmt.Printf("  Warning: failed to copy %s %s to local store: %v\n", item.Kind, item.Name, err)
+			}
+		}
+
+		fmt.Printf("  Registered %s %s\n", item.Kind, item.Name)
+		registered++
+	}
+	fmt.Printf("Registered %d asset(s) to global catalog\n", registered)
+	return nil
+}
+
+// copyPublishItemToLocal copies a discovered asset's content to ~/.aikit/<kind>s/<name>/.
+func copyPublishItemToLocal(item publishItem) error {
+	var base string
+	var err error
+	switch item.Kind {
+	case "skill":
+		base, err = config.LocalSkillDir()
+	case "rule":
+		base, err = config.LocalRuleDir()
+	case "command":
+		base, err = config.LocalCommandDir()
+	default:
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+
+	destDir := filepath.Join(base, item.Name)
+	os.RemoveAll(destDir)
+
+	if item.Dir != "" {
+		return copyDir(destDir, item.Dir)
+	}
+	if item.File != "" {
+		if err := os.MkdirAll(destDir, 0755); err != nil {
+			return err
+		}
+		data, err := os.ReadFile(item.File)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(destDir, filepath.Base(item.File)), data, 0644)
+	}
+	return nil
 }
 
 func resolveSourceDir(src string) (repoDir, resolvedSrc string, err error) {

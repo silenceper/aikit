@@ -30,13 +30,12 @@ func init() {
 var publishCmd = &cobra.Command{
 	Use:   "publish",
 	Short: "Publish local project assets to a remote Git repository",
-	Long: `Discover user-created assets from project IDE directories and push
-selected ones to a remote Git repository for sharing.
+	Long: `Discover assets from project IDE directories and push selected ones
+to a remote Git repository for sharing.
 
 Skills are discovered from IDE skill dirs (.cursor/skills/, .claude/skills/, etc.).
 Rules are discovered from IDE rule dirs (.cursor/rules/, .windsurf/rules/).
-Commands are discovered from IDE command dirs (.cursor/commands/, .claude/commands/).
-Only non-symlink assets (user-created, not installed by 'aikit sync') are shown.`,
+Commands are discovered from IDE command dirs (.cursor/commands/, .claude/commands/).`,
 	RunE: runPublish,
 }
 
@@ -58,7 +57,6 @@ func runPublish(cmd *cobra.Command, args []string) error {
 	allItems := discoverPublishableAssets(projectDir)
 	if len(allItems) == 0 {
 		fmt.Println("No local assets found to publish.")
-		fmt.Println("Only user-created assets (not installed by 'aikit sync') are discoverable.")
 		return nil
 	}
 
@@ -118,7 +116,7 @@ func runPublish(cmd *cobra.Command, args []string) error {
 	}
 
 	for _, item := range toPublish {
-		destDir := filepath.Join(repoDir, item.Name)
+		destDir := filepath.Join(repoDir, item.Kind+"s", item.Name)
 		if item.Dir != "" {
 			if err := agent.ExportCopyDir(item.Dir, destDir); err != nil {
 				return fmt.Errorf("copy %s %s: %w", item.Kind, item.Name, err)
@@ -176,46 +174,53 @@ spec:
 	return os.WriteFile(filepath.Join(destDir, "asset.yaml"), []byte(assetYAML), 0644)
 }
 
-// discoverPublishableAssets discovers user-created assets from project IDE directories.
-// Assets already tracked with a remote source in .aikit.yaml are filtered out.
+// discoverPublishableAssets discovers all assets from project IDE directories.
 func discoverPublishableAssets(projectDir string) []publishItem {
-	managed := loadManagedRemoteAssets(projectDir)
 	seen := make(map[string]bool)
 	var items []publishItem
 
-	// Skills: non-symlink dirs in IDE skill dirs
 	for _, s := range discoverLocalSkills(projectDir) {
 		key := "skill:" + s.Name
-		if !managed[key] && !seen[key] {
+		if !seen[key] {
 			items = append(items, publishItem{Kind: "skill", Name: s.Name, Dir: s.Dir})
 			seen[key] = true
 		}
 	}
 
-	// Rules: non-symlink files in IDE rule dirs
 	ruleDirs := []string{".cursor/rules", ".windsurf/rules"}
 	for _, rel := range ruleDirs {
 		dir := filepath.Join(projectDir, rel)
-		entries, _ := os.ReadDir(dir)
-		for _, e := range entries {
-			if e.IsDir() {
-				continue
+		_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return nil
 			}
-			name := stripRuleExt(e.Name())
+			relPath, _ := filepath.Rel(dir, path)
+			name := stripRuleExt(relPath)
 			key := "rule:" + name
-			if seen[key] || managed[key] {
-				continue
+			if seen[key] {
+				return nil
 			}
-			fullPath := filepath.Join(dir, e.Name())
-			if isSymlink(fullPath) {
-				continue
-			}
-			items = append(items, publishItem{Kind: "rule", Name: name, File: fullPath})
+			items = append(items, publishItem{Kind: "rule", Name: name, File: path})
 			seen[key] = true
-		}
+			return nil
+		})
 	}
 
-	// Commands: non-symlink files in IDE command dirs
+	ruleFiles := []string{"AGENTS.md", "CLAUDE.md", ".github/copilot-instructions.md"}
+	for _, rel := range ruleFiles {
+		fullPath := filepath.Join(projectDir, rel)
+		if _, err := os.Stat(fullPath); err != nil {
+			continue
+		}
+		name := stripRuleExt(filepath.Base(rel))
+		key := "rule:" + name
+		if seen[key] {
+			continue
+		}
+		items = append(items, publishItem{Kind: "rule", Name: name, File: fullPath})
+		seen[key] = true
+	}
+
 	cmdDirs := []string{".cursor/commands", ".claude/commands"}
 	for _, rel := range cmdDirs {
 		dir := filepath.Join(projectDir, rel)
@@ -226,14 +231,10 @@ func discoverPublishableAssets(projectDir string) []publishItem {
 			}
 			name := strings.TrimSuffix(e.Name(), filepath.Ext(e.Name()))
 			key := "command:" + name
-			if seen[key] || managed[key] {
+			if seen[key] {
 				continue
 			}
-			fullPath := filepath.Join(dir, e.Name())
-			if isSymlink(fullPath) {
-				continue
-			}
-			items = append(items, publishItem{Kind: "command", Name: name, File: fullPath})
+			items = append(items, publishItem{Kind: "command", Name: name, File: filepath.Join(dir, e.Name())})
 			seen[key] = true
 		}
 	}
@@ -245,46 +246,6 @@ func stripRuleExt(name string) string {
 	name = strings.TrimSuffix(name, ".mdc")
 	name = strings.TrimSuffix(name, ".md")
 	return name
-}
-
-func isSymlink(path string) bool {
-	fi, err := os.Lstat(path)
-	if err != nil {
-		return false
-	}
-	return fi.Mode()&os.ModeSymlink != 0
-}
-
-func loadManagedRemoteAssets(projectDir string) map[string]bool {
-	managed := make(map[string]bool)
-	cfg, err := config.LoadProject(projectDir)
-	if err != nil {
-		return managed
-	}
-	isRemote := func(src string) bool {
-		return src != "" && src != config.LocalSourceID()
-	}
-	for _, r := range cfg.Assets.Skills {
-		if isRemote(r.Source) {
-			managed["skill:"+r.Name] = true
-		}
-	}
-	for _, r := range cfg.Assets.Rules {
-		if isRemote(r.Source) {
-			managed["rule:"+r.Name] = true
-		}
-	}
-	for _, r := range cfg.Assets.Mcps {
-		if isRemote(r.Source) {
-			managed["mcp:"+r.Name] = true
-		}
-	}
-	for _, r := range cfg.Assets.Commands {
-		if isRemote(r.Source) {
-			managed["command:"+r.Name] = true
-		}
-	}
-	return managed
 }
 
 func filterPublishItems(items []publishItem, kind, name string) []publishItem {
@@ -402,9 +363,6 @@ func discoverLocalSkills(projectDir string) []skill.Info {
 				continue
 			}
 			fullPath := filepath.Join(skillDir, e.Name())
-			if isSymlink(fullPath) {
-				continue
-			}
 			skillMD := filepath.Join(fullPath, "SKILL.md")
 			if _, err := os.Stat(skillMD); os.IsNotExist(err) {
 				continue

@@ -82,19 +82,22 @@ func SelectAgents(agents []AgentOption) ([]string, error) {
 
 // CatalogItem represents a catalog entry for interactive selection.
 type CatalogItem struct {
-	Kind   string // "skill", "rule", "mcp", "command"
-	Name   string
-	Source string
-	Desc   string
+	Kind      string // "skill", "rule", "mcp", "command"
+	Name      string
+	Source    string
+	Desc      string
+	InCatalog bool
 }
 
 // SelectCatalogItems shows a multi-select prompt for choosing assets from the catalog.
+// Items with InCatalog=true are pre-selected and labeled accordingly.
 func SelectCatalogItems(items []CatalogItem) ([]CatalogItem, error) {
 	if len(items) == 0 {
 		return nil, fmt.Errorf("catalog is empty; run 'aikit catalog add <source>' first")
 	}
 
 	var options []huh.Option[int]
+	var preselected []int
 	for i, item := range items {
 		label := fmt.Sprintf("[%s] %s", item.Kind, item.Name)
 		if item.Desc != "" {
@@ -104,10 +107,14 @@ func SelectCatalogItems(items []CatalogItem) ([]CatalogItem, error) {
 			}
 			label += " — " + desc
 		}
+		if item.InCatalog {
+			label += " (in catalog)"
+			preselected = append(preselected, i)
+		}
 		options = append(options, huh.NewOption(label, i))
 	}
 
-	var selected []int
+	selected := preselected
 	form := huh.NewForm(
 		huh.NewGroup(
 			huh.NewMultiSelect[int]().

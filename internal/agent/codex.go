@@ -32,12 +32,8 @@ func (c *Codex) InstallSkill(projectDir, srcDir, skillName string) error {
 		return err
 	}
 	os.RemoveAll(dest)
-	absSrc, err := filepath.Abs(srcDir)
-	if err != nil {
+	if err := copyDir(srcDir, dest); err != nil {
 		return err
-	}
-	if err := os.Symlink(absSrc, dest); err != nil {
-		return copyDir(absSrc, dest)
 	}
 	fmt.Printf("  [codex] Installed skill %s\n", skillName)
 	return nil
