@@ -100,16 +100,7 @@ else
   fail "catalog list missing $TEST_SKILL" "$OUTPUT"
 fi
 
-# ---------- step 5: catalog update ----------
-step "Step 5: aikit catalog update"
-run_cmd "$AIKIT" catalog update "$TEST_SOURCE"
-if [ "$CMD_RC" -eq 0 ]; then
-  pass "catalog update succeeded"
-else
-  fail "catalog update failed (rc=$CMD_RC)" "$OUTPUT"
-fi
-
-# ---------- step 5b: catalog remove ----------
+# ---------- step 5: catalog remove ----------
 step "Step 5b: aikit catalog remove"
 run_cmd "$AIKIT" catalog remove --skill "$TEST_SKILL"
 if [ "$CMD_RC" -eq 0 ] && echo "$OUTPUT" | grep -qi "removed"; then

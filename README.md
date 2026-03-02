@@ -205,9 +205,6 @@ aikit sync
 # Remove assets you no longer need (interactive)
 aikit catalog remove
 
-# Update all cached remote assets to latest
-aikit catalog update
-
 # Sync your catalog across multiple devices via a private Git repo
 aikit catalog sync --remote git@github.com:you/my-aikit-catalog.git
 
@@ -334,7 +331,6 @@ aikit
 │   ├── add [<source>] [flags]           # Register assets to global catalog (no args: scan local IDE dirs)
 │   ├── remove [flags]                  # Remove from global catalog
 │   ├── list                            # List catalog entries
-│   ├── update [<source>]              # Update cached remote assets
 │   ├── sync [--remote <repo>]          # Multi-device catalog sync
 │   └── ui [--host] [--port]            # Launch web UI for catalog management
 └── version                             # Print version info

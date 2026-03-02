@@ -338,11 +338,9 @@ func loadCommandFromDir(dir, name string) (*asset.CommandData, error) {
 func ensureCache(src, cacheDir string) (string, error) {
 	subdir := source.NormalizeSource(src)
 	repoDir := filepath.Join(cacheDir, subdir)
-	if _, err := os.Stat(repoDir); os.IsNotExist(err) {
-		fmt.Printf("  Fetching %s ...\n", src)
-		if err := source.CloneOrFetch(src, repoDir); err != nil {
-			return "", fmt.Errorf("fetch %s: %w", src, err)
-		}
+	fmt.Printf("  Fetching %s ...\n", src)
+	if err := source.CloneOrFetch(src, repoDir); err != nil {
+		return "", fmt.Errorf("fetch %s: %w", src, err)
 	}
 	return repoDir, nil
 }
