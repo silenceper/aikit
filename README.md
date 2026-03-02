@@ -81,7 +81,7 @@ aikit sync
 
 aikit reads `.aikit.yaml` and installs everything into each IDE's native format:
 
-- Skills → installed to `.cursor/skills/`, `.claude/skills/`, `.codex/skills/`, etc. (symlink preferred, copy as fallback)
+- Skills → installed to `.cursor/skills/`, `.claude/skills/`, `.codex/skills/`, etc. (file copy)
 - Rules → `.mdc` (Cursor), `CLAUDE.md` (Claude Code), `AGENTS.md` (Codex), etc.
 - MCP → `.cursor/mcp.json`, `.mcp.json`, `.codex/config.toml`, etc.
 - Commands → `.cursor/commands/`, `.claude/commands/`, etc.
@@ -122,16 +122,19 @@ This makes it easy to bootstrap new projects from a team template — without bl
 
 ### Scenario 2: Publish & share your assets with the community
 
-Created a useful skill or rule? Publish it to a remote Git repo so anyone can use it.
+Publish any asset from your project to a remote Git repo so anyone can use it. All assets are discoverable — including those installed by `aikit sync`, rules in subdirectories, and standalone rule files like `AGENTS.md` and `CLAUDE.md`.
 
 **Example: you wrote a skill in `.cursor/skills/deploy-checker/`**
 
 ```bash
-# Publish to your public asset repo
+# Publish to your public asset repo (interactive selection)
+aikit publish --remote your-name/ai-assets
+
+# Or specify exactly what to publish
 aikit publish --remote your-name/ai-assets --skill deploy-checker
 ```
 
-aikit copies the skill to the remote repo and pushes. Now anyone can use it:
+aikit copies the asset to the remote repo organized by type (`skills/`, `rules/`, `commands/`) and pushes. Now anyone can use it:
 
 ```bash
 # Others add your skill to their project
@@ -152,7 +155,10 @@ The global catalog (`~/.aikit/catalog.yaml`) is your personal library of AI asse
 **Discover and collect:**
 
 ```bash
-# Found a great asset repo? Add it to your catalog (interactive selection)
+# Scan current project's IDE directories and add to catalog (interactive)
+aikit catalog add
+
+# From a remote asset repo (interactive selection)
 aikit catalog add vercel-labs/agent-skills
 
 # Or add a specific asset
@@ -293,7 +299,7 @@ aikit
 ├── sync [--target <agent>...]          # Sync assets to IDEs
 ├── publish --remote <repo> [flags]     # Publish local assets to remote repo
 ├── catalog
-│   ├── add <source> [flags]            # Register assets to global catalog
+│   ├── add [<source>] [flags]           # Register assets to global catalog (no args: scan local IDE dirs)
 │   ├── remove [flags]                  # Remove from global catalog
 │   ├── list                            # List catalog entries
 │   ├── update [<source>]              # Update cached remote assets
