@@ -41,12 +41,6 @@ brew tap silenceper/tap
 brew install aikit
 ```
 
-### From Go
-
-```bash
-go install github.com/silenceper/aikit@latest
-```
-
 ### From releases
 
 Download the pre-built binary for your platform from the [Releases](https://github.com/silenceper/aikit/releases) page.

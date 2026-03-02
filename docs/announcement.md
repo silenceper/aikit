@@ -169,11 +169,11 @@ aikit is that standard layer. It's like `package.json` for your AI dev environme
 ## Get Started
 
 ```bash
-# Install via Homebrew
+# Install via Homebrew(macOS / Linux)
 brew tap silenceper/tap && brew install aikit
 
-# Or via Go
-go install github.com/silenceper/aikit@latest
+# Download the binary from the releases page
+https://github.com/silenceper/aikit/releases
 
 # Collect some skills
 aikit catalog add anthropics/skills
