@@ -21,6 +21,10 @@ vendor/
 *.swo
 *~
 
+# Frontend
+node_modules/
+internal/web/static/
+
 # OS
 .DS_Store
 Thumbs.db

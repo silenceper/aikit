@@ -9,10 +9,10 @@ type AssetRef struct {
 
 // CatalogEntry is a catalog entry (name, source, description, group), used in ~/.aikit/catalog.yaml.
 type CatalogEntry struct {
-	Name        string `yaml:"name"`
-	Source      string `yaml:"source"`
-	Description string `yaml:"description"`
-	Group       string `yaml:"group"`
+	Name        string `yaml:"name" json:"name"`
+	Source      string `yaml:"source" json:"source"`
+	Description string `yaml:"description" json:"description"`
+	Group       string `yaml:"group" json:"group"`
 }
 
 // LocalRule is an inline rule defined in .aikit.yaml (local_rules).

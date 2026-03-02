@@ -10,10 +10,10 @@ import (
 
 // CatalogConfig is the root structure of ~/.aikit/catalog.yaml.
 type CatalogConfig struct {
-	Skills   []asset.CatalogEntry `yaml:"skills,omitempty"`
-	Rules    []asset.CatalogEntry `yaml:"rules,omitempty"`
-	Mcps     []asset.CatalogEntry `yaml:"mcps,omitempty"`
-	Commands []asset.CatalogEntry `yaml:"commands,omitempty"`
+	Skills   []asset.CatalogEntry `yaml:"skills,omitempty" json:"skills,omitempty"`
+	Rules    []asset.CatalogEntry `yaml:"rules,omitempty" json:"rules,omitempty"`
+	Mcps     []asset.CatalogEntry `yaml:"mcps,omitempty" json:"mcps,omitempty"`
+	Commands []asset.CatalogEntry `yaml:"commands,omitempty" json:"commands,omitempty"`
 }
 
 const (

@@ -207,6 +207,23 @@ aikit catalog update
 aikit catalog sync --remote git@github.com:you/my-aikit-catalog.git
 ```
 
+**Web UI — visual catalog management:**
+
+```bash
+aikit catalog ui
+```
+
+Launches a local web interface at `http://localhost:9001` for browsing, adding, editing, and deleting catalog assets — no terminal required.
+
+![Catalog UI](docs/images/catalog-ui.png)
+
+- **Add assets**: Enter a source (GitHub shorthand, Git URL, or local path) → auto-discover all assets → select and register in batch — the same workflow as `aikit catalog add <source>` but with a visual interface.
+- **Browse**: Filter by asset type (Skills / Rules / MCPs / Commands) and group via tabbed navigation.
+- **Edit**: Change the group assignment for any asset.
+- **Delete**: Remove assets with confirmation.
+
+Options: `--host` (default `localhost`), `--port` / `-p` (default `9001`).
+
 ## Asset Formats
 
 ### Skill (`SKILL.md`)
@@ -303,7 +320,8 @@ aikit
 │   ├── remove [flags]                  # Remove from global catalog
 │   ├── list                            # List catalog entries
 │   ├── update [<source>]              # Update cached remote assets
-│   └── sync [--remote <repo>]          # Multi-device catalog sync
+│   ├── sync [--remote <repo>]          # Multi-device catalog sync
+│   └── ui [--host] [--port]            # Launch web UI for catalog management
 └── version                             # Print version info
 ```
 
@@ -327,7 +345,8 @@ make test-e2e
 
 ## Design
 
-For detailed design documentation (in Chinese): [docs/design-zh.md](docs/design-zh.md)
+- Architecture & overall design (Chinese): [docs/design-zh.md](docs/design-zh.md)
+- Catalog UI design: [docs/catalog-ui.md](docs/catalog-ui.md)
 
 ## License
 
