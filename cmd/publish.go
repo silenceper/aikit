@@ -24,6 +24,7 @@ func init() {
 	publishCmd.Flags().StringVar(&publishMcp, "mcp", "", "Publish only this MCP")
 	publishCmd.Flags().StringVar(&publishCommand, "command", "", "Publish only this command")
 	publishCmd.Flags().StringVarP(&publishDir, "dir", "C", ".", "Project directory")
+	publishCmd.Flags().StringVar(&publishBranch, "branch", "", "Target branch in remote repository")
 }
 
 var publishCmd = &cobra.Command{
@@ -39,7 +40,7 @@ Only non-symlink assets (user-created, not installed by 'aikit sync') are shown.
 	RunE: runPublish,
 }
 
-var publishRemote, publishSkill, publishRule, publishMcp, publishCommand, publishDir string
+var publishRemote, publishSkill, publishRule, publishMcp, publishCommand, publishDir, publishBranch string
 
 type publishItem struct {
 	Kind string
@@ -107,9 +108,12 @@ func runPublish(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	subdir := source.NormalizeSource(publishRemote)
+	if publishBranch != "" {
+		subdir = subdir + "@" + publishBranch
+	}
 	repoDir := filepath.Join(cacheDir, subdir)
 	fmt.Printf("Preparing remote repo %s ...\n", publishRemote)
-	if err := source.CloneOrFetch(publishRemote, repoDir); err != nil {
+	if err := source.CloneOrFetch(publishRemote, repoDir, publishBranch); err != nil {
 		return fmt.Errorf("fetch remote: %w", err)
 	}
 
@@ -128,7 +132,7 @@ func runPublish(cmd *cobra.Command, args []string) error {
 	}
 
 	msg := fmt.Sprintf("aikit: publish %d asset(s)", len(toPublish))
-	if err := publishGitPush(repoDir, msg); err != nil {
+	if err := publishGitPush(repoDir, msg, publishBranch); err != nil {
 		return fmt.Errorf("git push: %w", err)
 	}
 
@@ -417,7 +421,7 @@ func discoverLocalSkills(projectDir string) []skill.Info {
 	return results
 }
 
-func publishGitPush(repoDir, message string) error {
+func publishGitPush(repoDir, message, branch string) error {
 	run := func(args ...string) error {
 		cmd := exec.Command("git", args...)
 		cmd.Dir = repoDir
@@ -437,5 +441,8 @@ func publishGitPush(repoDir, message string) error {
 	if err := run("commit", "--no-gpg-sign", "-m", message); err != nil {
 		return err
 	}
-	return run("push")
+	if branch != "" {
+		return run("push", "-u", "origin", branch)
+	}
+	return run("push", "-u", "origin", "HEAD")
 }
