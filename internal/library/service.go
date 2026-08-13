@@ -1,0 +1,566 @@
+package library
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/url"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+
+	"github.com/silenceper/aikit/pkg/config"
+)
+
+var fullObjectID = regexp.MustCompile(`^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$`)
+
+type Service struct {
+	LibraryRoot string
+	CacheRoot   string
+	Runner      Runner
+	CopySkill   func(source, destination string) error
+	Rename      func(old, new string) error
+	SyncDir     func(path string) error
+}
+
+type LocalCandidate struct {
+	Origin string
+	Candidate
+}
+
+type LocalAllocation struct {
+	Origin string
+	Candidate
+	Skill config.Skill
+}
+
+// AllocateLocal performs the stable ID allocation shared by scan and local
+// add. Callers scanning several roots must pass the whole batch with the
+// specification's g/... and p/... Origin ordering keys.
+func AllocateLocal(candidates []LocalCandidate, existing []config.Skill) ([]LocalAllocation, error) {
+	candidates = append([]LocalCandidate(nil), candidates...)
+	sort.SliceStable(candidates, func(i, j int) bool { return localOriginLess(candidates[i].Origin, candidates[j].Origin) })
+	existingByNameHash := make(map[string]config.Skill, len(existing))
+	occupied := make(map[string]struct{}, len(existing))
+	for _, skill := range existing {
+		existingByNameHash[skill.Name+"\x00"+skill.Hash] = skill
+		occupied[skill.ID] = struct{}{}
+	}
+	result := make([]LocalAllocation, 0, len(candidates))
+	for _, candidate := range candidates {
+		skill, reused := existingByNameHash[candidate.Name+"\x00"+candidate.Hash]
+		if !reused {
+			id := "local/" + candidate.Name
+			if _, exists := occupied[id]; exists {
+				if len(candidate.Hash) < 12 {
+					return nil, fmt.Errorf("candidate hash is too short")
+				}
+				id += "-" + candidate.Hash[:12]
+			}
+			if _, exists := occupied[id]; exists {
+				return nil, fmt.Errorf("local skill id collision %q", id)
+			}
+			skill = config.Skill{ID: id, Name: candidate.Name, Description: candidate.Description, Hash: candidate.Hash}
+			existingByNameHash[candidate.Name+"\x00"+candidate.Hash] = skill
+			occupied[id] = struct{}{}
+		}
+		result = append(result, LocalAllocation{Origin: candidate.Origin, Candidate: candidate.Candidate, Skill: skill})
+	}
+	return result, nil
+}
+
+var localAgentOrder = map[string]int{
+	"cursor": 0, "claude-code": 1, "codex": 2, "copilot": 3, "windsurf": 4,
+}
+
+func localOriginLess(left, right string) bool {
+	l, r := strings.Split(left, "/"), strings.Split(right, "/")
+	if len(l) >= 2 && len(r) >= 2 && l[0] == r[0] {
+		switch l[0] {
+		case "g":
+			li, lok := localAgentOrder[l[1]]
+			ri, rok := localAgentOrder[r[1]]
+			if lok && rok && li != ri {
+				return li < ri
+			}
+		case "p":
+			if len(l) >= 3 && len(r) >= 3 {
+				if l[1] != r[1] {
+					return l[1] < r[1]
+				}
+				li, lok := localAgentOrder[l[2]]
+				ri, rok := localAgentOrder[r[2]]
+				if lok && rok && li != ri {
+					return li < ri
+				}
+			}
+		}
+	}
+	return left < right
+}
+
+type GitAddOptions struct {
+	SourcePath string
+	Ref        *config.Ref
+	Skill      string
+	Existing   []config.Skill
+	Force      bool
+}
+
+func (s Service) AddLocal(source string, existing []config.Skill) ([]config.Skill, error) {
+	candidates, err := Discover(source)
+	if err != nil {
+		return nil, err
+	}
+	inputs := make([]LocalCandidate, len(candidates))
+	for i, candidate := range candidates {
+		inputs[i] = LocalCandidate{Origin: candidate.RelativePath, Candidate: candidate}
+	}
+	allocations, err := AllocateLocal(inputs, existing)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]config.Skill, 0, len(allocations))
+	var specs []CopySpec
+	seen := make(map[string]struct{})
+	existingIDs := make(map[string]struct{}, len(existing))
+	for _, skill := range existing {
+		existingIDs[skill.ID] = struct{}{}
+	}
+	for _, allocation := range allocations {
+		if _, duplicate := seen[allocation.Skill.ID]; duplicate {
+			continue
+		}
+		seen[allocation.Skill.ID] = struct{}{}
+		ledgerDestination := false
+		if _, ok := existingIDs[allocation.Skill.ID]; ok {
+			ledgerDestination = true
+		}
+		lexical, err := lexicalLibraryPath(s.LibraryRoot, allocation.Skill.ID)
+		if err != nil {
+			return nil, err
+		}
+		if info, statErr := os.Lstat(lexical); statErr == nil && info.Mode()&os.ModeSymlink != 0 {
+			return nil, fmt.Errorf("library destination %q exists without a matching ledger directory", lexical)
+		} else if statErr != nil && !os.IsNotExist(statErr) {
+			return nil, statErr
+		}
+		destination, err := SafeLibraryPath(s.LibraryRoot, allocation.Skill.ID)
+		if err != nil {
+			return nil, err
+		}
+		if info, statErr := os.Lstat(destination); os.IsNotExist(statErr) {
+			specs = append(specs, CopySpec{Source: allocation.Root, Destination: destination})
+		} else if statErr != nil {
+			return nil, statErr
+		} else if !ledgerDestination {
+			return nil, fmt.Errorf("library destination %q exists without a matching ledger entry", destination)
+		} else if !info.IsDir() {
+			return nil, fmt.Errorf("library destination %q is not a directory", destination)
+		}
+		result = append(result, allocation.Skill)
+	}
+	if len(specs) > 0 {
+		batch, err := PrepareBatch(specs, s.copySkill, s.rename)
+		if err != nil {
+			return nil, err
+		}
+		defer batch.Abort()
+		batch.SyncDirectory = s.syncDirectory
+		if err := batch.Commit(); err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
+}
+
+func (s Service) AddGit(ctx context.Context, rawSource string, options GitAddOptions) ([]config.Skill, error) {
+	if parsed, parseErr := url.Parse(strings.TrimSpace(rawSource)); parseErr == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.User != nil {
+		return nil, fmt.Errorf("HTTP git source must not contain embedded credentials")
+	}
+	canonical, err := NormalizeSource(rawSource)
+	if err != nil {
+		return nil, errors.New(sanitizeGitDiagnostic(err.Error()))
+	}
+	checkout, ref, resolved, cleanup, err := s.checkout(ctx, canonical, rawSource, options.Ref, true)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+
+	candidates, err := discoverSelection(checkout, options.SourcePath, options.Skill, true)
+	if err != nil {
+		return nil, err
+	}
+	if len(candidates) == 0 {
+		return nil, fmt.Errorf("repository contains no SKILL.md")
+	}
+	occupied := make(map[string]struct{}, len(options.Existing))
+	for _, skill := range options.Existing {
+		occupied[skill.ID] = struct{}{}
+	}
+	type preparedSkill struct {
+		candidate   Candidate
+		id          string
+		destination string
+	}
+	prepared := make([]preparedSkill, 0, len(candidates))
+	plannedIDs := make(map[string]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		id := canonical + "/" + candidate.Name
+		_, ledgerExists := occupied[id]
+		if ledgerExists && !options.Force {
+			return nil, fmt.Errorf("skill id %q already exists", id)
+		}
+		if _, duplicate := plannedIDs[id]; duplicate {
+			return nil, fmt.Errorf("multiple discovered skills produce id %q", id)
+		}
+		lexical, err := lexicalLibraryPath(s.LibraryRoot, id)
+		if err != nil {
+			return nil, err
+		}
+		if _, statErr := os.Lstat(lexical); statErr == nil && !ledgerExists {
+			return nil, fmt.Errorf("library destination %q exists without a matching ledger entry", lexical)
+		} else if statErr != nil && !os.IsNotExist(statErr) {
+			return nil, statErr
+		}
+		destination, err := SafeLibraryPath(s.LibraryRoot, id)
+		if err != nil {
+			return nil, err
+		}
+		if _, statErr := os.Lstat(destination); statErr == nil && !ledgerExists {
+			return nil, fmt.Errorf("library destination %q exists without a matching ledger entry", destination)
+		} else if statErr != nil && !os.IsNotExist(statErr) {
+			return nil, statErr
+		}
+		prepared = append(prepared, preparedSkill{candidate: candidate, id: id, destination: destination})
+		plannedIDs[id] = struct{}{}
+	}
+	specs := make([]CopySpec, 0, len(prepared))
+	for _, item := range prepared {
+		specs = append(specs, CopySpec{Source: item.candidate.Root, Destination: item.destination})
+	}
+	batch, err := PrepareBatch(specs, s.copySkill, s.rename)
+	if err != nil {
+		return nil, err
+	}
+	defer batch.Abort()
+	batch.SyncDirectory = s.syncDirectory
+	if err := batch.Commit(); err != nil {
+		return nil, err
+	}
+	result := make([]config.Skill, 0, len(prepared))
+	for _, item := range prepared {
+		refCopy := *ref
+		result = append(result, config.Skill{
+			ID: item.id, Name: item.candidate.Name, Description: item.candidate.Description,
+			Source: canonical, SourcePath: item.candidate.RelativePath, Ref: &refCopy,
+			Resolved: resolved, Hash: item.candidate.Hash,
+		})
+	}
+	return result, nil
+}
+
+// UpdateRef prepares and validates a fresh checkout before replacing the old
+// library tree. It returns the original value on every failure.
+func (s Service) UpdateRef(ctx context.Context, old config.Skill, requested *config.Ref) (config.Skill, error) {
+	if old.Source == "" || old.Ref == nil {
+		return old, fmt.Errorf("skill %q has no remote source", old.ID)
+	}
+	if err := ValidateSourcePath(old.SourcePath); err != nil {
+		return old, err
+	}
+	ref := old.Ref
+	if requested != nil {
+		ref = requested
+	}
+	checkout, actualRef, resolved, cleanup, err := s.checkout(ctx, old.Source, "", ref, false)
+	if err != nil {
+		return old, err
+	}
+	defer cleanup()
+	candidates, err := discoverSelection(checkout, old.SourcePath, "", true)
+	if err != nil {
+		return old, err
+	}
+	if len(candidates) != 1 {
+		return old, fmt.Errorf("source_path %q is not a single skill", old.SourcePath)
+	}
+	candidate := candidates[0]
+	if candidate.Name != old.Name {
+		return old, fmt.Errorf("skill name changed from %q to %q; add it again", old.Name, candidate.Name)
+	}
+	destination, err := SafeLibraryPath(s.LibraryRoot, old.ID)
+	if err != nil {
+		return old, err
+	}
+	batch, err := PrepareBatch([]CopySpec{{Source: candidate.Root, Destination: destination}}, s.copySkill, s.rename)
+	if err != nil {
+		return old, err
+	}
+	defer batch.Abort()
+	batch.SyncDirectory = s.syncDirectory
+	if err := batch.Commit(); err != nil {
+		return old, err
+	}
+	updated := old
+	refCopy := *actualRef
+	updated.Ref = &refCopy
+	updated.Resolved = resolved
+	updated.Description = candidate.Description
+	updated.Hash = candidate.Hash
+	return updated, nil
+}
+
+func (s Service) copySkill(source, destination string) error {
+	if s.CopySkill != nil {
+		return s.CopySkill(source, destination)
+	}
+	return AtomicCopy(source, destination)
+}
+
+func (s Service) rename(old, new string) error {
+	if s.Rename != nil {
+		return s.Rename(old, new)
+	}
+	return moveNoReplace(old, new)
+}
+
+func (s Service) syncDirectory(path string) error {
+	if s.SyncDir != nil {
+		return s.SyncDir(path)
+	}
+	return syncDirectory(path)
+}
+
+func (s Service) checkout(ctx context.Context, canonical, rawSource string, requested *config.Ref, allowCreate bool) (string, *config.Ref, string, func(), error) {
+	if s.Runner == nil {
+		return "", nil, "", func() {}, fmt.Errorf("git runner is required")
+	}
+	if err := os.MkdirAll(s.CacheRoot, 0o755); err != nil {
+		return "", nil, "", func() {}, err
+	}
+	repository, err := s.ensureRepository(ctx, canonical, rawSource, allowCreate)
+	if err != nil {
+		return "", nil, "", func() {}, err
+	}
+	if _, err := s.Runner.Run(ctx, repository, "fetch", "--prune", "origin"); err != nil {
+		return "", nil, "", func() {}, err
+	}
+	checkout, err := os.MkdirTemp(s.CacheRoot, "checkout-")
+	if err != nil {
+		return "", nil, "", func() {}, err
+	}
+	cleanup := func() { _ = os.RemoveAll(checkout) }
+	if err := os.Remove(checkout); err != nil {
+		cleanup()
+		return "", nil, "", func() {}, err
+	}
+	if _, err := s.Runner.Run(ctx, s.CacheRoot, "clone", "--no-checkout", "--", repository, checkout); err != nil {
+		cleanup()
+		return "", nil, "", func() {}, err
+	}
+
+	ref := requested
+	if ref == nil {
+		output, err := s.Runner.Run(ctx, repository, "symbolic-ref", "--short", "HEAD")
+		if err != nil {
+			cleanup()
+			return "", nil, "", func() {}, fmt.Errorf("resolve default branch: %w", err)
+		}
+		branch := strings.TrimSpace(output)
+		branch = strings.TrimPrefix(branch, "origin/")
+		ref = &config.Ref{Kind: "branch", Value: branch}
+	}
+	if err := validateRef(ref); err != nil {
+		cleanup()
+		return "", nil, "", func() {}, err
+	}
+	target := ref.Value
+	switch ref.Kind {
+	case "branch":
+		target = "refs/remotes/origin/" + ref.Value
+	case "tag":
+		target = "refs/tags/" + ref.Value
+	}
+	if _, err := s.Runner.Run(ctx, checkout, "checkout", "--detach", target); err != nil {
+		cleanup()
+		return "", nil, "", func() {}, err
+	}
+	output, err := s.Runner.Run(ctx, checkout, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil {
+		cleanup()
+		return "", nil, "", func() {}, err
+	}
+	resolved := strings.TrimSpace(output)
+	if !fullObjectID.MatchString(resolved) {
+		cleanup()
+		return "", nil, "", func() {}, fmt.Errorf("git returned non-full object id %q", resolved)
+	}
+	refCopy := *ref
+	return checkout, &refCopy, strings.ToLower(resolved), cleanup, nil
+}
+
+func (s Service) ensureRepository(ctx context.Context, canonical, rawSource string, allowCreate bool) (string, error) {
+	destination, err := RepoCachePath(s.CacheRoot, canonical)
+	if err != nil {
+		return "", err
+	}
+	repositories := filepath.Dir(destination)
+	if err := ensurePrivateDirectory(repositories); err != nil {
+		return "", err
+	}
+	if info, err := os.Stat(destination); err == nil && info.IsDir() {
+		if err := ensurePrivateDirectory(destination); err != nil {
+			return "", err
+		}
+		return destination, nil
+	} else if err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+	if rawSource == "" {
+		if !allowCreate {
+			var reconstructErr error
+			rawSource, reconstructErr = reconstructSource(canonical)
+			if reconstructErr != nil {
+				return "", reconstructErr
+			}
+		}
+	}
+	if rawSource == "" {
+		return "", fmt.Errorf("git cache missing for %q; re-add the skill", canonical)
+	}
+	temporary, err := os.MkdirTemp(repositories, ".repo-")
+	if err != nil {
+		return "", err
+	}
+	_ = os.Remove(temporary)
+	defer os.RemoveAll(temporary)
+	if _, err := s.Runner.Run(ctx, repositories, "clone", "--mirror", "--", rawSource, temporary); err != nil {
+		return "", err
+	}
+	if err := s.rename(temporary, destination); err != nil {
+		if _, statErr := os.Stat(destination); statErr == nil {
+			if privateErr := ensurePrivateDirectory(destination); privateErr != nil {
+				return "", privateErr
+			}
+			return destination, nil
+		}
+		return "", err
+	}
+	if err := ensurePrivateDirectory(destination); err != nil {
+		return "", err
+	}
+	if err := syncDirectory(repositories); err != nil {
+		return "", err
+	}
+	return destination, nil
+}
+
+func lexicalLibraryPath(root, id string) (string, error) {
+	if err := validateID(id); err != nil {
+		return "", err
+	}
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	target := filepath.Join(absRoot, filepath.FromSlash(id))
+	if !isWithin(absRoot, target) {
+		return "", fmt.Errorf("library id %q escapes root", id)
+	}
+	return target, nil
+}
+
+func ensurePrivateDirectory(path string) error {
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		return err
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("cache path %q is not a safe directory", path)
+	}
+	return hardenPrivateDirectory(path)
+}
+
+func discoverSelection(checkout, sourcePath, skillName string, gitMode bool) ([]Candidate, error) {
+	root := checkout
+	if sourcePath != "" {
+		if err := ValidateSourcePath(sourcePath); err != nil {
+			return nil, err
+		}
+		root = filepath.Join(checkout, filepath.FromSlash(sourcePath))
+		resolvedCheckout, err := filepath.EvalSymlinks(checkout)
+		if err != nil {
+			return nil, err
+		}
+		resolvedRoot, err := filepath.EvalSymlinks(root)
+		if err != nil {
+			return nil, fmt.Errorf("resolve source_path %q: %w", sourcePath, err)
+		}
+		if !isWithin(resolvedCheckout, resolvedRoot) {
+			return nil, fmt.Errorf("source_path %q escapes checkout", sourcePath)
+		}
+		root = resolvedRoot
+	}
+	var candidates []Candidate
+	var err error
+	if gitMode && sourcePath == "" {
+		candidates, err = DiscoverGit(root)
+	} else {
+		candidates, err = Discover(root)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if sourcePath != "" {
+		if len(candidates) != 1 || candidates[0].RelativePath != "." {
+			return nil, fmt.Errorf("source_path %q is not a skill root", sourcePath)
+		}
+		candidates[0].RelativePath = filepath.ToSlash(sourcePath)
+	}
+	if skillName != "" {
+		selected := candidates[:0]
+		for _, candidate := range candidates {
+			if candidate.Name == skillName || candidate.RelativePath == skillName {
+				selected = append(selected, candidate)
+			}
+		}
+		candidates = selected
+		if len(candidates) == 0 {
+			return nil, fmt.Errorf("skill %q not found", skillName)
+		}
+	}
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].RelativePath < candidates[j].RelativePath })
+	return candidates, nil
+}
+
+func validateRef(ref *config.Ref) error {
+	if ref == nil || ref.Value == "" || strings.ContainsRune(ref.Value, '\x00') || strings.HasPrefix(ref.Value, "-") {
+		return fmt.Errorf("invalid git ref")
+	}
+	switch ref.Kind {
+	case "branch", "tag":
+		return nil
+	case "commit":
+		if !fullObjectID.MatchString(ref.Value) {
+			return fmt.Errorf("commit ref must be a full object id")
+		}
+		return nil
+	default:
+		return fmt.Errorf("invalid git ref kind %q", ref.Kind)
+	}
+}
+
+func reconstructSource(canonical string) (string, error) {
+	parts := strings.Split(canonical, "/")
+	if len(parts) == 2 {
+		return "https://github.com/" + canonical + ".git", nil
+	}
+	return "", fmt.Errorf("git cache missing for %q and transport is ambiguous; re-add the skill", canonical)
+}
