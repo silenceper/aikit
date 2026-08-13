@@ -3,7 +3,6 @@ version: 2
 before:
   hooks:
     - go mod tidy
-    - bash -c "cd internal/web/frontend && npm install && npm run build"
 
 builds:
   - id: aikit
@@ -50,7 +49,7 @@ brews:
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     homepage: "https://github.com/silenceper/aikit"
-    description: "Manage AI dev assets. Sync once, align everyone."
+    description: "Manage skills across AI coding agents"
     license: "Apache-2.0"
     directory: Formula
     install: |

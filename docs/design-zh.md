@@ -1,5 +1,9 @@
 # aikit - 统一 AI 开发资产管理 CLI
 
+> **已废弃：**本文描述的是已经移除的 catalog、publish、Web UI、Rules、MCP、Commands
+> 和项目 `.aikit.yaml` 产品，仅作为历史设计记录保留。当前 Skills-only CLI 请以
+> README 与 2026-08-13 global skills manager spec 为准。
+>
 > **Share your AI rules. Sync with your team.**
 > **共享规则，协作开发。**
 
@@ -1100,4 +1104,3 @@ aikit/
 - 远程资产索引源（从 URL 拉取 catalog 扩展）
 - skills.sh 目录集成
 - 发布到 Homebrew
-

@@ -107,7 +107,7 @@ func atomicWriteFile(path string, data []byte, mode os.FileMode) (err error) {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(tmpPath, path); err != nil {
+	if err := replaceFile(tmpPath, path); err != nil {
 		return fmt.Errorf("replace config: %w", err)
 	}
 	directory, err := os.Open(dir)

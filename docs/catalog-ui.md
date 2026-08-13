@@ -1,5 +1,9 @@
 # Catalog UI Design Document
 
+> **Obsolete:** The catalog command and Web UI were removed from the product.
+> This file is retained only as a historical design record; it does not describe
+> the current CLI.
+>
 > `aikit catalog ui` — A browser-based interface for managing the global asset catalog (`~/.aikit/catalog.yaml`).
 
 ## 1. Overview

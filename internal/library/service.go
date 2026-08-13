@@ -523,7 +523,7 @@ func (s Service) checkout(ctx context.Context, canonical, rawSource string, requ
 	resolved := strings.TrimSpace(output)
 	if !fullObjectID.MatchString(resolved) {
 		cleanup()
-		return "", nil, "", func() {}, fmt.Errorf("git returned non-full object id %q", resolved)
+		return "", nil, "", func() {}, fmt.Errorf("git returned a non-full object id")
 	}
 	refCopy := *ref
 	return checkout, &refCopy, strings.ToLower(resolved), cleanup, nil

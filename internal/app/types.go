@@ -160,12 +160,15 @@ type ScanRequest struct {
 	Agent   string
 	Project string
 	Skills  []string
+	Targets []string
 	All     bool
 	Adopt   bool
+	DryRun  bool
 }
 
 type ScanItem struct {
 	Origin  string
+	Target  string
 	Skill   config.Skill
 	Adopted bool
 	Error   string
@@ -180,12 +183,14 @@ type ScanResult struct {
 type MigrateRequest struct {
 	ProjectPaths []string
 	Adopt        bool
+	DryRun       bool
 }
 
 type MigrateResult struct {
-	Imported int
-	Skipped  int
-	Failed   int
-	Warnings []string
-	Exit     ExitClass
+	Imported     int
+	PendingAdopt int
+	Skipped      int
+	Failed       int
+	Warnings     []string
+	Exit         ExitClass
 }

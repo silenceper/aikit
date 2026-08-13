@@ -1,3 +1,8 @@
+> **Obsolete:** This announcement describes the removed catalog, publish, Web UI,
+> Rules, MCP, Commands, and project `.aikit.yaml` product. See the repository
+> README and the 2026-08-13 global skills manager specification for the current
+> Skills-only CLI.
+
 <p align="center">
   <img src="images/logo.png" alt="aikit logo" width="120">
 </p>

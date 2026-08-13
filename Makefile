@@ -8,26 +8,20 @@ LDFLAGS := -s -w \
 	-X github.com/silenceper/aikit/cmd.commit=$(COMMIT) \
 	-X github.com/silenceper/aikit/cmd.date=$(DATE)
 
-FRONTEND_DIR := internal/web/frontend
+.PHONY: build install clean test test-e2e run
 
-.PHONY: build install clean test test-e2e run frontend
-
-frontend:
-	cd $(FRONTEND_DIR) && npm install && npm run build
-
-build: frontend
+build:
 	@mkdir -p $(BIN_DIR)
 	go build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$(BINARY_NAME) .
 
-install: frontend
+install:
 	go install -ldflags "$(LDFLAGS)" .
 
 clean:
 	rm -rf $(BIN_DIR)
-	rm -rf internal/web/static
 
 test:
-	go test ./...
+	go test -race ./...
 
 test-e2e: build
 	bash scripts/test-e2e.sh

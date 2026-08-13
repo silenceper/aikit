@@ -590,6 +590,9 @@ func TestUpdateRefCheckoutAndCopyFailuresKeepOldResult(t *testing.T) {
 			if updateErr == nil {
 				t.Fatal("expected update error")
 			}
+			if test.name == "short object id" && strings.Contains(updateErr.Error(), test.resolved) {
+				t.Fatalf("invalid remote output leaked into diagnostic: %v", updateErr)
+			}
 			if updated.Resolved != old.Resolved || updated.Ref.Value != old.Ref.Value {
 				t.Fatalf("returned mutated old skill: %#v", updated)
 			}
