@@ -212,6 +212,9 @@ func (c *Config) validateOperation(operation PendingOperation) error {
 		if operation.Original == nil || operation.Original.Kind == "" {
 			return fmt.Errorf("adopt original fingerprint is required")
 		}
+		if len(operation.JournalHash) != 64 || !hexObjectID.MatchString(operation.JournalHash) {
+			return fmt.Errorf("adopt journal_hash must be a full sha256 digest")
+		}
 	}
 	return nil
 }

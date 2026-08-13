@@ -67,6 +67,9 @@ type PendingOperation struct {
 	Temp     string        `yaml:"temp,omitempty" json:"temp,omitempty"`
 	Backup   string        `yaml:"backup,omitempty" json:"backup,omitempty"`
 	Original *Fingerprint  `yaml:"original,omitempty" json:"original,omitempty"`
+	// JournalHash binds an adopt delete manifest to the operation authorized
+	// before any user content is moved. Recovery must fail closed if it differs.
+	JournalHash string `yaml:"journal_hash,omitempty" json:"journal_hash,omitempty"`
 }
 
 type Config struct {

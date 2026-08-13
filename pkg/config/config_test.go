@@ -53,9 +53,10 @@ func TestConfigRoundTripIncludesStructuredState(t *testing.T) {
 		ID: "op-1", Kind: OperationAdopt,
 		Scope:  Scope{Project: "aikit", ProjectPath: projectPath, Agent: "cursor"},
 		Target: filepath.Join(projectPath, ".cursor", "skills", "review"), SkillID: "example.com/group/repo/review",
-		Temp:     filepath.Join(projectPath, ".cursor", "skills", ".aikit-adopt-temp-1"),
-		Backup:   filepath.Join(projectPath, ".cursor", "skills", ".aikit-adopt-backup-1"),
-		Original: &Fingerprint{Kind: "directory", Hash: strings.Repeat("a", 64)},
+		Temp:        filepath.Join(projectPath, ".cursor", "skills", ".aikit-adopt-temp-1"),
+		Backup:      filepath.Join(projectPath, ".cursor", "skills", ".aikit-adopt-backup-1"),
+		Original:    &Fingerprint{Kind: "directory", Hash: strings.Repeat("a", 64)},
+		JournalHash: strings.Repeat("b", 64),
 	}}
 
 	b, err := yaml.Marshal(cfg)
