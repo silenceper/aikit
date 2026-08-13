@@ -1,41 +1,43 @@
 package agent
 
-import "github.com/silenceper/aikit/internal/asset"
-
-// Agent defines the interface that each IDE adapter must implement.
 type Agent interface {
 	Name() string
-	Detect(projectDir string) bool
-	ProjectSkillDir() string
-	InstallSkill(projectDir, srcDir, skillName string) error
-	InstallRule(projectDir string, rule asset.RuleData) error
-	InstallMCP(projectDir string, mcp asset.MCPData) error
-	InstallCommand(projectDir string, cmd asset.CommandData) error
-	SupportsCommand() bool
+	GlobalSkillDir(home string) string
+	ProjectSkillDir(project string) string
 }
 
-// All returns all known agent adapters.
 func All() []Agent {
 	return []Agent{
-		&Cursor{},
-		&ClaudeCode{},
-		&Copilot{},
-		&Windsurf{},
-		&Codex{},
+		Cursor{},
+		ClaudeCode{},
+		Codex{},
+		Copilot{},
+		Windsurf{},
 	}
 }
 
-// ByName returns agents matching the given names.
-func ByName(names []string) []Agent {
-	set := make(map[string]bool, len(names))
-	for _, n := range names {
-		set[n] = true
+func Names() []string {
+	agents := All()
+	names := make([]string, len(agents))
+	for i, item := range agents {
+		names[i] = item.Name()
 	}
-	var out []Agent
-	for _, a := range All() {
-		if set[a.Name()] {
-			out = append(out, a)
+	return names
+}
+
+func NormalizeLegacyName(name string) string {
+	if name == "github-copilot" {
+		return "copilot"
+	}
+	return name
+}
+
+func ByName(name string) (Agent, bool) {
+	name = NormalizeLegacyName(name)
+	for _, item := range All() {
+		if item.Name() == name {
+			return item, true
 		}
 	}
-	return out
+	return nil, false
 }
