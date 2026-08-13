@@ -38,6 +38,7 @@
 ```
 $AIKIT_HOME 或 ~/.aikit/
 ├── config.yaml                 # 唯一账本
+├── config.lock                 # 单机进程互斥锁
 ├── library/skills/<id>/        # 技能正文（SKILL.md 等）
 └── cache/                      # 远程 git 克隆，供 add / update
 ```
@@ -63,7 +64,7 @@ $AIKIT_HOME 或 ~/.aikit/
 
 - **id**（库内唯一）：`<normalized-source>/<name>`
   - GitHub shorthand：`vercel-labs/agent-skills/code-review`
-  - 其它 git URL：先规范化为稳定 source（与现有 cache 目录规则一致），再拼 `name`
+  - 其它 git URL：规范化为包含 host 与完整仓库 path 的稳定 source，再拼 `name`；不能丢弃 GitLab subgroup 等中间路径
   - 无远程源的本地导入：按下面「本地 id」规则，**不要**用 `local/<agent>/<name>`
 - **name**（短名）：来自 `SKILL.md` frontmatter / 目录名，用作 IDE 下的文件夹名
 - CLI/TUI：短名在库中唯一时可省略 id；一旦撞名必须写全 id
@@ -92,8 +93,11 @@ library:
     - id: vercel-labs/agent-skills/code-review
       name: code-review
       source: vercel-labs/agent-skills
-      ref: v1.2.0                    # 可选：tag / commit / branch
-      resolved: a1b2c3d              # 入库/上次 update 时的 commit 短 SHA，供检测更新
+      source_path: skills/code-review # skill 在仓库内的相对目录
+      ref:
+        kind: tag                     # branch / tag / commit
+        value: v1.2.0
+      resolved: 0123456789abcdef0123456789abcdef01234567 # 完整 Git object id
       description: "..."
 
 presets:
@@ -120,6 +124,8 @@ projects:
         presets: []
         skills:
           - vercel-labs/agent-skills/web-design-guidelines
+
+pending_operations: []               # aikit 内部恢复日志，正常稳定态为空
 ```
 
 Agent 全局有效集合 = `agents.<agent>.presets` 展开 ∪ `agents.<agent>.skills`。
@@ -129,6 +135,17 @@ Agent 全局有效集合 = `agents.<agent>.presets` 展开 ∪ `agents.<agent>.s
 所有层级都只保存 preset **名**（不展开）；修改 preset 后，所有引用该 preset 的全局与项目目标在下次 `sync` 时一起更新。一个 skill 同时被直接引用和 preset 引用时按集合去重。
 
 `projects[].path` 为本机绝对路径。`projects[].name` 在配置内唯一，用于 CLI/TUI 与 `--project`；规范化后的真实 path 也必须唯一，禁止同一路径登记成两个项目。`presets[].name` 同样唯一。
+
+远程 library 条目必须保存 `source_path`，它是发现到的 `SKILL.md` 所在目录相对于仓库根的路径。一个仓库内多个或嵌套 skill 各自保存自己的 `source_path`；update 只从该路径重拷对应 skill。`ref.kind` 明确区分 branch/tag/commit，禁止靠名称猜类型；用户未指定 ref 时，add 解析远程默认分支并显式写成 `kind: branch`。`resolved` 始终保存 Git 返回的完整 object id，界面可缩写显示但比较时不得使用短 SHA。
+
+`pending_operations` 是仍属于账本的一部分的恢复日志，只允许 aikit 写入：
+
+- `cleanup`：保存旧目标链接的绝对 path、预期 id 和原因，用于 project remove / remove-agent / path rebind 后可重试地拆链
+- `adopt`：保存目标 path、library id、临时 symlink path 与 backup path，表示用户已经授权把该真实目录或库外 symlink 收归
+
+cleanup 重试时，path 不存在视为完成；path 仍是指向记录 id 的 aikit symlink 才删除；若已变成真目录、库外 symlink 或不同 id，停止并报 `pending-cleanup conflict`，不能删除后来出现的用户内容。
+
+所有变更命令与 `sync` 都先恢复或推进 pending operation，再执行新的变更。操作完成后原子删除对应记录；失败则保留记录并由 `status` 展示，下一次 `sync` 可继续。所有变更命令从读取 config 到更新 YAML、对账和清除 pending operation 全程持有 `$AIKIT_HOME/config.lock` 独占锁，避免 TUI 与 CLI 并发覆盖账本；获得锁后必须重新读取 config。
 
 ### 2.3 Agent 与落地路径
 
@@ -148,6 +165,15 @@ symlink 目标一律指向 `$AIKIT_HOME/library/skills/<id>`（解析后的绝�
 
 账本与 CLI 只使用上表「Agent 名」。旧适配器名 `github-copilot` 在 migrate / 任何读入处映射为 `copilot`，不得把旧名写入 `config.yaml`。
 
+### 2.4 路径与内容边界
+
+- normalized source 保留小写 host、非默认 port 和完整 repo path；每个 segment 做确定性的 UTF-8 百分号编码。GitHub shorthand 与等价 GitHub URL 得到同一值，不同完整 URL 不得因只取末两段而碰撞
+- skill name 必须非空，不能是 `.` / `..`，不能包含路径分隔符或 NUL；不合法的 frontmatter name 直接拒绝入库，不退化成文件路径
+- `source_path` 必须是 clean 的仓库内相对路径，不能是绝对路径或包含 `..`；解析 symlink 后也必须仍在 cache checkout 内
+- 所有 cache/library/IDE 目标在 join 后都用 `filepath.Rel`（或等价逻辑）验证仍位于预期根目录，验证失败时停止，不能读写根目录外路径
+- 复制和 hash 遇到 skill 内部 symlink 时只接受解析后仍在该 skill 根内的目标；越界 symlink 拒绝入库，不能把机器上的其它文件复制进 library
+- hash 按排序后的记录计算，每条记录包含相对路径长度+路径、类型、可执行位、内容长度+内容，避免简单字符串拼接歧义
+
 ## 3. 对账引擎
 
 `enable` / `disable` / `sync` / `project remove` 走 **普通对账**。`scan --adopt` 走 **adopt 换链**（§5.1），不套用下表「真目录不覆盖」。
@@ -161,11 +187,15 @@ symlink 目标一律指向 `$AIKIT_HOME/library/skills/<id>`（解析后的绝�
 | 无此路径 | 建 symlink | 不动 |
 | 正确指向该 id 的 symlink | 跳过 | 断链 |
 | symlink 指向库内另一 id | 改指向 | 断链 |
-| 断掉的 symlink | 删掉再建 | 删掉 |
+| 断链，词法目标是期望 id，但 library 目录缺失 | 不改链，报 `library-missing` | 断链 |
+| 断链，词法目标是库内另一 id | 期望 library 存在时改指向，否则报 `library-missing` | 断链 |
+| 断链，词法目标在 library 外 | 不覆盖，记冲突 | 不删 |
 | 真目录 / 真文件 | 不覆盖，记冲突，其它路径继续 | 不删 |
 | 指向库外的 symlink | 不覆盖，记冲突 | 不删 |
 
 写盘顺序：**先原子写 YAML**（temp + rename），再对账磁盘。写盘失败时账本已是新状态，`status` 显示 drift，再 `sync` 修复。禁止「目录已变、账本未记」。
+
+断链归属用 `Lstat + Readlink` 做词法判断：相对目标先相对 symlink 所在目录转为绝对 clean path，再检查是否严格位于 library 根下；不能用会因目标不存在而失败的 `EvalSymlinks` 来判断。expected library 目录不存在时不得创建一个永久断链，必须保留现场并报 `library-missing`，提示 `update --force` 或重新 add。
 
 `sync --dry-run` 只打印将建 / 将拆 / 冲突。
 
@@ -198,7 +228,7 @@ symlink 目标一律指向 `$AIKIT_HOME/library/skills/<id>`（解析后的绝�
 
 ### 3.4 enable / disable 的 `--agent` / `--project`
 
-- 只 `--agent X`：改 `agents.X` 绑定，立刻普通对账 X 的全局目录
+- 只 `--agent X`：改 `agents.X` 全局绑定，并对账 X 的全局目录以及所有声明 X 的登记项目。原因是同 id 的项目链接可能需要在全局启用后收起、或在全局禁用后补建
 - 只 `--project P`：改该项目的公共 `skills`/`presets`，立刻普通对账该项目全部已声明 Agent 的项目级目录
 - `--project P --agent X`：只改 `projects[P].agent_bindings.X`，即只在该项目的 X 中启用；X 不在项目 `agents` 中则拒绝，并提示先 `project edit --add-agent`
 
@@ -232,7 +262,7 @@ symlink 目标一律指向 `$AIKIT_HOME/library/skills/<id>`（解析后的绝�
 | `aikit project add [path]` | 默认 `.`；询问/参数指定 agents；name 默认目录名，重名拒绝 |
 | `aikit project list` | |
 | `aikit project edit <name>` | `--name` / `--path` / `--add-agent` / `--remove-agent`；见 §4.2 |
-| `aikit project remove <name>` | 先从 YAML 删除该项目，再按「期望无」普通对账拆除其 aikit symlink。不删用户真目录 |
+| `aikit project remove <name>` | 从 YAML 删除项目的同时写入 cleanup operations，再拆除其 aikit symlink；全部成功后清除 operations。不删用户真目录 |
 | `aikit status` | 只读：库数量、绑定、drift、未纳管项、可更新数；不会询问或执行 update |
 | `aikit update --check` | 只探测，不写库；打印落后条目 |
 | `aikit sync` | 按 YAML 全量对账（只对账 symlink，**不**拉远端） |
@@ -244,10 +274,10 @@ symlink 目标一律指向 `$AIKIT_HOME/library/skills/<id>`（解析后的绝�
 
 `aikit update` 与 `ref`：
 
-- `ref` 为空，或为 branch：`git fetch` 后更新到该 branch（空则远程默认分支）的当前提交，并把 cache 中该 skill 目录重拷到 library，写入新的 `resolved`
-- `ref` 为 tag 或 commit：默认不前进，打印 pinned 并跳过；`--force` 仍检出**同一个** pin 再重拷（用于修复库文件损坏，不会升到更新的 tag）
+- `ref.kind=branch`：`git fetch` 后更新到 `ref.value` 的远程 HEAD，根据 `source_path` 把该 skill 目录原子重拷到 library，写入新的完整 `resolved`
+- `ref.kind=tag|commit`：默认不前进，打印 pinned 并跳过；`--force` 仍检出**同一个** pin，再根据 `source_path` 重拷（用于修复库文件损坏，不会升到更新的 tag）
 - 无远程 `source` 的本地导入（id 以 `local/` 开头）：`update` 跳过
-- 改 pin：编辑 YAML 里的 `ref` 后执行 `aikit update --force [id]`
+- 改 pin 或回退：使用 `aikit update <id> --ref branch:<name>|tag:<name>|commit:<object-id>`；类型前缀必填，不要求用户手改 YAML
 - `disable <id>`：只从该目标的 `skills[]` 去掉该 id。若有效集合仍包含它（来自 preset），磁盘不变并打印提示；若用户就是要从 preset 里拿掉，应改 preset，而不是 disable
 
 本地路径 `add`：
@@ -259,7 +289,7 @@ symlink 目标一律指向 `$AIKIT_HOME/library/skills/<id>`（解析后的绝�
 
 ### 4.1 远端更新探测与确认
 
-「有更新」= 该 skill 有 git `source`，且 `ref` 为空或为 branch，`git fetch` 后远程该 branch 的 HEAD ≠ `resolved`。pinned tag/commit 不参与「有更新」提示（除非用户 `update --force` 修文件）。
+「有更新」= 该 skill 有 git `source`，且 `ref.kind=branch`，`git fetch` 后远程该 branch 的完整 HEAD object id ≠ `resolved`。pinned tag/commit 不参与「有更新」提示（除非用户 `update --force` 修文件）。
 
 **不自动写入。** 探测到更新后必须确认：
 
@@ -276,14 +306,14 @@ symlink 目标一律指向 `$AIKIT_HOME/library/skills/<id>`（解析后的绝�
 
 探测结果可缓存在 `$AIKIT_HOME/cache/.update-check`（source → 远程 SHA + 检查时间），避免每次按键都 fetch；TUI/`status` 使用不超过 10 分钟的缓存，`update --check` 与确认后的 update 总是重新 fetch。
 
-`aikit update <id> --ref <branch|tag|commit>` 用于显式换 pin 或回退到已知 commit。TTY 下显示当前 `ref/resolved` 与目标 ref 后确认；非 TTY 必须同时给 `--yes`。成功后写入新的 `ref/resolved`，失败则保留原 library 与账本值。
+`aikit update <id> --ref branch:<name>|tag:<name>|commit:<object-id>` 用于显式换 pin 或回退到已知 commit。TTY 下显示当前 `ref/resolved` 与目标 ref 后确认；非 TTY 必须同时给 `--yes`。成功后写入新的结构化 `ref` 与完整 `resolved`，失败则保留原 library 与账本值。目标 ref 下的 `source_path/SKILL.md` 不存在或 name 改变时拒绝更新并提示重新 add，不能悄悄更新到另一个 skill。
 
 ### 4.2 项目编辑
 
 - `--add-agent X`：把 X 加入项目，校验有效视图后立即对账其项目目录
-- `--remove-agent X`：先从新账本中移除 X 及其 `agent_bindings.X`，再拆除该项目 X 目录下的 aikit symlink；不删用户真目录
+- `--remove-agent X`：同一次 YAML 写入中移除 X 及其 `agent_bindings.X`，并为原有效集合的每条项目链接写入 cleanup operation；随后执行 cleanup，不删用户真目录。中断后 `sync` 根据 operation 继续
 - `--name N`：只修改显示名和 CLI 标识，保持 path 与绑定
-- `--path P`：用于项目目录已经移动后的重新绑定。旧 path 仍存在时先列出将拆除的 aikit symlink 并要求确认；之后更新账本并在新 path 对账。旧 path 不存在则直接更新并对账新 path
+- `--path P`：用于项目目录已经移动后的重新绑定。旧 path 仍存在时先预览要拆除的旧项目 aikit symlink 并要求确认；确认后一次原子 YAML 写入同时更新 path、为每条旧链接加入 cleanup operation。随后先处理旧 path cleanup，再对账新 path，最后删除 operation。任一步失败都保留 operation，`status` 报 `pending-cleanup`，下次 `sync` 继续；旧 path 不存在时无需 cleanup，直接更新并对账新 path
 - 一次可组合多个参数，但必须先对最终状态做名称、真实 path 唯一性和跨层冲突校验
 
 ## 5. 存量
@@ -309,9 +339,15 @@ symlink 目标一律指向 `$AIKIT_HOME/library/skills/<id>`（解析后的绝�
 `scan --adopt` 顺序（与普通对账相反的「换真目录」只发生在这一步）：
 
 1. 把选中项拷进 library（失败则停，原目录不动）
-2. **先原子写 YAML**：全局发现项写入 `agents.<agent>`；项目发现项写入 `projects[].agent_bindings.<agent>`，绝不因为在一个 Agent 目录发现就写成项目公共绑定
-3. **adopt 换链**：对该目标，若路径是真目录或库外 symlink，备份式替换为指向 library 的 symlink（先建新链到临时名，再替换）；若已是正确 aikit 链则跳过
-4. 换链失败：原目录保留，YAML 已含绑定，`status` 记 conflict。普通 `sync` 仍不会覆盖真目录，因此**不会拆掉**这次失败留下的现场；用户修好权限后再次 `scan --adopt` 或对单条路径重试
+2. 在目标的同一父目录选定唯一的临时路径与 backup 路径；**先原子写 YAML**：全局发现项写入 `agents.<agent>`，项目发现项写入 `projects[].agent_bindings.<agent>`，同时写入包含 target/id/temp/backup 的 `pending_operations.adopt`
+3. 在 temp path 创建指向 library id 的 symlink 并验证；失败则删除 temp、保留原目录和 pending operation
+4. 把原真目录或库外 symlink 原子 rename 到 backup；失败则删除 temp，原目录保持不变
+5. 把 temp symlink 原子 rename 到正式 target；失败则立即把 backup rename 回 target。回滚成功后保留 pending operation 供重试；回滚也失败时绝不删除 backup，`status` 报 `adopt-recovery` 并显示 backup path
+6. 验证正式 target 正确指向 library，且 backup 内容 hash 与已入库副本一致；然后删除 backup，最后原子删除 pending operation
+
+temp/backup 使用 aikit 专用前缀加随机 nonce，不覆盖任何已有路径；冲突就重新生成。进程中断后，`sync` 在普通对账前恢复 pending adopt：target 缺失而 backup 存在时先恢复原目录；target 已是正确 aikit symlink且 backup hash 一致时完成清理；其它组合停止并报 `adopt-recovery`，不猜测、不删除用户数据。
+
+换链失败时 YAML 已含绑定和 pending operation，普通对账不得把该目标当普通真目录冲突处理，必须先走上述恢复流程。用户修好权限后执行 `sync` 或再次 `scan --adopt` 即可重试。
 
 非 TTY 的 `--adopt` 必须带 `--skill <id>`（可重复）或 `--all`，禁止无选择地全盘替换。
 
@@ -319,12 +355,26 @@ symlink 目标一律指向 `$AIKIT_HOME/library/skills/<id>`（解析后的绝�
 
 ### 5.2 `migrate`
 
-显式一次性：
+迁移只处理用户明确提供或当前已知的位置，不扫描整个磁盘：
 
-- `~/.aikit/catalog.yaml` 的 skills + `cache/` → 按已有 `source`+`name` 填 library（id 优于 `local/...`）
-- 项目 `.aikit.yaml` 里的 `assets.skills` → `project add` 该目录。`targets` / Detect 结果映射到规范 Agent 名（`github-copilot` → `copilot`）；映射后为空则默认 `[cursor]`。旧项目 assets 原本面向全部 targets，因此迁入项目公共 `skills`，文件从 cache 来
-- 不迁移 rules / mcp / commands
-- 不删除旧文件；成功后打印可手删提示
+- `aikit migrate`：读取 `$AIKIT_HOME/catalog.yaml`；若 cwd 下存在 `.aikit.yaml`，同时迁移 cwd 项目
+- `aikit migrate --project <path>`：可重复，迁移指定项目的 `.aikit.yaml`
+- `aikit migrate --dry-run`：只显示将入库、合并、跳过和冲突的条目
+- `aikit migrate --adopt`：除迁入账本外，还明确授权把旧项目/IDE 真实 skill 目录按 §5.1 收归；不带该参数时绝不替换现场
+
+合并与幂等规则：
+
+- config 不存在则创建；已有非空 config 时只合并，不整体覆盖
+- `catalog.yaml` 的 skill 根据旧 `source` + name 在 cache 中重新发现，写入新的 source/source_path/ref/resolved；同 id 且内容相同则跳过
+- 同 id 但 source_path 或内容不同：该条冲突并跳过，不覆盖现有 library；其它条目继续，最终退出码非 0
+- 项目 canonical path 已登记：把旧 targets 映射后并入 `agents`，旧 `assets.skills` 并入项目公共 `skills`
+- 项目 path 未登记但 name 与另一 path 冲突：该项目跳过并报错，不覆盖同名项目
+- `targets` / Detect 结果映射到规范 Agent 名（`github-copilot` → `copilot`）；映射后为空则默认 `[cursor]`
+- rules / mcp / commands 不迁移；旧文件、旧 catalog、旧 `.aikit.yaml` 和 cache 永不删除
+
+每个 library 条目必须先成功复制并校验，才可在同一次原子 YAML 写入中加入该条目及其引用。单个条目失败不会留下悬空引用；已经成功迁入的条目保留，因此重复执行可继续完成剩余项。
+
+默认 migrate 写入项目绑定后，如果旧 IDE 位置是真目录，`status` 会显示 conflict，普通 sync 不覆盖；用户随后运行 `scan --adopt`。带 `--adopt` 时，迁移直接为这些已授权位置创建 pending adopt operations并执行 §5.1 流程。迁移结束必须打印“已纳管 / 待 adopt / 冲突 / 跳过”汇总。
 
 ## 6. 延后功能
 
@@ -396,7 +446,7 @@ symlink 目标一律指向 `$AIKIT_HOME/library/skills/<id>`（解析后的绝�
 | preset 引用缺失 skill | enable/sync 拒绝，指出 preset 与 id |
 | 短名冲突 | 该目标跳过，其余继续，非 0 退出 |
 | 全局与项目同名不同 id | 写操作预校验拒绝；手改 YAML 则 status 报 `scope-conflict`，sync 跳过该项目 Agent |
-| 库目录缺失 | 该条失败，提示 `update` 或重新 `add` |
+| 库目录缺失 | 不建/改 symlink，报 `library-missing`，提示 `update --force` 或重新 `add` |
 | 项目 path 不存在 | 警告跳过 |
 | 权限 / 建链失败 | 该条失败，继续其余，最后汇总 |
 | remove 仍被引用 | 拒绝并列出引用；`--force` 才解绑出库 |
@@ -406,10 +456,12 @@ symlink 目标一律指向 `$AIKIT_HOME/library/skills/<id>`（解析后的绝�
 `status` 每次检查五个 Agent 的全局 skills 目录和所有 path 存在的登记项目目录，并保持只读：
 
 - `missing`：YAML 期望存在但链接缺失
+- `library-missing`：YAML 引用的 library id 目录缺失；与普通链接缺失分开报告
 - `conflict`：期望位置被真目录、真文件或库外 symlink 占用
 - `scope-conflict`：同一「项目 × Agent」的全局与项目层出现同名不同 id
 - `unmanaged`：目标 skills 目录中存在未进入账本、也不占据某个期望路径的真目录、真文件或库外 symlink；可交给 `scan --adopt`。占据期望路径的同类对象只归为 `conflict`，不重复计数
 - `orphaned-link`：指向 aikit library、但账本没有对应绑定的 symlink；普通 `sync` 会拆除，用户也可先 `scan --adopt` 恢复绑定
+- `pending-cleanup` / `adopt-recovery`：持久化 operation 尚未完成；显示 target、backup（若有）和下一步 `sync`/人工处理建议
 - `updates`：远端可更新数量；只提示，不执行更新
 
 `status` 示例：
@@ -424,6 +476,7 @@ Unmanaged: 2
   - ~/work/aikit/.codex/skills/local-debug (external symlink)
 Drift:
   - missing: ~/.cursor/skills/archimate
+  - library-missing: local/old-helper
   - conflict: ~/work/aikit/.cursor/skills/code-review (real directory, not symlink)
   - scope-conflict: aikit/cursor code-review (source-a/code-review vs source-b/code-review)
 ```
@@ -435,32 +488,38 @@ Drift:
 必须覆盖：
 
 - 缺链建、正确跳过、错误库内链改写、多余 aikit 链拆除
-- 真目录与库外 symlink：不删不覆盖，记冲突
+- 真目录与库外 symlink：不删不覆盖，记冲突；库内/库外 broken symlink 分别处理
+- expected library 目录缺失时报 `library-missing`，不创建永久断链
 - 短名冲突：该目标不改盘
 - 全局和项目同名同 id：只建全局链接；关闭全局后自动补项目链接
 - 全局和项目同名不同 id：enable/preset/project edit 在写 YAML 前拒绝；手改 YAML 后 status/sync 报错
 - `--dry-run` 不写盘
 - Git source 与本地单 skill/多 skill 路径均可 add；纯 add 不碰 IDE 目录
 - 本地 add 复制后删除原路径不影响 library
+- source/name/source_path 的 `..`、绝对路径、分隔符与越界 symlink 被拒绝；嵌套 Git group 不发生 source id 碰撞
 - `enable`/`disable`：YAML 先于磁盘；写盘失败后 status 有 drift，sync 能修
 - `enable --project P --agent X` 只改项目 X；只 `--agent X` 只改全局；只 `--project P` 改项目公共集合
+- 全局 enable/disable 后重算所有声明该 Agent 的项目有效视图：启用同 id 时拆除冗余项目链，关闭时补建仍有项目绑定的链
 - `remove` 引用保护与 `--force`
 - `scan` 只入库；`scan --adopt` 为拷贝 → 写 YAML → 换链；换链失败则 conflict，且随后普通 sync 不拆真目录
-- `project remove`：先删 YAML 再拆该项目 aikit 链
-- `project edit`：增删 Agent、改名、项目移动后的 path 重绑；删除 Agent 时只拆该 Agent 的项目链接
+- `project remove`：YAML 删除项目并写 cleanup operations；中断后 sync 继续拆链并清 operation
+- `project edit`：增删 Agent、改名、项目移动后的 path 重绑；旧 path cleanup 中断后可恢复；删除 Agent 时只拆该 Agent 的项目链接
 - `sync --agent` 只动该 Agent 全局目录
 - 已有 aikit symlink 的 `--adopt` 只写 YAML 不改链；随后普通 `sync` 因「期望有」而保留
 - 在已登记项目目录执行无参 `sync` / `status` 仍是全量
 - 存量 hash 相同只入一份并多处 enable；不同则 `local/<name>` 与 `local/<name>-<hash12>`
-- `migrate`：catalog + 项目 `.aikit.yaml` 的 skills 进入新 config，旧文件仍在
+- `migrate`：catalog + 显式项目进入空/非空 config；重复执行幂等；冲突不覆盖；默认待 adopt，`--adopt` 走恢复日志；旧文件仍在
 - CLI 冒烟：`add` → `enable --agent` → `project add` → `enable --project` → `status` 全绿 → `disable` 断链
-- `update --check`：远端 HEAD ≠ `resolved` 列为可更新；pin 的 tag 不列入
+- 多 skill/嵌套 skill 仓库分别保存 source_path，update 只重拷目标路径
+- `update --check`：远端完整 HEAD object id ≠ `resolved` 列为可更新；pin 的 tag 不列入；branch/tag 同名按 ref.kind 区分
 - TTY `update` 拒绝确认时库文件与 `resolved` 不变
 - 非 TTY `update` 无 `--yes` 不写库；`--yes` 才更新
 - `update <id> --ref <commit>` 可回退；失败保持原 ref/resolved 和 library
 - TTY `status` 发现更新只提示，不进入确认、不写库
 - `status --offline` 不发起 fetch
 - `status` 列出 unmanaged/orphaned-link；选中 unmanaged 后可进入精确 adopt
+- adopt 在原目录 rename 后、临时链 rename 前中断时可恢复；backup 冲突或回滚失败时不删除用户数据
+- 两个并发变更进程由 config.lock 串行，后获得锁者重读账本，不丢更新
 
 TUI：逻辑测底层 API；k9s 式主界面做一次手动走通（列表移动、项目 common/Agent 作用域切换、space enable、项目编辑、unmanaged adopt、`u` 确认更新）。CI 不模拟按键。
 
