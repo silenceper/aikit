@@ -105,12 +105,37 @@ type GitAddOptions struct {
 	SourcePath string
 	Ref        *config.Ref
 	Skill      string
+	Skills     []string
 	Existing   []config.Skill
 	Force      bool
 }
 
+type UpdateSpec struct {
+	Old config.Skill
+	Ref *config.Ref
+}
+
 func (s Service) AddLocal(source string, existing []config.Skill) ([]config.Skill, error) {
+	mutation, err := s.PrepareLocal(context.Background(), source, nil, existing)
+	if err != nil {
+		return nil, err
+	}
+	defer mutation.Abort()
+	if err := mutation.Commit(context.Background()); err != nil {
+		return nil, err
+	}
+	return mutation.Skills, nil
+}
+
+func (s Service) PrepareLocal(ctx context.Context, source string, selections []string, existing []config.Skill) (*Mutation, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	candidates, err := Discover(source)
+	if err != nil {
+		return nil, err
+	}
+	candidates, err = selectCandidates(candidates, selections)
 	if err != nil {
 		return nil, err
 	}
@@ -167,16 +192,29 @@ func (s Service) AddLocal(source string, existing []config.Skill) ([]config.Skil
 		if err != nil {
 			return nil, err
 		}
-		defer batch.Abort()
 		batch.SyncDirectory = s.syncDirectory
-		if err := batch.Commit(); err != nil {
+		if err := s.configureBatchSkills(batch, result, existing); err != nil {
+			_ = batch.Abort()
 			return nil, err
 		}
+		return &Mutation{Skills: result, batch: batch}, nil
 	}
-	return result, nil
+	return &Mutation{Skills: result}, nil
 }
 
 func (s Service) AddGit(ctx context.Context, rawSource string, options GitAddOptions) ([]config.Skill, error) {
+	mutation, err := s.PrepareGit(ctx, rawSource, options)
+	if err != nil {
+		return nil, err
+	}
+	defer mutation.Abort()
+	if err := mutation.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return mutation.Skills, nil
+}
+
+func (s Service) PrepareGit(ctx context.Context, rawSource string, options GitAddOptions) (*Mutation, error) {
 	if parsed, parseErr := url.Parse(strings.TrimSpace(rawSource)); parseErr == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.User != nil {
 		return nil, fmt.Errorf("HTTP git source must not contain embedded credentials")
 	}
@@ -196,6 +234,10 @@ func (s Service) AddGit(ctx context.Context, rawSource string, options GitAddOpt
 	}
 	if len(candidates) == 0 {
 		return nil, fmt.Errorf("repository contains no SKILL.md")
+	}
+	candidates, err = selectCandidates(candidates, options.Skills)
+	if err != nil {
+		return nil, err
 	}
 	occupied := make(map[string]struct{}, len(options.Existing))
 	for _, skill := range options.Existing {
@@ -246,11 +288,7 @@ func (s Service) AddGit(ctx context.Context, rawSource string, options GitAddOpt
 	if err != nil {
 		return nil, err
 	}
-	defer batch.Abort()
 	batch.SyncDirectory = s.syncDirectory
-	if err := batch.Commit(); err != nil {
-		return nil, err
-	}
 	result := make([]config.Skill, 0, len(prepared))
 	for _, item := range prepared {
 		refCopy := *ref
@@ -260,17 +298,111 @@ func (s Service) AddGit(ctx context.Context, rawSource string, options GitAddOpt
 			Resolved: resolved, Hash: item.candidate.Hash,
 		})
 	}
-	return result, nil
+	if err := s.configureBatchSkills(batch, result, options.Existing); err != nil {
+		_ = batch.Abort()
+		return nil, err
+	}
+	return &Mutation{Skills: result, batch: batch}, nil
 }
 
 // UpdateRef prepares and validates a fresh checkout before replacing the old
 // library tree. It returns the original value on every failure.
 func (s Service) UpdateRef(ctx context.Context, old config.Skill, requested *config.Ref) (config.Skill, error) {
+	mutation, err := s.PrepareUpdate(ctx, old, requested)
+	if err != nil {
+		return old, err
+	}
+	defer mutation.Abort()
+	if err := mutation.Commit(ctx); err != nil {
+		return old, err
+	}
+	return *mutation.Updated, nil
+}
+
+func (s Service) PrepareUpdate(ctx context.Context, old config.Skill, requested *config.Ref) (*Mutation, error) {
+	mutation, err := s.PrepareUpdates(ctx, []UpdateSpec{{Old: old, Ref: requested}})
+	if err != nil {
+		return nil, err
+	}
+	mutation.Updated = &mutation.Skills[0]
+	return mutation, nil
+}
+
+func (s Service) PrepareUpdates(ctx context.Context, requests []UpdateSpec) (*Mutation, error) {
+	if len(requests) == 0 {
+		return nil, fmt.Errorf("update batch is empty")
+	}
+	specs := make([]CopySpec, 0, len(requests))
+	updated := make([]config.Skill, 0, len(requests))
+	var cleanups []func()
+	defer func() {
+		for _, cleanup := range cleanups {
+			cleanup()
+		}
+	}()
+	for _, request := range requests {
+		item, copySpec, cleanup, err := s.prepareUpdate(ctx, request.Old, request.Ref)
+		if err != nil {
+			return nil, err
+		}
+		cleanups = append(cleanups, cleanup)
+		updated = append(updated, item)
+		specs = append(specs, copySpec)
+	}
+	batch, err := PrepareBatch(specs, s.copySkill, s.rename)
+	if err != nil {
+		return nil, err
+	}
+	batch.SyncDirectory = s.syncDirectory
+	old := make([]config.Skill, 0, len(requests))
+	for _, request := range requests {
+		old = append(old, request.Old)
+	}
+	if err := s.configureBatchSkills(batch, updated, old); err != nil {
+		_ = batch.Abort()
+		return nil, err
+	}
+	return &Mutation{Skills: updated, batch: batch}, nil
+}
+
+func (s Service) configureBatchSkills(batch *Batch, next, previous []config.Skill) error {
+	newByPath := make(map[string]config.Skill, len(next))
+	oldByID := make(map[string]config.Skill, len(previous))
+	for _, skill := range next {
+		path, err := SafeLibraryPath(s.LibraryRoot, skill.ID)
+		if err != nil {
+			return err
+		}
+		newByPath[path] = skill
+	}
+	for _, skill := range previous {
+		oldByID[skill.ID] = skill
+	}
+	for index := range batch.Copies {
+		copy := &batch.Copies[index]
+		newSkill, ok := newByPath[copy.Destination]
+		if !ok {
+			return fmt.Errorf("batch destination has no new skill metadata")
+		}
+		newCopy := newSkill
+		copy.newSkill = &newCopy
+		if oldSkill, ok := oldByID[newSkill.ID]; ok {
+			oldCopy := oldSkill
+			copy.oldSkill = &oldCopy
+			copy.operation = "update"
+		} else {
+			copy.operation = "add"
+		}
+	}
+	return batch.persistJournal("prepared")
+}
+
+func (s Service) prepareUpdate(ctx context.Context, old config.Skill, requested *config.Ref) (config.Skill, CopySpec, func(), error) {
 	if old.Source == "" || old.Ref == nil {
-		return old, fmt.Errorf("skill %q has no remote source", old.ID)
+		return old, CopySpec{}, func() {}, fmt.Errorf("skill %q has no remote source", old.ID)
 	}
 	if err := ValidateSourcePath(old.SourcePath); err != nil {
-		return old, err
+		return old, CopySpec{}, func() {}, err
 	}
 	ref := old.Ref
 	if requested != nil {
@@ -278,32 +410,26 @@ func (s Service) UpdateRef(ctx context.Context, old config.Skill, requested *con
 	}
 	checkout, actualRef, resolved, cleanup, err := s.checkout(ctx, old.Source, "", ref, false)
 	if err != nil {
-		return old, err
+		return old, CopySpec{}, func() {}, err
 	}
-	defer cleanup()
 	candidates, err := discoverSelection(checkout, old.SourcePath, "", true)
 	if err != nil {
-		return old, err
+		cleanup()
+		return old, CopySpec{}, func() {}, err
 	}
 	if len(candidates) != 1 {
-		return old, fmt.Errorf("source_path %q is not a single skill", old.SourcePath)
+		cleanup()
+		return old, CopySpec{}, func() {}, fmt.Errorf("source_path %q is not a single skill", old.SourcePath)
 	}
 	candidate := candidates[0]
 	if candidate.Name != old.Name {
-		return old, fmt.Errorf("skill name changed from %q to %q; add it again", old.Name, candidate.Name)
+		cleanup()
+		return old, CopySpec{}, func() {}, fmt.Errorf("skill name changed from %q to %q; add it again", old.Name, candidate.Name)
 	}
 	destination, err := SafeLibraryPath(s.LibraryRoot, old.ID)
 	if err != nil {
-		return old, err
-	}
-	batch, err := PrepareBatch([]CopySpec{{Source: candidate.Root, Destination: destination}}, s.copySkill, s.rename)
-	if err != nil {
-		return old, err
-	}
-	defer batch.Abort()
-	batch.SyncDirectory = s.syncDirectory
-	if err := batch.Commit(); err != nil {
-		return old, err
+		cleanup()
+		return old, CopySpec{}, func() {}, err
 	}
 	updated := old
 	refCopy := *actualRef
@@ -311,7 +437,7 @@ func (s Service) UpdateRef(ctx context.Context, old config.Skill, requested *con
 	updated.Resolved = resolved
 	updated.Description = candidate.Description
 	updated.Hash = candidate.Hash
-	return updated, nil
+	return updated, CopySpec{Source: candidate.Root, Destination: destination}, cleanup, nil
 }
 
 func (s Service) copySkill(source, destination string) error {
@@ -538,6 +664,41 @@ func discoverSelection(checkout, sourcePath, skillName string, gitMode bool) ([]
 	}
 	sort.Slice(candidates, func(i, j int) bool { return candidates[i].RelativePath < candidates[j].RelativePath })
 	return candidates, nil
+}
+
+func selectCandidates(candidates []Candidate, selections []string) ([]Candidate, error) {
+	if len(selections) == 0 {
+		return candidates, nil
+	}
+	wanted := make(map[string]struct{}, len(selections))
+	for _, selection := range selections {
+		if selection == "" {
+			return nil, fmt.Errorf("skill selection must not be empty")
+		}
+		wanted[selection] = struct{}{}
+	}
+	selected := make([]Candidate, 0, len(wanted))
+	matched := make(map[string]struct{}, len(wanted))
+	for _, candidate := range candidates {
+		_, byName := wanted[candidate.Name]
+		_, byPath := wanted[candidate.RelativePath]
+		if !byName && !byPath {
+			continue
+		}
+		selected = append(selected, candidate)
+		if byName {
+			matched[candidate.Name] = struct{}{}
+		}
+		if byPath {
+			matched[candidate.RelativePath] = struct{}{}
+		}
+	}
+	for selection := range wanted {
+		if _, ok := matched[selection]; !ok {
+			return nil, fmt.Errorf("skill %q not found", selection)
+		}
+	}
+	return selected, nil
 }
 
 func validateRef(ref *config.Ref) error {

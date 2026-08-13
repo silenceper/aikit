@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+
+	"github.com/silenceper/aikit/pkg/config"
 )
 
 type CopySpec struct {
@@ -19,33 +21,51 @@ type PreparedCopy struct {
 	Destination string
 	Staging     string
 	Backup      string
+	Quarantine  string
 	existed     bool
 	backedUp    bool
 	installed   bool
 	stageOwner  ownedTree
 	backupOwner ownedTree
 	destOwner   ownedTree
+	operation   string
+	oldSkill    *config.Skill
+	newSkill    *config.Skill
 }
 
 type Batch struct {
 	Copies        []PreparedCopy
+	Journal       string
 	rename        func(string, string) error
 	SyncDirectory func(string) error
+	// SyncJournalDirectory is injectable so callers can distinguish a journal
+	// replace that became visible from a failure before the replace.
+	SyncJournalDirectory func(string) error
+	journalID            string
+	phase                string
+	ledgerDriven         bool
 }
 
 // PrepareBatch fully copies and validates all sources without changing any
 // destination. Abort removes only staging trees whose recorded identity and
 // fingerprint still match; concurrently replaced paths are preserved.
 func PrepareBatch(specs []CopySpec, copier func(string, string) error, rename func(string, string) error) (*Batch, error) {
+	if len(specs) == 0 {
+		return nil, fmt.Errorf("batch has no copies")
+	}
 	if copier == nil {
 		copier = AtomicCopy
 	}
 	if rename == nil {
 		rename = moveNoReplace
 	}
-	batch := &Batch{rename: rename, SyncDirectory: syncDirectory}
+	journalID, err := newBatchID()
+	if err != nil {
+		return nil, err
+	}
+	batch := &Batch{rename: rename, SyncDirectory: syncDirectory, SyncJournalDirectory: syncDirectory, journalID: journalID}
 	destinations := make(map[string]struct{}, len(specs))
-	for _, spec := range specs {
+	for index, spec := range specs {
 		if _, duplicate := destinations[spec.Destination]; duplicate {
 			batch.Abort()
 			return nil, fmt.Errorf("duplicate batch destination %q", spec.Destination)
@@ -56,40 +76,75 @@ func PrepareBatch(specs []CopySpec, copier func(string, string) error, rename fu
 			batch.Abort()
 			return nil, err
 		}
-		staging, err := os.MkdirTemp(parent, ".aikit-batch-stage-")
-		if err != nil {
-			batch.Abort()
-			return nil, err
+		staging := batchArtifactPath(parent, "stage", journalID, index)
+		backup := batchArtifactPath(parent, "backup", journalID, index)
+		quarantine := batchArtifactPath(parent, "quarantine", journalID, index)
+		for _, artifact := range []string{staging, backup, quarantine} {
+			if _, err := os.Lstat(artifact); err == nil {
+				cleanupErr := batch.Abort()
+				return nil, combineBatchError(fmt.Errorf("batch artifact %q already exists", artifact), cleanupErr)
+			} else if !os.IsNotExist(err) {
+				cleanupErr := batch.Abort()
+				return nil, combineBatchError(err, cleanupErr)
+			}
 		}
-		if err := os.Remove(staging); err != nil {
-			batch.Abort()
-			return nil, err
-		}
-		batch.Copies = append(batch.Copies, PreparedCopy{Destination: spec.Destination, Staging: staging})
+		batch.Copies = append(batch.Copies, PreparedCopy{Destination: spec.Destination, Staging: staging, Backup: backup, Quarantine: quarantine})
 		if err := copier(spec.Source, staging); err != nil {
 			if owner, inspectErr := inspectOwnedTree(staging); inspectErr == nil {
 				batch.Copies[len(batch.Copies)-1].stageOwner = owner
 			}
-			batch.Abort()
-			return nil, err
+			cleanupErr := batch.Abort()
+			return nil, combineBatchError(err, cleanupErr)
 		}
 		owner, err := inspectOwnedTree(staging)
 		if err != nil {
-			batch.Abort()
-			return nil, err
+			cleanupErr := batch.Abort()
+			return nil, combineBatchError(err, cleanupErr)
 		}
 		batch.Copies[len(batch.Copies)-1].stageOwner = owner
+	}
+	for index := range batch.Copies {
+		copy := &batch.Copies[index]
+		if _, err := os.Lstat(copy.Destination); err == nil {
+			copy.existed = true
+			owner, inspectErr := inspectOwnedTree(copy.Destination)
+			if inspectErr != nil {
+				cleanupErr := batch.Abort()
+				return nil, combineBatchError(inspectErr, cleanupErr)
+			}
+			copy.destOwner = owner
+		} else if !os.IsNotExist(err) {
+			cleanupErr := batch.Abort()
+			return nil, combineBatchError(err, cleanupErr)
+		}
+	}
+	batch.Journal = filepath.Join(filepath.Dir(batch.Copies[0].Destination), ".aikit-batch-"+journalID+".journal")
+	if err := batch.persistJournal("prepared"); err != nil {
+		cleanupErr := batch.Abort()
+		return nil, combineBatchError(err, cleanupErr)
 	}
 	return batch, nil
 }
 
-func (b *Batch) Abort() {
+func (b *Batch) Abort() error {
+	if b.phase != "" && b.phase != "prepared" {
+		return fmt.Errorf("batch phase %q requires RecoverBatches", b.phase)
+	}
+	var first error
 	for i := range b.Copies {
 		copy := &b.Copies[i]
 		if copy.stageOwner.identity != "" {
-			_ = removeOwnedTree(copy.Staging, copy.stageOwner)
+			if err := removeOwnedArtifact(copy.Staging, copy.Quarantine, copy.stageOwner, b.rename); err != nil && !os.IsNotExist(err) && first == nil {
+				first = err
+			}
 		}
 	}
+	if first == nil {
+		if err := b.clearJournal(); err != nil {
+			first = err
+		}
+	}
+	return first
 }
 
 // Commit switches a prepared batch as one recoverable unit. Errors are rolled
@@ -98,40 +153,42 @@ func (b *Batch) Abort() {
 // and the application layer must record/recover any surviving .aikit-batch-*
 // paths before starting a later mutation.
 func (b *Batch) Commit() error {
+	if err := b.prepareMutationJournal(); err != nil {
+		if b.ledgerDriven {
+			return fmt.Errorf("prepare mutation journal; run RecoverBatches: %w", err)
+		}
+		if journalErrorVisible(err) {
+			return fmt.Errorf("prepare mutation journal became visible; run RecoverBatches: %w", err)
+		}
+		return b.withRollback("prepare mutation journal", err, -1)
+	}
 	for i := range b.Copies {
 		copy := &b.Copies[i]
-		if _, err := os.Lstat(copy.Destination); err == nil {
-			copy.existed = true
-			owner, ownerErr := inspectOwnedTree(copy.Destination)
-			if ownerErr != nil {
-				return b.withRollback("record destination identity", ownerErr, i-1)
-			}
-			copy.destOwner = owner
-			backup, tempErr := os.MkdirTemp(filepath.Dir(copy.Destination), ".aikit-batch-backup-"+filepath.Base(copy.Destination)+"-")
-			if tempErr != nil {
-				return b.withRollback("create backup", tempErr, i-1)
-			}
-			if err := os.Remove(backup); err != nil {
-				return b.withRollback("prepare backup", err, i-1)
-			}
-			copy.Backup = backup
+		if copy.existed {
 			if err := b.rename(copy.Destination, copy.Backup); err != nil {
+				if b.ledgerDriven {
+					return fmt.Errorf("backup destination; run RecoverBatches: %w", err)
+				}
 				return b.withRollback("backup destination", err, i-1)
 			}
 			copy.backedUp = true
-			owner, ownerErr = inspectOwnedTree(copy.Backup)
+			owner, ownerErr := inspectOwnedTree(copy.Backup)
 			if ownerErr != nil {
+				if b.ledgerDriven {
+					return fmt.Errorf("record backup identity; run RecoverBatches: %w", ownerErr)
+				}
 				return b.withRollback("record backup identity", ownerErr, i-1)
 			}
 			if owner != copy.destOwner {
+				if b.ledgerDriven {
+					return fmt.Errorf("backup destination changed; run RecoverBatches")
+				}
 				if restoreErr := b.rename(copy.Backup, copy.Destination); restoreErr == nil {
 					copy.backedUp = false
 				}
 				return b.withRollback("backup destination", fmt.Errorf("destination changed before backup; moved object was preserved"), i-1)
 			}
 			copy.backupOwner = owner
-		} else if !os.IsNotExist(err) {
-			return b.withRollback("inspect destination", err, i-1)
 		}
 	}
 
@@ -139,6 +196,9 @@ func (b *Batch) Commit() error {
 	for i := range b.Copies {
 		copy := &b.Copies[i]
 		if err := b.rename(copy.Staging, copy.Destination); err != nil {
+			if b.ledgerDriven {
+				return fmt.Errorf("install batch; run RecoverBatches: %w", err)
+			}
 			if rollbackErr := b.rollback(installed); rollbackErr != nil {
 				return fmt.Errorf("install batch: %v; rollback failed: %w", err, rollbackErr)
 			}
@@ -147,6 +207,9 @@ func (b *Batch) Commit() error {
 		copy.installed = true
 		installed = i
 		if err := verifyOwnedTree(copy.Destination, copy.stageOwner); err != nil {
+			if b.ledgerDriven {
+				return fmt.Errorf("verify installed batch; run RecoverBatches: %w", err)
+			}
 			if restoreErr := b.rename(copy.Destination, copy.Staging); restoreErr == nil {
 				copy.installed = false
 			}
@@ -162,22 +225,47 @@ func (b *Batch) Commit() error {
 	}
 	for parent := range parents {
 		if err := b.SyncDirectory(parent); err != nil {
+			if b.ledgerDriven {
+				return fmt.Errorf("sync batch; run RecoverBatches: %w", err)
+			}
 			if rollbackErr := b.rollback(installed); rollbackErr != nil {
 				return fmt.Errorf("sync batch: %v; rollback failed: %w", err, rollbackErr)
 			}
 			return fmt.Errorf("sync batch: %w", err)
 		}
 	}
+	if err := b.persistJournal("committed"); err != nil {
+		if b.ledgerDriven {
+			return fmt.Errorf("commit batch journal; run RecoverBatches: %w", err)
+		}
+		if journalErrorVisible(err) {
+			return fmt.Errorf("committed journal became visible; run RecoverBatches: %w", err)
+		}
+		return b.withRollback("commit batch journal", err, installed)
+	}
+	if b.ledgerDriven {
+		// The durable ledger is the commit decision. Leave the committed journal
+		// and authenticated backups for RecoverBatches to finalize in that
+		// direction; this also makes a post-return crash recoverable.
+		return nil
+	}
+	cleanupComplete := true
 	for i := range b.Copies {
 		copy := &b.Copies[i]
-		if copy.Backup != "" {
-			if err := removeOwnedTree(copy.Backup, copy.backupOwner); err != nil {
+		if copy.existed {
+			if err := removeOwnedArtifact(copy.Backup, copy.Quarantine, copy.backupOwner, b.rename); err != nil {
 				// The new batch is already installed and synced. A cleanup error
 				// must not trigger a rollback after earlier backups may have been
 				// deleted; retain the identifiable backup for startup recovery.
+				cleanupComplete = false
 				continue
 			}
 			copy.backedUp = false
+		}
+	}
+	if cleanupComplete {
+		if err := b.clearJournal(); err != nil {
+			return fmt.Errorf("clear batch journal: %w", err)
 		}
 	}
 	return nil
@@ -186,6 +274,9 @@ func (b *Batch) Commit() error {
 func (b *Batch) withRollback(stage string, cause error, installed int) error {
 	if rollbackErr := b.rollback(installed); rollbackErr != nil {
 		return fmt.Errorf("%s: %v; rollback failed: %w", stage, cause, rollbackErr)
+	}
+	if err := b.clearJournal(); err != nil {
+		return fmt.Errorf("%s: %v; rollback succeeded but journal cleanup failed: %w", stage, cause, err)
 	}
 	return fmt.Errorf("%s: %w", stage, cause)
 }
@@ -197,7 +288,7 @@ func (b *Batch) rollback(installed int) error {
 		if !copy.installed {
 			continue
 		}
-		if err := quarantineAndRemove(copy.Destination, copy.stageOwner, b.rename); err != nil {
+		if err := quarantineAndRemoveAt(copy.Destination, copy.Quarantine, copy.stageOwner, b.rename); err != nil {
 			if first == nil {
 				first = err
 			}
@@ -231,12 +322,23 @@ func (b *Batch) rollback(installed int) error {
 			}
 		}
 		if copy.stageOwner.identity != "" {
-			if err := removeOwnedTree(copy.Staging, copy.stageOwner); err != nil && !os.IsNotExist(err) && first == nil {
+			if err := removeOwnedArtifact(copy.Staging, copy.Quarantine, copy.stageOwner, b.rename); err != nil && !os.IsNotExist(err) && first == nil {
 				first = err
 			}
 		}
 	}
 	return first
+}
+
+func combineBatchError(cause, cleanup error) error {
+	if cleanup == nil {
+		return cause
+	}
+	return fmt.Errorf("%v; cleanup requires RecoverBatches: %w", cause, cleanup)
+}
+
+func batchArtifactPath(parent, kind, id string, index int) string {
+	return filepath.Join(parent, fmt.Sprintf(".aikit-batch-%s-%s-%d", kind, id, index))
 }
 
 // AtomicCopy validates and installs a skill into a previously absent path.
@@ -425,6 +527,16 @@ func quarantineAndRemove(path string, expected ownedTree, rename func(string, st
 	if err := os.Remove(quarantine); err != nil {
 		return err
 	}
+	return quarantineAndRemoveAt(path, quarantine, expected, rename)
+}
+
+func quarantineAndRemoveAt(path, quarantine string, expected ownedTree, rename func(string, string) error) error {
+	if err := verifyOwnedTree(path, expected); err != nil {
+		return err
+	}
+	if quarantine == "" {
+		return fmt.Errorf("quarantine path is empty")
+	}
 	if err := rename(path, quarantine); err != nil {
 		return err
 	}
@@ -432,6 +544,29 @@ func quarantineAndRemove(path string, expected ownedTree, rename func(string, st
 		return fmt.Errorf("quarantined owned tree retained at %q: %w", quarantine, err)
 	}
 	return nil
+}
+
+// removeOwnedArtifact first moves the exact recorded object to a batch-bound
+// tombstone with no replacement. A concurrently installed object at the old
+// pathname is therefore never deleted. The post-move identity check also
+// ensures the moved object is the one recorded by the journal.
+func removeOwnedArtifact(path, tombstone string, expected ownedTree, rename func(string, string) error) error {
+	if path == "" || expected.identity == "" {
+		return nil
+	}
+	if err := verifyOwnedTree(path, expected); err != nil {
+		return err
+	}
+	if tombstone == "" || tombstone == path {
+		return fmt.Errorf("invalid artifact tombstone path")
+	}
+	if err := rename(path, tombstone); err != nil {
+		return err
+	}
+	if err := verifyOwnedTree(tombstone, expected); err != nil {
+		return fmt.Errorf("moved artifact identity changed; retained at %q: %w", tombstone, err)
+	}
+	return removeOwnedTree(tombstone, expected)
 }
 
 func copyTree(source, destination string) error {
