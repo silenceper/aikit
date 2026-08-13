@@ -536,6 +536,7 @@ Drift:
 - 在已登记项目目录执行无参 `sync` / `status` 仍是全量
 - 存量 hash 相同只入一份并多处 enable；不同则 `local/<name>` 与 `local/<name>-<hash12>`
 - `migrate`：catalog + 显式项目进入空/非空 config；重复执行幂等；冲突不覆盖；默认待 adopt，`--adopt` 走恢复日志；旧文件仍在
+- `migrate --adopt` 遇到现场 skill 与旧 cache 内容不同：不以 cache 覆盖现场，保留 backup 并报告 adopt-recovery
 - CLI 冒烟：`add` → `enable --agent` → `project add` → `enable --project` → `status` 全绿 → `disable` 断链
 - 多 skill/嵌套 skill 仓库分别保存 source_path，update 只重拷目标路径
 - `update --check`：远端完整 HEAD object id ≠ `resolved` 列为可更新；pin 的 tag 不列入；branch/tag 同名按 ref.kind 区分
