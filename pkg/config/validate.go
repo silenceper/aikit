@@ -181,7 +181,7 @@ func (c *Config) validateOperation(operation PendingOperation) error {
 	if !isValidAgent(operation.Scope.Agent) {
 		return fmt.Errorf("unknown scope agent %q", operation.Scope.Agent)
 	}
-	expectedRoot, err := c.operationSkillRoot(operation.Scope)
+	expectedRoot, err := c.operationSkillRoot(operation.Scope, operation.Kind == OperationCleanup)
 	if err != nil {
 		return err
 	}
@@ -219,7 +219,7 @@ func (c *Config) validateOperation(operation PendingOperation) error {
 	return nil
 }
 
-func (c *Config) operationSkillRoot(scope Scope) (string, error) {
+func (c *Config) operationSkillRoot(scope Scope, historicalProjectPath bool) (string, error) {
 	var base string
 	if scope.Project == "" {
 		if scope.ProjectPath != "" {
@@ -232,6 +232,16 @@ func (c *Config) operationSkillRoot(scope Scope) (string, error) {
 		base = home
 	} else {
 		base = scope.ProjectPath
+		if historicalProjectPath && base != "" {
+			parts, ok := agentSkillPath(scope.Agent, true)
+			if !ok {
+				return "", fmt.Errorf("unknown scope agent %q", scope.Agent)
+			}
+			if !filepath.IsAbs(base) {
+				return "", fmt.Errorf("project scope requires an absolute project_path")
+			}
+			return filepath.Join(append([]string{base}, parts...)...), nil
+		}
 		for _, project := range c.Projects {
 			if project.Name != scope.Project {
 				continue

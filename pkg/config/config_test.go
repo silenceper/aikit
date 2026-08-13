@@ -238,6 +238,23 @@ func TestValidateRejectsPendingOperationOutsideScope(t *testing.T) {
 	}
 }
 
+func TestValidateAllowsCleanupAtHistoricalProjectPathAfterRebind(t *testing.T) {
+	oldPath := t.TempDir()
+	newPath := t.TempDir()
+	cfg := New()
+	cfg.Library.Skills = []Skill{{ID: "local/review", Name: "review"}}
+	cfg.Projects = []Project{{Name: "repo", Path: newPath, Agents: []string{"cursor"}}}
+	cfg.PendingOperations = []PendingOperation{{
+		ID: "cleanup-old-path", Kind: OperationCleanup,
+		Scope:   Scope{Project: "repo", ProjectPath: oldPath, Agent: "cursor"},
+		Target:  filepath.Join(oldPath, ".cursor", "skills", "review"),
+		SkillID: "local/review", Reason: "path-rebind",
+	}}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("historical path cleanup rejected: %v", err)
+	}
+}
+
 func TestStoreLoadDefaultsAndCheckpointDurability(t *testing.T) {
 	home := t.TempDir()
 	userHome := t.TempDir()
