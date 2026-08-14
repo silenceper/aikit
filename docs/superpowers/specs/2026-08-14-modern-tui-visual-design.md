@@ -60,8 +60,8 @@ than forcing a narrow split pane.
 
 Below 60 columns, render a single pane with a breadcrumb and a Back action. The
 active collection, details, and modal actions must remain reachable with both
-keyboard and mouse. The navigation divider disappears in this mode; app-bar,
-breadcrumb, and footer dividers remain.
+keyboard and mouse. The navigation divider disappears in this mode; only the
+app-bar and footer dividers remain. The breadcrumb does not add another line.
 
 The top app bar contains only `aikit`, the current context, and scan/busy
 status. The bottom bar shows only actions valid for the current focus.
