@@ -16,7 +16,7 @@ import (
 func (a *App) EditProject(ctx context.Context, request ProjectEditRequest) (Result, error) {
 	var output Result
 	err := a.deps.Store.WithLock(ctx, func(tx *config.Tx) error {
-		if err := a.beforeMutation(ctx, tx.Config.Library.Skills); err != nil {
+		if err := a.beforeMutation(ctx, tx.Config); err != nil {
 			return err
 		}
 		if request.Project == "" {
@@ -144,7 +144,7 @@ func (a *App) RemoveProject(ctx context.Context, request ProjectRemoveRequest) (
 	}
 	var output Result
 	err := a.deps.Store.WithLock(ctx, func(tx *config.Tx) error {
-		if err := a.beforeMutation(ctx, tx.Config.Library.Skills); err != nil {
+		if err := a.beforeMutation(ctx, tx.Config); err != nil {
 			return err
 		}
 		index := -1
@@ -224,6 +224,22 @@ func (a *App) PreviewProjectEdit(ctx context.Context, request ProjectEditRequest
 		return ProjectEditPreview{}, err
 	}
 	copy := cloneConfig(cfg)
+	if request.Project == "" {
+		if request.Name == "" || request.Path == "" {
+			return ProjectEditPreview{}, fmt.Errorf("new project name and path are required")
+		}
+		path, err := canonicalInputPath(request.Path)
+		if err != nil {
+			return ProjectEditPreview{}, err
+		}
+		project := config.Project{Name: request.Name, Path: path, Agents: append([]string(nil), request.AddAgents...), AgentBindings: map[string]config.Binding{}}
+		copy.Projects = append(copy.Projects, project)
+		if err := validatePreviewConfig(copy); err != nil {
+			return ProjectEditPreview{}, err
+		}
+		next := link.BuildPlan(a.deps.Paths.LibrarySkills, buildTargets(copy, a.deps.UserHome), copy.PendingOperations, link.Selector{Project: project.Name})
+		return ProjectEditPreview{Next: next}, nil
+	}
 	project, err := findProject(copy, request.Project)
 	if err != nil {
 		return ProjectEditPreview{}, err
@@ -249,10 +265,7 @@ func (a *App) PreviewProjectEdit(ctx context.Context, request ProjectEditRequest
 		project.Agents = removeValue(project.Agents, name)
 		delete(project.AgentBindings, name)
 	}
-	if err := copy.Validate(); err != nil {
-		return ProjectEditPreview{}, err
-	}
-	if err := validateEffective(copy); err != nil {
+	if err := validatePreviewConfig(copy); err != nil {
 		return ProjectEditPreview{}, err
 	}
 	var operations []config.PendingOperation
@@ -267,6 +280,54 @@ func (a *App) PreviewProjectEdit(ctx context.Context, request ProjectEditRequest
 	cleanupPlan := link.BuildPlan(a.deps.Paths.LibrarySkills, nil, operations, link.Selector{})
 	nextPlan := link.BuildPlan(a.deps.Paths.LibrarySkills, buildTargets(copy, a.deps.UserHome), nil, link.Selector{Project: project.Name})
 	return ProjectEditPreview{Cleanup: cleanupPlan, Next: nextPlan}, nil
+}
+
+func (a *App) PreviewProjectRemove(ctx context.Context, request ProjectRemoveRequest) (MutationPreview, error) {
+	if request.Project == "" {
+		return MutationPreview{}, fmt.Errorf("project is required")
+	}
+	loaded, err := a.deps.Store.Load(ctx)
+	if err != nil {
+		return MutationPreview{}, err
+	}
+	next := cloneConfig(loaded)
+	project, err := findProject(next, request.Project)
+	if err != nil {
+		return MutationPreview{}, err
+	}
+	old := *project
+	old.Agents = append([]string(nil), project.Agents...)
+	old.AgentBindings = cloneBindings(project.AgentBindings)
+	selectors := []link.Selector{{Project: old.Name}}
+	preview := MutationPreview{
+		Title:                "Remove project",
+		Summary:              fmt.Sprintf("Remove project %q and clean its managed paths", old.Name),
+		AffectedScopes:       affectedScopes(next, selectors),
+		RequiresConfirmation: true,
+	}
+	for _, scope := range preview.AffectedScopes {
+		agentName := scope.Agent
+		if agentName == "" {
+			agentName = "common"
+		}
+		preview.References = append(preview.References, "project:"+old.Name+":"+agentName)
+	}
+	cleanup, err := cleanupForProject(next, old, old.Name, nil, "project removed")
+	if err != nil {
+		return MutationPreview{}, err
+	}
+	for i := range next.Projects {
+		if next.Projects[i].Name == old.Name {
+			next.Projects = append(next.Projects[:i], next.Projects[i+1:]...)
+			break
+		}
+	}
+	if err := validatePreviewConfig(next); err != nil {
+		return MutationPreview{}, err
+	}
+	preview.Plan = link.BuildPlan(a.deps.Paths.LibrarySkills, nil, cleanup, link.Selector{})
+	addPlanDiagnostics(&preview)
+	return preview, nil
 }
 
 func cloneConfig(cfg *config.Config) *config.Config {

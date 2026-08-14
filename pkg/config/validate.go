@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 )
@@ -97,6 +98,8 @@ func (c *Config) Validate() error {
 	}
 
 	operationIDs := make(map[string]struct{}, len(c.PendingOperations))
+	transactionPhases := make(map[string]map[TransactionPhase]struct{})
+	operationsByID := make(map[string]PendingOperation, len(c.PendingOperations))
 	for i, operation := range c.PendingOperations {
 		if err := c.validateOperation(operation); err != nil {
 			return fmt.Errorf("pending_operations[%d]: %w", i, err)
@@ -105,6 +108,59 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("duplicate pending operation id %q", operation.ID)
 		}
 		operationIDs[operation.ID] = struct{}{}
+		operationsByID[operation.ID] = operation
+		if operation.TransactionID != "" {
+			phases := transactionPhases[operation.TransactionID]
+			if phases == nil {
+				phases = make(map[TransactionPhase]struct{})
+				transactionPhases[operation.TransactionID] = phases
+			}
+			phases[operation.TransactionPhase] = struct{}{}
+		}
+	}
+	for transactionID, phases := range transactionPhases {
+		if len(phases) > 1 {
+			_, source := phases[TransactionRollbackSource]
+			_, rollback := phases[TransactionRollback]
+			if len(phases) != 2 || !source || !rollback {
+				return fmt.Errorf("transaction %q mixes incompatible phases", transactionID)
+			}
+		}
+	}
+	for _, operation := range c.PendingOperations {
+		if operation.ParentOperationID == "" {
+			continue
+		}
+		parent, exists := operationsByID[operation.ParentOperationID]
+		if !exists || operation.TransactionPhase != TransactionRollback || parent.TransactionPhase != TransactionRollbackSource || parent.TransactionID != operation.TransactionID {
+			return fmt.Errorf("pending operation %q has invalid rollback-source parent %q", operation.ID, operation.ParentOperationID)
+		}
+	}
+	childrenBySource := make(map[string][]PendingOperation)
+	for _, operation := range c.PendingOperations {
+		if operation.ParentOperationID != "" {
+			childrenBySource[operation.ParentOperationID] = append(childrenBySource[operation.ParentOperationID], operation)
+		}
+	}
+	for _, source := range c.PendingOperations {
+		if source.TransactionPhase != TransactionRollbackSource {
+			continue
+		}
+		if source.ParentOperationID != "" {
+			return fmt.Errorf("rollback source %q cannot have a parent operation", source.ID)
+		}
+		if source.Rollback == nil {
+			return fmt.Errorf("rollback source %q is missing its embedded rollback intent", source.ID)
+		}
+		children := childrenBySource[source.ID]
+		if len(children) != 1 {
+			return fmt.Errorf("rollback source %q requires exactly one top-level child, found %d", source.ID, len(children))
+		}
+		canonicalChild := children[0]
+		canonicalChild.ParentOperationID = ""
+		if !reflect.DeepEqual(canonicalChild, *source.Rollback) {
+			return fmt.Errorf("rollback source %q child does not match its embedded rollback intent", source.ID)
+		}
 	}
 	return nil
 }
@@ -169,7 +225,7 @@ func (c *Config) validateOperation(operation PendingOperation) error {
 	if operation.ID == "" {
 		return fmt.Errorf("id is empty")
 	}
-	if operation.Kind != OperationCleanup && operation.Kind != OperationAdopt {
+	if operation.Kind != OperationCleanup && operation.Kind != OperationAdopt && operation.Kind != OperationReconcile {
 		return fmt.Errorf("invalid kind %q", operation.Kind)
 	}
 	if !cleanAbsolute(operation.Target) {
@@ -214,6 +270,51 @@ func (c *Config) validateOperation(operation PendingOperation) error {
 		}
 		if len(operation.JournalHash) != 64 || !hexObjectID.MatchString(operation.JournalHash) {
 			return fmt.Errorf("adopt journal_hash must be a full sha256 digest")
+		}
+	}
+	if (operation.TransactionID == "") != (operation.TransactionPhase == "") {
+		return fmt.Errorf("transaction id and phase must be set together")
+	}
+	if operation.TransactionPhase != "" && operation.TransactionPhase != TransactionForward && operation.TransactionPhase != TransactionRollbackSource && operation.TransactionPhase != TransactionRollback {
+		return fmt.Errorf("invalid transaction phase %q", operation.TransactionPhase)
+	}
+	if operation.Kind == OperationCleanup || operation.Kind == OperationReconcile {
+		if operation.Expected == nil && !operation.ExpectedAbsent {
+			return fmt.Errorf("%s expected object or expected_absent is required", operation.Kind)
+		}
+		if operation.Expected != nil {
+			if !safeRelativeSlashPath(operation.ExpectedSkillID) {
+				return fmt.Errorf("unsafe expected skill id %q", operation.ExpectedSkillID)
+			}
+			if operation.Expected.Kind != "symlink" || operation.Expected.LinkTarget == "" || len(operation.Expected.Hash) != 64 || !hexObjectID.MatchString(operation.Expected.Hash) {
+				return fmt.Errorf("reconcile expected managed-link fingerprint is invalid")
+			}
+		} else if operation.ExpectedSkillID != "" {
+			return fmt.Errorf("reconcile expected skill id requires a fingerprint")
+		}
+		prefix := ".aikit-reconcile-"
+		if operation.Kind == OperationCleanup {
+			prefix = ".aikit-cleanup-"
+		}
+		if !cleanAbsolute(operation.Tombstone) || filepath.Dir(operation.Tombstone) != filepath.Dir(operation.Target) || filepath.Base(operation.Tombstone) != prefix+operation.ID {
+			return fmt.Errorf("%s tombstone must be its deterministic reserved sibling", operation.Kind)
+		}
+	}
+	if operation.Rollback != nil {
+		if operation.TransactionPhase != TransactionForward && operation.TransactionPhase != TransactionRollbackSource {
+			return fmt.Errorf("rollback intent requires a forward transaction")
+		}
+		if operation.Rollback.Rollback != nil {
+			return fmt.Errorf("nested rollback intent is invalid")
+		}
+		if operation.Rollback.Scope != operation.Scope || operation.Rollback.Target != operation.Target {
+			return fmt.Errorf("rollback intent must inherit scope and target")
+		}
+		if operation.Rollback.TransactionID != operation.TransactionID || operation.Rollback.TransactionPhase != TransactionRollback {
+			return fmt.Errorf("rollback intent must share transaction id and use rollback phase")
+		}
+		if err := c.validateOperation(*operation.Rollback); err != nil {
+			return fmt.Errorf("rollback intent: %w", err)
 		}
 	}
 	return nil

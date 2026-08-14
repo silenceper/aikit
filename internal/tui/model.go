@@ -2,48 +2,113 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"sort"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/silenceper/aikit/internal/agent"
 	"github.com/silenceper/aikit/internal/app"
-	"github.com/silenceper/aikit/internal/status"
 	"github.com/silenceper/aikit/internal/updatecheck"
-	"github.com/silenceper/aikit/pkg/config"
 )
 
 type View string
 
 const (
-	ViewLibrary  View = "library"
+	ViewOverview   View = "overview"
+	ViewLibrary    View = "library"
+	ViewWorkspaces View = "workspaces"
+	ViewPresets    View = "presets"
+	ViewMigration  View = "migration"
+	ViewStatus     View = "status"
+
+	// Legacy launch aliases are accepted at the command boundary and open the
+	// corresponding subsection of Workspaces.
 	ViewAgents   View = "agents"
 	ViewProjects View = "projects"
-	ViewPresets  View = "presets"
-	ViewStatus   View = "status"
 )
+
+var topViews = []View{ViewOverview, ViewLibrary, ViewWorkspaces, ViewPresets, ViewMigration, ViewStatus}
 
 type Action string
 
 const (
-	ActionNone          Action = ""
-	ActionEnable        Action = "enable"
-	ActionUpdate        Action = "update"
-	ActionScan          Action = "scan"
-	ActionRemoveSkill   Action = "remove skill"
-	ActionRemoveProject Action = "remove project"
+	ActionNone              Action = ""
+	ActionEnable            Action = "enable"
+	ActionUpdate            Action = "update"
+	ActionScan              Action = "adopt"
+	ActionBinding           Action = "binding"
+	ActionAdd               Action = "add source"
+	ActionPreset            Action = "preset"
+	ActionForcePresetDelete Action = "force delete preset"
+	ActionBatch             Action = "batch"
+	ActionRef               Action = "change ref"
+	ActionSync              Action = "sync"
+	ActionRemoveSkill       Action = "remove skill"
+	ActionForceRemove       Action = "force remove skill"
+	ActionForceBatchRemove  Action = "force remove selected"
+	ActionProjectEdit       Action = "project edit"
+	ActionRemoveProject     Action = "remove project"
+	ActionRecovery          Action = "resume recovery"
 )
 
 type Mode string
 
 const (
-	ModeTable   Mode = "table"
-	ModeFilter  Mode = "filter"
-	ModeUpdates Mode = "updates"
-	ModeScan    Mode = "scan"
-	ModeConfirm Mode = "confirm"
+	ModeTable         Mode = "table"
+	ModeFilter        Mode = "filter"
+	ModeUpdates       Mode = "updates"
+	ModeScan          Mode = "scan"
+	ModeConfirm       Mode = "confirm"
+	ModeConfiguration Mode = "configuration"
+	ModeInput         Mode = "input"
+	ModeAddSelect     Mode = "add-select"
+	ModeMore          Mode = "more"
+	ModeErrorDetail   Mode = "error-detail"
 )
+
+type Focus string
+
+const (
+	FocusList    Focus = "list"
+	FocusDetail  Focus = "detail"
+	FocusActions Focus = "actions"
+)
+
+type LibraryStateFilter string
+
+const (
+	LibraryStateAll             LibraryStateFilter = "all"
+	LibraryStateUpdateAvailable LibraryStateFilter = "update-available"
+	LibraryStateManaged         LibraryStateFilter = "managed"
+)
+
+type LibrarySourceFilter string
+
+const (
+	LibrarySourceAll   LibrarySourceFilter = "all"
+	LibrarySourceGit   LibrarySourceFilter = "git"
+	LibrarySourceLocal LibrarySourceFilter = "local"
+)
+
+type inputKind string
+
+const (
+	inputAddSource       inputKind = "add-source"
+	inputPresetCreate    inputKind = "preset-create"
+	inputPresetDuplicate inputKind = "preset-duplicate"
+	inputPresetRename    inputKind = "preset-rename"
+	inputPresetApply     inputKind = "preset-apply"
+	inputRefChange       inputKind = "ref-change"
+	inputBatchScope      inputKind = "batch-scope"
+	inputProjectCreate   inputKind = "project-create"
+	inputProjectEdit     inputKind = "project-edit"
+)
+
+type inputState struct {
+	Kind   inputKind
+	Prompt string
+	Value  string
+}
 
 type Scope struct {
 	Agent   string
@@ -52,18 +117,58 @@ type Scope struct {
 	Level   string
 }
 
+type InventoryState struct {
+	Generation uint64
+	Items      []app.ScanItem
+	Issues     []app.ScanIssue
+	Completed  int
+	Total      int
+	Loading    bool
+	Complete   bool
+}
+
 type row struct {
-	ID      string
-	Name    string
-	Origin  string
-	Target  string
-	Source  string
-	State   string
-	Detail  string
-	Enabled bool
+	Key      string
+	ID       string
+	Name     string
+	Origin   string
+	Target   string
+	Source   string
+	State    string
+	Action   string
+	Detail   string
+	Enabled  bool
+	Severity rowSeverity
+}
+
+type rowSeverity uint8
+
+const (
+	rowSeverityInfo rowSeverity = iota
+	rowSeveritySuccess
+	rowSeverityWarning
+	rowSeverityConflict
+	rowSeverityError
+	rowSeverityRecovery
+)
+
+func severityRank(severity rowSeverity) int {
+	switch severity {
+	case rowSeverityRecovery, rowSeverityError:
+		return 0
+	case rowSeverityConflict:
+		return 1
+	case rowSeverityWarning:
+		return 2
+	default:
+		return 3
+	}
 }
 
 func (r row) selectionKey() string {
+	if r.Key != "" {
+		return r.Key
+	}
 	if r.Target != "" {
 		return r.Origin + "\x00" + r.Target
 	}
@@ -71,52 +176,101 @@ func (r row) selectionKey() string {
 }
 
 type Model struct {
-	ctx       context.Context
-	service   app.Service
-	migration app.MigrationService
-	action    Action
+	ctx             context.Context
+	service         app.Service
+	migration       app.MigrationService
+	action          Action
+	inventoryCancel context.CancelFunc
+	inventoryEvents <-chan app.InventoryEvent
 
-	ActiveView   View
-	Mode         Mode
-	Scope        Scope
-	Cursor       int
-	Filter       string
-	Help         bool
-	Detail       bool
-	Width        int
-	Height       int
-	Status       string
-	Err          string
-	Busy         bool
-	Snapshot     app.Snapshot
-	Scan         app.ScanResult
-	Selected     map[string]bool
-	confirm      Action
-	pendingID    string
-	filterParent Mode
+	ActiveView          View
+	Mode                Mode
+	Focus               Focus
+	ActionIndex         int
+	Scope               Scope
+	Cursor              int
+	Scroll              int
+	DetailScroll        int
+	OverlayScroll       int
+	errorDetailParent   Mode
+	Filter              string
+	LibraryStateFilter  LibraryStateFilter
+	LibrarySourceFilter LibrarySourceFilter
+	Help                bool
+	Detail              bool
+	Width               int
+	Height              int
+	Status              string
+	Err                 string
+	Busy                bool
+	MutationBusy        bool
+	Snapshot            app.Snapshot
+	Scan                app.ScanResult
+	Inventory           InventoryState
+	Selected            map[string]bool
+	Ignored             map[string]bool
+	Config              app.ConfigurationDetail
+	ConfigValidation    app.ConfigurationValidation
+	SkillDetail         app.SkillDetail
+	Preview             app.MutationPreview
+	PlanPreview         app.Result
+	AddPreview          app.AddPreview
+	Compare             app.CompareResult
+	BatchResult         app.BatchResult
+	ProjectPreview      app.ProjectEditPreview
+	ProjectResult       app.Result
+	RecoveryPreview     app.RecoveryPreview
+	RecoveryResult      app.RecoveryResult
+	FullError           string
+	UpdateWarnings      []string
+	UpdateFailures      []updatecheck.Result
+	Input               inputState
+	confirm             Action
+	pendingID           string
+	pendingDetailID     string
+	pendingBinding      app.BindingPreviewRequest
+	pendingRemove       app.RemoveRequest
+	pendingScan         app.ScanRequest
+	pendingSync         app.SyncRequest
+	pendingAdd          app.AddRequest
+	pendingPreset       app.PresetMutationRequest
+	pendingBatch        app.BatchRequest
+	pendingUpdate       app.UpdateRequest
+	pendingProject      app.ProjectEditRequest
+	pendingRecovery     app.RecoveryRequest
+	forceAcknowledged   bool
+	filterParent        Mode
 }
 
 func NewModel(ctx context.Context, service app.Service, migration app.MigrationService, initialView View, initialAction Action) Model {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	scope := Scope{}
+	switch initialView {
+	case ViewAgents:
+		initialView, scope.Level = ViewWorkspaces, "workspace-agents"
+	case ViewProjects:
+		initialView, scope.Level = ViewWorkspaces, "workspace-projects"
+	}
 	if !validView(initialView) {
-		initialView = ViewLibrary
+		initialView = ViewOverview
 	}
 	return Model{
 		ctx: ctx, service: service, migration: migration, action: initialAction,
-		ActiveView: initialView, Mode: ModeTable, Width: 80, Height: 24,
-		Status: "loading snapshot…", Selected: make(map[string]bool),
+		ActiveView: initialView, Mode: ModeTable, Focus: FocusList, Scope: scope, Width: 80, Height: 24,
+		Status: "Loading local snapshot...", Selected: make(map[string]bool), Ignored: make(map[string]bool),
+		LibraryStateFilter: LibraryStateAll, LibrarySourceFilter: LibrarySourceAll,
 	}
 }
 
 func validView(view View) bool {
-	switch view {
-	case ViewLibrary, ViewAgents, ViewProjects, ViewPresets, ViewStatus:
-		return true
-	default:
-		return false
+	for _, current := range topViews {
+		if current == view {
+			return true
+		}
 	}
+	return false
 }
 
 func (m Model) Init() tea.Cmd { return snapshotCmd(m.ctx, m.service) }
@@ -124,86 +278,383 @@ func (m Model) Init() tea.Cmd { return snapshotCmd(m.ctx, m.service) }
 func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := message.(type) {
 	case tea.WindowSizeMsg:
-		m.Width, m.Height = msg.Width, msg.Height
+		m.Width, m.Height = max(0, msg.Width), max(0, msg.Height)
+		m.ensureVisible()
 		return m, nil
 	case snapshotMsg:
 		m.Busy = false
 		if msg.err != nil {
 			m.Err = msg.err.Error()
-			m.Status = "snapshot failed"
+			m.Status = "Snapshot failed"
 			return m, nil
 		}
 		m.Snapshot = msg.snapshot
 		m.Err = strings.Join(msg.snapshot.Updates.Warnings, "; ")
-		m.Status = "ready"
+		m.Status = "Local snapshot ready"
 		action := m.action
 		m.action = ActionNone
 		switch action {
 		case ActionUpdate:
 			m.openUpdates()
 		case ActionScan:
-			m.Busy = true
-			m.Status = "scanning…"
-			return m, scanCmd(m.ctx, m.migration, app.ScanRequest{All: true, DryRun: true})
+			m.switchView(ViewMigration)
 		case ActionEnable:
-			m.ActiveView = ViewAgents
+			m.ActiveView, m.Scope.Level = ViewWorkspaces, "workspace-agents"
 		}
 		m.clampCursor()
-		return m, nil
+		if len(msg.snapshot.Config.PendingOperations) > 0 {
+			ids := make([]string, 0, len(msg.snapshot.Config.PendingOperations))
+			for _, operation := range msg.snapshot.Config.PendingOperations {
+				ids = append(ids, operation.ID)
+			}
+			m.pendingRecovery = app.RecoveryRequest{OperationIDs: ids}
+			m.Busy, m.Status = true, "Building recovery preview..."
+			return m, recoveryPreviewCmd(m.ctx, m.service, m.pendingRecovery)
+		}
+		return m.startInventory()
+	case inventoryMsg:
+		if !msg.ok || msg.event.Generation != m.Inventory.Generation {
+			return m, nil
+		}
+		activeKey := m.activeKey()
+		viewportOffset := m.Cursor - m.Scroll
+		m.mergeInventory(msg.event)
+		m.restoreActiveKey(activeKey)
+		if m.ActiveView == ViewOverview && activeKey != "" {
+			m.Scroll = max(0, m.Cursor-viewportOffset)
+			m.Scroll = m.visibleRowsLayout(ComputeLayout(m.Width, m.Height)).Start
+		}
+		if msg.event.Done {
+			m.Inventory.Loading, m.Inventory.Complete = false, true
+			m.Status = fmt.Sprintf("Inventory complete: %d roots", m.Inventory.Completed)
+			return m, nil
+		}
+		return m, waitInventoryCmd(m.inventoryEvents)
 	case scanMsg:
 		m.Busy = false
 		if msg.err != nil {
 			m.Err = msg.err.Error()
-			m.Status = "scan failed"
+			m.Status = "Migration preview failed"
 			return m, nil
 		}
 		m.Scan = msg.result
-		m.Mode = ModeScan
-		m.Cursor = 0
-		m.Selected = make(map[string]bool)
-		m.Status = fmt.Sprintf("found %d candidates", len(msg.result.Items))
+		m.ActiveView = ViewMigration
+		if msg.name == "migration preview" {
+			m.enterConfirm(ActionScan)
+			m.Status = "Review the exact migration plan, then confirm"
+		} else {
+			m.Mode = ModeScan
+			m.Cursor, m.Scroll = 0, 0
+			m.Selected = make(map[string]bool)
+			m.Status = fmt.Sprintf("Found %d migration candidates", len(msg.result.Items))
+		}
 		m.Err = strings.Join(msg.result.Warnings, "; ")
 		return m, nil
-	case operationMsg:
+	case skillDetailMsg:
+		if msg.skillID != m.pendingDetailID {
+			return m, nil
+		}
+		m.pendingDetailID = ""
+		if msg.err != nil {
+			m.Err, m.Status = msg.err.Error(), "Skill detail failed"
+			return m, nil
+		}
+		m.SkillDetail, m.Detail, m.DetailScroll = msg.detail, true, 0
+		m.Status = "Skill detail loaded"
+		return m, nil
+	case mutationPreviewMsg:
 		m.Busy = false
 		if msg.err != nil {
+			m.Err, m.Status = msg.err.Error(), title(msg.name)+" preview failed"
+			return m, nil
+		}
+		m.Preview = msg.preview
+		m.enterConfirm(m.confirm)
+		m.Status = "Review the exact change, then confirm"
+		return m, nil
+	case batchRemovePreviewMsg:
+		m.Busy = false
+		if msg.err != nil {
+			m.Err, m.Status = msg.err.Error(), "Remove selected preview failed"
+			return m, nil
+		}
+		m.Preview = msg.preview
+		m.enterConfirm(ActionBatch)
+		m.Status = "Review every selected removal, then confirm"
+		return m, nil
+	case syncPreviewMsg:
+		m.Busy = false
+		if msg.err != nil {
+			m.Err, m.Status = msg.err.Error(), "Sync preview failed"
+			return m, nil
+		}
+		m.PlanPreview = msg.result
+		m.enterConfirm(ActionSync)
+		m.Status = "Review the exact sync plan, then confirm"
+		return m, nil
+	case addPreviewMsg:
+		m.Busy = false
+		if msg.err != nil {
+			m.Err, m.Status = msg.err.Error(), "Add source preview failed"
+			return m, nil
+		}
+		m.AddPreview = msg.preview
+		m.Selected = make(map[string]bool)
+		m.Cursor, m.Scroll = 0, 0
+		if msg.preview.NetworkRequired {
+			m.enterConfirm(ActionAdd)
+			m.Preview = app.MutationPreview{
+				Title: "Add remote source", Summary: "Remote discovery needs network access before adding this source.",
+				Warnings: append([]string(nil), msg.preview.Warnings...), RequiresConfirmation: true,
+			}
+			m.Status = "Confirm network-enabled add"
+			return m, nil
+		}
+		m.Mode = ModeAddSelect
+		m.Status = fmt.Sprintf("Select from %d discovered skill(s)", len(msg.preview.Candidates))
+		return m, nil
+	case compareMsg:
+		m.Busy = false
+		if msg.err != nil {
+			m.Err, m.Status = msg.err.Error(), "Compare failed"
+			return m, nil
+		}
+		m.Compare, m.Detail, m.DetailScroll = msg.result, true, 0
+		m.Status = "Comparison ready"
+		return m, nil
+	case updateCheckMsg:
+		m.Busy = false
+		if msg.err != nil {
+			m.Err, m.Status = msg.err.Error(), "Update check failed"
+			return m, nil
+		}
+		m.Snapshot.Updates = msg.result.Updates
+		m.UpdateWarnings = append([]string(nil), msg.result.Updates.Warnings...)
+		m.UpdateFailures = nil
+		for _, item := range msg.result.Updates.Results {
+			if item.State == updatecheck.StateCheckFailed {
+				m.UpdateFailures = append(m.UpdateFailures, item)
+			}
+		}
+		m.openUpdates()
+		if problems := len(m.UpdateWarnings) + len(m.UpdateFailures); problems > 0 {
+			m.Status = fmt.Sprintf("Update check completed with %d problem(s); review details", problems)
+		} else {
+			m.Status = fmt.Sprintf("Update check complete: %d update(s) available", len(m.rows()))
+		}
+		return m, nil
+	case configurationMsg:
+		if msg.err != nil {
 			m.Err = msg.err.Error()
-			m.Status = msg.name + " failed"
+			return m, nil
+		}
+		m.Config = msg.detail
+		return m, nil
+	case configurationValidationMsg:
+		m.Busy = false
+		m.ConfigValidation = msg.result
+		if msg.err != nil {
+			m.Err, m.Status = msg.err.Error(), "Configuration invalid; review details"
 			return m, nil
 		}
 		m.Err = ""
-		m.Status = msg.name + " completed"
+		m.Status = "Configuration valid"
+		return m, nil
+	case configurationReloadMsg:
+		if msg.err != nil {
+			m.Busy = false
+			m.Err, m.Status = msg.err.Error(), "Configuration reload failed"
+			return m, nil
+		}
+		m.Config = msg.detail
+		m.Status = "Reloading offline snapshot..."
+		return m, offlineSnapshotCmd(m.ctx, m.service)
+	case projectPreviewMsg:
+		m.Busy = false
+		if msg.err != nil {
+			m.Err, m.Status = msg.err.Error(), "Project edit preview failed"
+			return m, nil
+		}
+		m.ProjectPreview = msg.preview
+		m.enterConfirm(ActionProjectEdit)
+		m.Status = "Review cleanup and next project paths, then confirm"
+		return m, nil
+	case projectOperationMsg:
+		m.Busy, m.MutationBusy = false, false
+		m.ProjectResult = msg.result
+		m.Mode, m.confirm = ModeTable, ActionNone
+		m.Input = inputState{}
+		if msg.err != nil {
+			if pending, ok := pendingRecoveryFromError(msg.err); ok {
+				return m.openRecoveryPreview(pending.Operations)
+			}
+			m.Err, m.Status = msg.err.Error(), title(msg.name)+" failed; review details"
+			return m, nil
+		}
+		m.Err = ""
+		if msg.result.Exit == app.ExitPartial || len(msg.result.Plan.Issues)+len(msg.result.Link.Failures)+len(msg.result.Link.Issues) > 0 {
+			m.Status = title(msg.name) + " partial; review issues"
+		} else {
+			m.Status = title(msg.name) + " completed"
+		}
+		return m, snapshotCmd(m.ctx, m.service)
+	case recoveryPreviewMsg:
+		m.Busy = false
+		if msg.err != nil {
+			m.Err, m.Status = msg.err.Error(), "Recovery preview failed"
+			return m, nil
+		}
+		m.RecoveryPreview = msg.preview
+		m.pendingRecovery.OperationIDs = recoveryOperationIDs(msg.preview.Operations)
+		m.enterConfirm(ActionRecovery)
+		m.Status = "Review recovery and resume exact operations"
+		return m, nil
+	case recoveryOperationMsg:
+		m.Busy, m.MutationBusy = false, false
+		m.RecoveryResult = msg.result
+		m.Mode, m.confirm = ModeTable, ActionNone
+		if msg.err != nil {
+			m.Err, m.Status = msg.err.Error(), "Recovery resume failed; review issues"
+			return m, nil
+		}
+		m.Err = ""
+		m.Status = fmt.Sprintf("Recovery resumed: %d completed", len(msg.result.Completed))
+		return m, snapshotCmd(m.ctx, m.service)
+	case operationMsg:
+		m.Busy, m.MutationBusy = false, false
+		if msg.err != nil {
+			if pending, ok := pendingRecoveryFromError(msg.err); ok {
+				return m.openRecoveryPreview(pending.Operations)
+			}
+			m.Err = msg.err.Error()
+			m.Status = title(msg.name) + " failed"
+			return m, nil
+		}
+		m.Err = ""
 		if msg.name == "update" {
-			m.Status = "updated selected skills"
+			m.Status = "Updated selected skills"
+		} else {
+			m.Status = title(msg.name) + " completed"
 		}
 		m.Mode = ModeTable
 		m.confirm = ActionNone
+		m.Preview = app.MutationPreview{}
+		m.PlanPreview = app.Result{}
+		m.AddPreview = app.AddPreview{}
+		m.Input = inputState{}
+		m.forceAcknowledged = false
 		m.Selected = make(map[string]bool)
+		return m, snapshotCmd(m.ctx, m.service)
+	case batchOperationMsg:
+		m.Busy, m.MutationBusy = false, false
+		m.BatchResult = msg.result
+		m.Mode, m.confirm = ModeTable, ActionNone
+		m.Selected = make(map[string]bool)
+		m.Preview = app.MutationPreview{}
+		if msg.err != nil {
+			if pending, ok := pendingRecoveryFromError(msg.err); ok {
+				return m.openRecoveryPreview(pending.Operations)
+			}
+			m.Err = msg.err.Error()
+			if msg.result.Changed {
+				m.Status = title(msg.name) + " failed after changes; review details"
+			} else {
+				m.Status = title(msg.name) + " failed; review details"
+			}
+			return m, nil
+		}
+		m.Err = ""
+		if len(msg.result.Issues) > 0 || msg.result.Exit == app.ExitPartial {
+			m.Status = fmt.Sprintf("%s completed with %d issue(s); review details", title(msg.name), len(msg.result.Issues))
+		} else {
+			m.Status = title(msg.name) + " completed"
+		}
 		return m, snapshotCmd(m.ctx, m.service)
 	case tea.KeyMsg:
 		return m.updateKey(msg)
+	case tea.MouseMsg:
+		return m.updateMouse(msg)
 	}
 	return m, nil
 }
 
+func (m Model) startInventory() (tea.Model, tea.Cmd) {
+	if m.inventoryCancel != nil {
+		m.inventoryCancel()
+	}
+	m.Inventory.Generation++
+	m.Inventory.Items = nil
+	m.Inventory.Issues = nil
+	m.Inventory.Completed = 0
+	m.Inventory.Total = 0
+	m.Inventory.Loading = true
+	m.Inventory.Complete = false
+	m.Scroll, m.Cursor = 0, 0
+	if m.migration == nil {
+		m.Inventory.Loading = false
+		m.Err = errUnavailable("migration service").Error()
+		return m, nil
+	}
+	ctx, cancel := context.WithCancel(m.ctx)
+	m.inventoryCancel = cancel
+	m.inventoryEvents = m.migration.Inventory(ctx, app.InventoryRequest{Generation: m.Inventory.Generation, AllProjects: true})
+	m.Status = "Scanning local skills..."
+	return m, waitInventoryCmd(m.inventoryEvents)
+}
+
+func (m *Model) mergeInventory(event app.InventoryEvent) {
+	index := make(map[string]int, len(m.Inventory.Items))
+	for i := range m.Inventory.Items {
+		index[m.Inventory.Items[i].Key] = i
+	}
+	for _, item := range event.Items {
+		if i, ok := index[item.Key]; ok {
+			m.Inventory.Items[i] = item
+			continue
+		}
+		index[item.Key] = len(m.Inventory.Items)
+		m.Inventory.Items = append(m.Inventory.Items, item)
+	}
+	for _, issue := range event.Issues {
+		if !containsIssue(m.Inventory.Issues, issue) {
+			m.Inventory.Issues = append(m.Inventory.Issues, issue)
+		}
+	}
+	m.Inventory.Completed = max(m.Inventory.Completed, event.Completed)
+	m.Inventory.Total = max(m.Inventory.Total, event.Total)
+}
+
+func containsIssue(issues []app.ScanIssue, wanted app.ScanIssue) bool {
+	for _, issue := range issues {
+		if issue.State == wanted.State && issue.Origin == wanted.Origin && issue.Path == wanted.Path && issue.Message == wanted.Message {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *Model) openUpdates() {
 	m.Mode = ModeUpdates
+	m.Focus, m.ActionIndex = FocusList, 0
 	m.Scope = Scope{}
-	m.Cursor = 0
-	m.Detail = false
-	m.Help = false
+	m.Cursor, m.Scroll = 0, 0
+	m.Detail, m.Help = false, false
+	m.DetailScroll = 0
 	m.Selected = make(map[string]bool)
-	m.Status = "select updates with space"
+	m.Status = "Select updates"
 }
 
 func (m *Model) switchView(view View) {
-	m.ActiveView = view
-	m.Mode = ModeTable
+	if !validView(view) {
+		return
+	}
+	m.ActiveView, m.Mode = view, ModeTable
+	m.Focus, m.ActionIndex = FocusList, 0
 	m.Scope = Scope{}
-	m.Cursor = 0
+	m.Cursor, m.Scroll = 0, 0
 	m.Filter = ""
-	m.Detail = false
-	m.Help = false
+	m.Detail, m.Help = false, false
+	m.DetailScroll = 0
 	m.Selected = make(map[string]bool)
 	m.filterParent = ModeTable
 }
@@ -212,213 +663,67 @@ func (m *Model) clampCursor() {
 	n := len(m.rows())
 	if n == 0 {
 		m.Cursor = 0
-	} else if m.Cursor >= n {
-		m.Cursor = n - 1
-	} else if m.Cursor < 0 {
-		m.Cursor = 0
+	} else {
+		m.Cursor = min(max(0, m.Cursor), n-1)
 	}
 }
 
-func (m Model) rows() []row {
-	var rows []row
-	mode := m.Mode
-	if mode == ModeFilter {
-		mode = m.filterParent
-	}
-	switch mode {
-	case ModeUpdates:
-		for _, item := range m.Snapshot.Updates.Results {
-			if item.State == updatecheck.StateUpdateAvailable {
-				rows = append(rows, row{ID: item.SkillID, Name: skillName(m.Snapshot.Config.Library.Skills, item.SkillID), State: string(item.State), Detail: shortOID(item.Current) + " → " + shortOID(item.Remote)})
-			}
-		}
-		return m.filtered(rows)
-	case ModeScan:
-		for _, item := range m.Scan.Items {
-			state := "candidate"
-			if item.Adopted {
-				state = "adopted"
-			} else if item.Error != "" {
-				state = "error"
-			}
-			rows = append(rows, row{ID: item.Skill.ID, Name: item.Skill.Name, Origin: item.Origin, Target: item.Target, Source: item.Target, State: state, Detail: item.Origin + " · " + item.Error})
-		}
-		return m.filtered(rows)
-	}
-
-	switch m.ActiveView {
-	case ViewLibrary:
-		for _, skill := range m.Snapshot.Config.Library.Skills {
-			rows = append(rows, row{ID: skill.ID, Name: skill.Name, Source: skill.Source, State: updateState(m.Snapshot.Updates, skill.ID), Detail: skill.Description + " · resolved " + shortOID(skill.Resolved)})
-		}
-	case ViewAgents:
-		if m.Scope.Level == "agent-skills" {
-			binding := m.Snapshot.Config.Agents[m.Scope.Agent]
-			for _, skill := range m.Snapshot.Config.Library.Skills {
-				rows = append(rows, row{ID: skill.ID, Name: skill.Name, State: toggleState(contains(binding.Skills, skill.ID)), Enabled: contains(binding.Skills, skill.ID), Detail: skill.Description})
-			}
-		} else {
-			for _, name := range agent.Names() {
-				binding := m.Snapshot.Config.Agents[name]
-				rows = append(rows, row{ID: name, Name: name, State: fmt.Sprintf("%d skills", len(binding.Skills))})
-			}
-		}
-	case ViewProjects:
-		rows = m.projectRows()
-	case ViewPresets:
-		if m.Scope.Level == "preset-skills" {
-			if preset, ok := findPreset(m.Snapshot.Config.Presets, m.Scope.Preset); ok {
-				for _, skill := range m.Snapshot.Config.Library.Skills {
-					enabled := contains(preset.Skills, skill.ID)
-					rows = append(rows, row{ID: skill.ID, Name: skill.Name, State: toggleState(enabled), Enabled: enabled})
-				}
-			}
-		} else {
-			for _, preset := range m.Snapshot.Config.Presets {
-				rows = append(rows, row{ID: preset.Name, Name: preset.Name, State: fmt.Sprintf("%d skills", len(preset.Skills))})
-			}
-		}
-	case ViewStatus:
-		for i, item := range m.Snapshot.Status.Items {
-			id := item.SkillID
-			if id == "" {
-				id = fmt.Sprintf("%s:%d", item.Kind, i)
-			}
-			rows = append(rows, row{ID: id, Name: firstNonEmpty(item.Name, item.SkillID, item.Path), Source: item.Path, State: string(item.Kind), Detail: item.Message})
-		}
-	}
-	sort.SliceStable(rows, func(i, j int) bool {
-		if m.ActiveView == ViewProjects && m.Scope.Level == "project-targets" {
-			if rows[i].ID == "common" {
-				return true
-			}
-			if rows[j].ID == "common" {
-				return false
-			}
-		}
-		return rows[i].ID < rows[j].ID
-	})
-	return m.filtered(rows)
+func (m *Model) ensureVisible() {
+	m.clampCursor()
+	m.Scroll = m.visibleRowsLayout(ComputeLayout(m.Width, m.Height)).Start
 }
 
-func (m Model) projectRows() []row {
-	project, ok := findProject(m.Snapshot.Config.Projects, m.Scope.Project)
-	switch m.Scope.Level {
-	case "project-targets":
-		if !ok {
-			return nil
-		}
-		rows := []row{{ID: "common", Name: "common", State: fmt.Sprintf("%d skills", len(project.Skills))}}
-		for _, name := range project.Agents {
-			rows = append(rows, row{ID: name, Name: name, State: fmt.Sprintf("%d skills", len(project.AgentBindings[name].Skills))})
-		}
-		return m.filtered(rows)
-	case "project-skills":
-		if !ok {
-			return nil
-		}
-		binding := project.Binding
-		if m.Scope.Agent != "" {
-			binding = project.AgentBindings[m.Scope.Agent]
-		}
-		var rows []row
-		for _, skill := range m.Snapshot.Config.Library.Skills {
-			enabled := contains(binding.Skills, skill.ID)
-			rows = append(rows, row{ID: skill.ID, Name: skill.Name, State: toggleState(enabled), Enabled: enabled})
-		}
-		return m.filtered(rows)
-	default:
-		var rows []row
-		for _, current := range m.Snapshot.Config.Projects {
-			rows = append(rows, row{ID: current.Name, Name: current.Name, Source: current.Path, State: strings.Join(current.Agents, ",")})
-		}
-		return m.filtered(rows)
-	}
-}
-
-func (m Model) filtered(rows []row) []row {
-	query := strings.ToLower(strings.TrimSpace(m.Filter))
-	if query == "" {
-		return rows
-	}
-	filtered := make([]row, 0, len(rows))
-	for _, row := range rows {
-		if strings.Contains(strings.ToLower(row.ID+" "+row.Name+" "+row.Source+" "+row.State), query) {
-			filtered = append(filtered, row)
-		}
-	}
-	return filtered
-}
-
-func updateState(report updatecheck.CheckReport, id string) string {
-	for _, item := range report.Results {
-		if item.SkillID == id {
-			if item.State == updatecheck.StateUpdateAvailable {
-				return "↑ update"
-			}
-			return string(item.State)
-		}
+func (m Model) activeKey() string {
+	rows := m.rows()
+	if m.Cursor >= 0 && m.Cursor < len(rows) {
+		return rows[m.Cursor].selectionKey()
 	}
 	return ""
 }
 
-func skillName(skills []config.Skill, id string) string {
-	for _, skill := range skills {
-		if skill.ID == id {
-			return skill.Name
+func (m *Model) restoreActiveKey(key string) {
+	if key == "" {
+		m.clampCursor()
+		return
+	}
+	for i, current := range m.rows() {
+		if current.selectionKey() == key {
+			m.Cursor = i
+			return
 		}
 	}
-	return id
+	m.clampCursor()
 }
 
-func findProject(projects []config.Project, name string) (config.Project, bool) {
-	for _, project := range projects {
-		if project.Name == name {
-			return project, true
-		}
+func (m *Model) cancelInventory() {
+	if m.inventoryCancel != nil {
+		m.inventoryCancel()
+		m.inventoryCancel = nil
 	}
-	return config.Project{}, false
 }
 
-func findPreset(presets []config.Preset, name string) (config.Preset, bool) {
-	for _, preset := range presets {
-		if preset.Name == name {
-			return preset, true
-		}
+func title(value string) string {
+	if value == "" {
+		return value
 	}
-	return config.Preset{}, false
+	return strings.ToUpper(value[:1]) + value[1:]
 }
 
-func contains(values []string, wanted string) bool {
-	for _, value := range values {
-		if value == wanted {
-			return true
-		}
+func recoveryOperationIDs(operations []app.RecoveryOperation) []string {
+	ids := make([]string, 0, len(operations))
+	for _, operation := range operations {
+		ids = append(ids, operation.Operation.ID)
 	}
-	return false
+	return ids
 }
 
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value != "" {
-			return value
-		}
-	}
-	return "-"
+func pendingRecoveryFromError(err error) (*app.PendingRecoveryError, bool) {
+	var pending *app.PendingRecoveryError
+	return pending, errors.As(err, &pending)
 }
 
-func toggleState(enabled bool) string {
-	if enabled {
-		return "enabled"
-	}
-	return "disabled"
+func (m Model) openRecoveryPreview(operations []app.RecoveryOperation) (tea.Model, tea.Cmd) {
+	m.pendingRecovery = app.RecoveryRequest{OperationIDs: recoveryOperationIDs(operations)}
+	m.Busy, m.Status = true, "Building recovery preview..."
+	return m, recoveryPreviewCmd(m.ctx, m.service, m.pendingRecovery)
 }
-
-func shortOID(value string) string {
-	if len(value) > 8 {
-		return value[:8]
-	}
-	return value
-}
-
-func isUnmanaged(item status.Item) bool { return item.Kind == status.Unmanaged }

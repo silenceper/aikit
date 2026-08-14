@@ -52,7 +52,10 @@ func TestCleanupOnlyDeletesExpectedManagedLink(t *testing.T) {
 	if err := os.Symlink(filepath.Join(library, "local/demo"), target); err != nil {
 		t.Fatal(err)
 	}
-	op := config.PendingOperation{ID: "clean", Kind: config.OperationCleanup, Scope: config.Scope{Project: "p", ProjectPath: filepath.Join(root, "project"), Agent: "cursor"}, Target: target, SkillID: "local/demo"}
+	op, err := link.NewCleanupOperation("clean", config.Scope{Project: "p", ProjectPath: filepath.Join(root, "project"), Agent: "cursor"}, target, "local/demo", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
 	r := link.Recover(library, []config.PendingOperation{op}, link.Selector{Project: "p", Agent: "cursor"}, false)
 	if len(r.Completed) != 1 {
 		t.Fatalf("cleanup not completed: %#v", r)
@@ -69,6 +72,384 @@ func TestCleanupOnlyDeletesExpectedManagedLink(t *testing.T) {
 	}
 	if st, err := os.Stat(target); err != nil || !st.IsDir() {
 		t.Fatalf("user directory deleted: %v", err)
+	}
+}
+
+func TestRollbackSourceRestoresReconcileAndCleanupTombstones(t *testing.T) {
+	root := t.TempDir()
+	library := filepath.Join(root, "library", "skills")
+	makeSkill(t, library, "local/old")
+	makeSkill(t, library, "local/new")
+	project := filepath.Join(root, "project")
+	parent := filepath.Join(project, ".cursor", "skills")
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	scope := config.Scope{Project: "p", ProjectPath: project, Agent: "cursor"}
+
+	for _, tc := range []struct {
+		name string
+		make func(string) (config.PendingOperation, error)
+		ops  link.FileOps
+	}{
+		{name: "reconcile", make: func(target string) (config.PendingOperation, error) {
+			return link.NewReconcileOperation("forward-reconcile", scope, target, "local/new", library, "test")
+		}, ops: link.FileOps{FailReconcileSymlink: errors.New("injected create failure")}},
+		{name: "cleanup", make: func(target string) (config.PendingOperation, error) {
+			return link.NewCleanupOperation("forward-cleanup", scope, target, "local/old", "test")
+		}, ops: link.FileOps{FailCleanupUnlink: errors.New("injected unlink failure")}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			target := filepath.Join(parent, tc.name)
+			if err := os.Symlink(filepath.Join(library, "local/old"), target); err != nil {
+				t.Fatal(err)
+			}
+			op, err := tc.make(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			op.TransactionID = "tx-" + tc.name
+			op.TransactionPhase = config.TransactionForward
+			failed := link.RecoverWithOps(library, []config.PendingOperation{op}, link.Selector{}, false, tc.ops)
+			if len(failed.Issues) != 1 {
+				t.Fatalf("forward failure not injected: %#v", failed)
+			}
+			if _, err := os.Lstat(op.Tombstone); err != nil {
+				t.Fatalf("forward tombstone missing: %v", err)
+			}
+			op.TransactionPhase = config.TransactionRollbackSource
+			restored := link.Recover(library, []config.PendingOperation{op}, link.Selector{}, false)
+			if len(restored.Completed) != 1 || len(restored.Issues) != 0 {
+				t.Fatalf("rollback source did not restore old link: %#v", restored)
+			}
+			state, err := link.Inspect(target, library)
+			if err != nil || state.SkillID != "local/old" {
+				t.Fatalf("old link not restored: %+v %v", state, err)
+			}
+			if _, err := os.Lstat(op.Tombstone); !os.IsNotExist(err) {
+				t.Fatalf("forward tombstone remains: %v", err)
+			}
+		})
+	}
+}
+
+func TestCleanupDeleteQuarantineRejectsSwappedEntryAndRestoresUnknown(t *testing.T) {
+	root := t.TempDir()
+	library := filepath.Join(root, "library", "skills")
+	makeSkill(t, library, "local/demo")
+	project := filepath.Join(root, "project")
+	target := filepath.Join(project, ".cursor", "skills", "demo")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(library, "local/demo"), target); err != nil {
+		t.Fatal(err)
+	}
+	op, err := link.NewCleanupOperation("delete-race", config.Scope{Project: "p", ProjectPath: project, Agent: "cursor"}, target, "local/demo", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(root, "outside")
+	saved := op.Tombstone + ".saved-authenticated"
+	result := link.RecoverWithOps(library, []config.PendingOperation{op}, link.Selector{}, false, link.FileOps{BeforeDeleteQuarantine: func(role string) {
+		if role != "tombstone" {
+			return
+		}
+		if err := os.Rename(op.Tombstone, saved); err != nil {
+			panic(err)
+		}
+		if err := os.Symlink(outside, op.Tombstone); err != nil {
+			panic(err)
+		}
+	}})
+	if len(result.Completed) != 0 || len(result.Issues) != 1 {
+		t.Fatalf("swapped delete entry was accepted: %#v", result)
+	}
+	if got, err := os.Readlink(op.Tombstone); err != nil || got != outside {
+		t.Fatalf("unknown replacement was not restored: %q %v", got, err)
+	}
+	if state, err := link.Inspect(saved, library); err != nil || state.SkillID != "local/demo" {
+		t.Fatalf("authenticated original did not survive race: %+v %v", state, err)
+	}
+}
+
+func TestCleanupDeleteQuarantineCrashResumes(t *testing.T) {
+	root := t.TempDir()
+	library := filepath.Join(root, "library", "skills")
+	makeSkill(t, library, "local/demo")
+	project := filepath.Join(root, "project")
+	target := filepath.Join(project, ".cursor", "skills", "demo")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(library, "local/demo"), target); err != nil {
+		t.Fatal(err)
+	}
+	op, err := link.NewCleanupOperation("delete-crash", config.Scope{Project: "p", ProjectPath: project, Agent: "cursor"}, target, "local/demo", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	func() {
+		defer func() { _ = recover() }()
+		link.RecoverWithOps(library, []config.PendingOperation{op}, link.Selector{}, false, link.FileOps{AfterDeleteQuarantine: func(string) { panic("crash") }})
+	}()
+	quarantine := filepath.Join(filepath.Dir(target), ".aikit-delete-tombstone-"+op.ID)
+	if _, err := os.Lstat(quarantine); err != nil {
+		t.Fatalf("deterministic delete quarantine missing: %v", err)
+	}
+	resumed := link.Recover(library, []config.PendingOperation{op}, link.Selector{}, false)
+	if len(resumed.Completed) != 1 || len(resumed.Issues) != 0 {
+		t.Fatalf("delete quarantine did not resume: %#v", resumed)
+	}
+	if _, err := os.Lstat(quarantine); !os.IsNotExist(err) {
+		t.Fatalf("delete quarantine remains: %v", err)
+	}
+}
+
+func TestReconcileDeleteQuarantineCrashResumes(t *testing.T) {
+	root := t.TempDir()
+	library := filepath.Join(root, "library", "skills")
+	makeSkill(t, library, "local/old")
+	makeSkill(t, library, "local/new")
+	project := filepath.Join(root, "project")
+	target := filepath.Join(project, ".cursor", "skills", "demo")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(library, "local/old"), target); err != nil {
+		t.Fatal(err)
+	}
+	op, err := link.NewReconcileOperation("reconcile-delete-crash", config.Scope{Project: "p", ProjectPath: project, Agent: "cursor"}, target, "local/new", library, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	func() {
+		defer func() { _ = recover() }()
+		link.RecoverWithOps(library, []config.PendingOperation{op}, link.Selector{}, false, link.FileOps{AfterDeleteQuarantine: func(string) { panic("crash") }})
+	}()
+	resumed := link.Recover(library, []config.PendingOperation{op}, link.Selector{}, false)
+	if len(resumed.Completed) != 1 || len(resumed.Issues) != 0 {
+		t.Fatalf("reconcile delete quarantine did not resume: %#v", resumed)
+	}
+	state, err := link.Inspect(target, library)
+	if err != nil || state.SkillID != "local/new" {
+		t.Fatalf("desired reconcile target missing: %+v %v", state, err)
+	}
+}
+
+func TestRollbackSourceTargetDeleteQuarantineCrashRestoresOldLink(t *testing.T) {
+	root := t.TempDir()
+	library := filepath.Join(root, "library", "skills")
+	makeSkill(t, library, "local/old")
+	makeSkill(t, library, "local/new")
+	project := filepath.Join(root, "project")
+	target := filepath.Join(project, ".cursor", "skills", "demo")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(library, "local/new"), target); err != nil {
+		t.Fatal(err)
+	}
+	oldFingerprint, err := link.ExpectedManagedFingerprint(library, "local/old")
+	if err != nil {
+		t.Fatal(err)
+	}
+	newFingerprint, err := link.ExpectedManagedFingerprint(library, "local/new")
+	if err != nil {
+		t.Fatal(err)
+	}
+	op := config.PendingOperation{
+		ID: "rollback-target-delete", Kind: config.OperationReconcile,
+		Scope: config.Scope{Project: "p", ProjectPath: project, Agent: "cursor"}, Target: target, SkillID: "local/new",
+		TransactionID: "tx-delete", TransactionPhase: config.TransactionRollbackSource,
+		ExpectedSkillID: "local/old", Expected: oldFingerprint,
+		Tombstone: filepath.Join(filepath.Dir(target), ".aikit-reconcile-rollback-target-delete"),
+	}
+	op.Rollback = &config.PendingOperation{ID: "rollback-child", Kind: config.OperationReconcile, Scope: op.Scope, Target: target, SkillID: "local/old", TransactionID: op.TransactionID, TransactionPhase: config.TransactionRollback, ExpectedSkillID: "local/new", Expected: newFingerprint, Tombstone: filepath.Join(filepath.Dir(target), ".aikit-reconcile-rollback-child")}
+	if err := os.Symlink(filepath.Join(library, "local/old"), op.Tombstone); err != nil {
+		t.Fatal(err)
+	}
+	func() {
+		defer func() { _ = recover() }()
+		link.RecoverWithOps(library, []config.PendingOperation{op}, link.Selector{}, false, link.FileOps{AfterDeleteQuarantine: func(role string) {
+			if role == "target" {
+				panic("crash")
+			}
+		}})
+	}()
+	resumed := link.Recover(library, []config.PendingOperation{op}, link.Selector{}, false)
+	if len(resumed.Completed) != 1 || len(resumed.Issues) != 0 {
+		t.Fatalf("rollback source target delete did not resume: %#v", resumed)
+	}
+	state, err := link.Inspect(target, library)
+	if err != nil || state.SkillID != "local/old" {
+		t.Fatalf("old link not restored: %+v %v", state, err)
+	}
+	for _, pattern := range []string{".aikit-delete-*", ".aikit-reconcile-*"} {
+		if leftovers, _ := filepath.Glob(filepath.Join(filepath.Dir(target), pattern)); len(leftovers) != 0 {
+			t.Fatalf("rollback source left artifacts: %v", leftovers)
+		}
+	}
+}
+
+func TestCleanupPreservesConcurrentManagedReplacement(t *testing.T) {
+	root := t.TempDir()
+	library := filepath.Join(root, "library", "skills")
+	makeSkill(t, library, "local/demo")
+	makeSkill(t, library, "local/replacement")
+	project := filepath.Join(root, "project")
+	target := filepath.Join(project, ".cursor", "skills", "demo")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(library, "local/demo"), target); err != nil {
+		t.Fatal(err)
+	}
+	op, err := link.NewCleanupOperation("cleanup-concurrent", config.Scope{Project: "p", ProjectPath: project, Agent: "cursor"}, target, "local/demo", "disable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(target); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(library, "local/replacement"), target); err != nil {
+		t.Fatal(err)
+	}
+	r := link.Recover(library, []config.PendingOperation{op}, link.Selector{}, false)
+	if len(r.Completed) != 0 || len(r.Issues) != 1 {
+		t.Fatalf("concurrent cleanup replacement accepted: %#v", r)
+	}
+	state, err := link.Inspect(target, library)
+	if err != nil || state.SkillID != "local/replacement" {
+		t.Fatalf("concurrent replacement changed: %+v %v", state, err)
+	}
+}
+
+func TestCleanupParentSwapAfterAnchorRetainsPendingAndWritesNothing(t *testing.T) {
+	root := t.TempDir()
+	library := filepath.Join(root, "library", "skills")
+	makeSkill(t, library, "local/demo")
+	project := filepath.Join(root, "project")
+	parent := filepath.Join(project, ".cursor", "skills")
+	target := filepath.Join(parent, "demo")
+	outside := filepath.Join(root, "outside")
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(library, "local/demo"), target); err != nil {
+		t.Fatal(err)
+	}
+	op, err := link.NewCleanupOperation("cleanup-parent-race", config.Scope{Project: "p", ProjectPath: project, Agent: "cursor"}, target, "local/demo", "disable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	moved := filepath.Join(project, ".cursor", "skills-original")
+	r := link.RecoverWithOps(library, []config.PendingOperation{op}, link.Selector{}, false, link.FileOps{BeforeCleanupMutation: func() {
+		if err := os.Rename(parent, moved); err != nil {
+			panic(err)
+		}
+		if err := os.Symlink(outside, parent); err != nil {
+			panic(err)
+		}
+	}})
+	if len(r.Completed) != 0 || len(r.Issues) != 1 || r.Issues[0].Kind != link.IssueUnsafePath {
+		t.Fatalf("cleanup parent swap was accepted: %#v", r)
+	}
+	state, err := link.Inspect(filepath.Join(moved, "demo"), library)
+	if err != nil || state.SkillID != "local/demo" {
+		t.Fatalf("anchored original target changed: %+v %v", state, err)
+	}
+	if _, err := os.Lstat(filepath.Join(outside, "demo")); !os.IsNotExist(err) {
+		t.Fatalf("cleanup wrote outside swapped parent: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(moved, filepath.Base(op.Tombstone))); !os.IsNotExist(err) {
+		t.Fatalf("cleanup created tombstone despite parent swap: %v", err)
+	}
+}
+
+func TestStandaloneCleanupRollbackRestoresAuthenticatedTombstone(t *testing.T) {
+	root := t.TempDir()
+	library := filepath.Join(root, "library", "skills")
+	makeSkill(t, library, "local/demo")
+	project := filepath.Join(root, "project")
+	target := filepath.Join(project, ".cursor", "skills", "demo")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(library, "local/demo"), target); err != nil {
+		t.Fatal(err)
+	}
+	op, err := link.NewCleanupOperation("standalone-crash", config.Scope{Project: "p", ProjectPath: project, Agent: "cursor"}, target, "local/demo", "disable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	func() {
+		defer func() { _ = recover() }()
+		link.RecoverWithOps(library, []config.PendingOperation{op}, link.Selector{}, false, link.FileOps{AfterCleanupMove: func() { panic("crash") }})
+	}()
+	preview := link.RollbackCleanup(library, []config.PendingOperation{op}, true)
+	if len(preview.Completed) != 1 || len(preview.Issues) != 0 {
+		t.Fatalf("tombstone rollback unavailable: %#v", preview)
+	}
+	rolledBack := link.RollbackCleanup(library, []config.PendingOperation{op}, false)
+	if len(rolledBack.Completed) != 1 || len(rolledBack.Issues) != 0 {
+		t.Fatalf("tombstone rollback failed: %#v", rolledBack)
+	}
+	state, err := link.Inspect(target, library)
+	if err != nil || state.SkillID != "local/demo" {
+		t.Fatalf("cleanup link was not restored: %+v %v", state, err)
+	}
+	if _, err := os.Lstat(op.Tombstone); !os.IsNotExist(err) {
+		t.Fatalf("restored cleanup left tombstone: %v", err)
+	}
+}
+
+func TestStandaloneCleanupRollbackDetectsParentSwapAfterRestoreMove(t *testing.T) {
+	root := t.TempDir()
+	library := filepath.Join(root, "library", "skills")
+	makeSkill(t, library, "local/demo")
+	project := filepath.Join(root, "project")
+	parent := filepath.Join(project, ".cursor", "skills")
+	target := filepath.Join(parent, "demo")
+	outside := filepath.Join(root, "outside")
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(library, "local/demo"), target); err != nil {
+		t.Fatal(err)
+	}
+	op, err := link.NewCleanupOperation("rollback-parent-race", config.Scope{Project: "p", ProjectPath: project, Agent: "cursor"}, target, "local/demo", "disable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	func() {
+		defer func() { _ = recover() }()
+		link.RecoverWithOps(library, []config.PendingOperation{op}, link.Selector{}, false, link.FileOps{AfterCleanupMove: func() { panic("crash") }})
+	}()
+	moved := filepath.Join(project, ".cursor", "skills-original")
+	result := link.RollbackCleanupWithOps(library, []config.PendingOperation{op}, false, link.FileOps{AfterCleanupRollbackMove: func() {
+		if err := os.Rename(parent, moved); err != nil {
+			panic(err)
+		}
+		if err := os.Symlink(outside, parent); err != nil {
+			panic(err)
+		}
+	}})
+	if len(result.Completed) != 0 || len(result.Issues) != 1 || result.Issues[0].Kind != link.IssueUnsafePath {
+		t.Fatalf("post-restore parent swap falsely completed: %#v", result)
+	}
+	state, err := link.Inspect(filepath.Join(moved, "demo"), library)
+	if err != nil || state.SkillID != "local/demo" {
+		t.Fatalf("restored deterministic state lost: %+v %v", state, err)
+	}
+	if _, err := os.Lstat(filepath.Join(outside, "demo")); !os.IsNotExist(err) {
+		t.Fatalf("rollback wrote outside swapped parent: %v", err)
 	}
 }
 
@@ -324,6 +705,9 @@ func TestCleanupRecoveryRejectsEveryWrongObject(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(filepath.Join(root, "outside"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	cases := []struct {
 		name  string
 		setup func(string) error
@@ -334,7 +718,10 @@ func TestCleanupRecoveryRejectsEveryWrongObject(t *testing.T) {
 			if err := tc.setup(target); err != nil {
 				t.Fatal(err)
 			}
-			op := config.PendingOperation{ID: tc.name, Kind: config.OperationCleanup, Scope: config.Scope{Project: "p", ProjectPath: base, Agent: "cursor"}, Target: target, SkillID: "local/demo"}
+			op, err := link.NewCleanupOperation(tc.name, config.Scope{Project: "p", ProjectPath: base, Agent: "cursor"}, target, "local/demo", "test")
+			if err != nil {
+				t.Fatal(err)
+			}
 			r := link.Recover(library, []config.PendingOperation{op}, link.Selector{}, false)
 			if len(r.Completed) != 0 || len(r.Issues) != 1 {
 				t.Fatalf("wrong object accepted: %#v", r)
@@ -345,10 +732,161 @@ func TestCleanupRecoveryRejectsEveryWrongObject(t *testing.T) {
 		})
 	}
 	target := filepath.Join(dir, "absent")
-	op := config.PendingOperation{ID: "absent", Kind: config.OperationCleanup, Scope: config.Scope{Project: "p", ProjectPath: base, Agent: "cursor"}, Target: target, SkillID: "local/demo"}
+	op, err := link.NewCleanupOperation("absent", config.Scope{Project: "p", ProjectPath: base, Agent: "cursor"}, target, "local/demo", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
 	r := link.Recover(library, []config.PendingOperation{op}, link.Selector{}, false)
 	if len(r.Completed) != 1 {
 		t.Fatalf("absent cleanup not completed: %#v", r)
+	}
+}
+
+func TestReconcilePreservesConcurrentManagedReplacement(t *testing.T) {
+	root := t.TempDir()
+	library := filepath.Join(root, "library", "skills")
+	makeSkill(t, library, "local/demo")
+	makeSkill(t, library, "local/old")
+	makeSkill(t, library, "local/replacement")
+	base := filepath.Join(root, "project")
+	target := filepath.Join(base, ".cursor", "skills", "demo")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(library, "local/old"), target); err != nil {
+		t.Fatal(err)
+	}
+	op, err := link.NewReconcileOperation("", config.Scope{Project: "p", ProjectPath: base, Agent: "cursor"}, target, "local/demo", library, "rollback")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(target); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(library, "local/replacement"), target); err != nil {
+		t.Fatal(err)
+	}
+	r := link.Recover(library, []config.PendingOperation{op}, link.Selector{}, false)
+	if len(r.Completed) != 0 || len(r.Issues) != 1 || r.Issues[0].Kind != link.IssuePendingReconcile {
+		t.Fatalf("concurrent replacement was accepted: %#v", r)
+	}
+	state, inspectErr := link.Inspect(target, library)
+	if inspectErr != nil || state.SkillID != "local/replacement" {
+		t.Fatalf("concurrent replacement changed: %#v %v", state, inspectErr)
+	}
+}
+
+func TestReconcileRejectsParentSymlinkSwap(t *testing.T) {
+	root := t.TempDir()
+	library := filepath.Join(root, "library", "skills")
+	makeSkill(t, library, "local/demo")
+	project := filepath.Join(root, "project")
+	outside := filepath.Join(root, "outside")
+	target := filepath.Join(project, ".cursor", "skills", "demo")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	op, err := link.NewReconcileOperation("", config.Scope{Project: "p", ProjectPath: project, Agent: "cursor"}, target, "local/demo", library, "forward")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(outside, "skills"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(project, ".cursor", "skills")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "skills"), filepath.Join(project, ".cursor", "skills")); err != nil {
+		t.Fatal(err)
+	}
+	r := link.Recover(library, []config.PendingOperation{op}, link.Selector{}, false)
+	if len(r.Completed) != 0 || len(r.Issues) != 1 || r.Issues[0].Kind != link.IssueUnsafePath {
+		t.Fatalf("parent symlink swap was accepted: %#v", r)
+	}
+	if _, err := os.Lstat(filepath.Join(outside, "skills", "demo")); !os.IsNotExist(err) {
+		t.Fatalf("recovery wrote through swapped parent: %v", err)
+	}
+}
+
+func TestReconcileResumesAfterCrashImmediatelyAfterQuarantine(t *testing.T) {
+	root := t.TempDir()
+	library := filepath.Join(root, "library", "skills")
+	makeSkill(t, library, "local/demo")
+	makeSkill(t, library, "local/old")
+	project := filepath.Join(root, "project")
+	target := filepath.Join(project, ".cursor", "skills", "demo")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(library, "local/old"), target); err != nil {
+		t.Fatal(err)
+	}
+	op, err := link.NewReconcileOperation("reconcile-crash", config.Scope{Project: "p", ProjectPath: project, Agent: "cursor"}, target, "local/demo", library, "forward")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if op.Tombstone == "" || filepath.Dir(op.Tombstone) != filepath.Dir(target) {
+		t.Fatalf("deterministic tombstone missing: %+v", op)
+	}
+	func() {
+		defer func() {
+			if recovered := recover(); recovered == nil {
+				t.Fatal("injected quarantine crash did not occur")
+			}
+		}()
+		link.RecoverWithOps(library, []config.PendingOperation{op}, link.Selector{}, false, link.FileOps{AfterReconcileMove: func() { panic("crash") }})
+	}()
+	if _, err := os.Lstat(target); !os.IsNotExist(err) {
+		t.Fatalf("target should be absent at crash point: %v", err)
+	}
+	if _, err := os.Lstat(op.Tombstone); err != nil {
+		t.Fatalf("durable tombstone missing after crash: %v", err)
+	}
+	r := link.Recover(library, []config.PendingOperation{op}, link.Selector{}, false)
+	if len(r.Completed) != 1 || len(r.Issues) != 0 {
+		t.Fatalf("resume after quarantine crash failed: %#v", r)
+	}
+	state, err := link.Inspect(target, library)
+	if err != nil || state.Kind != link.StateManagedLink || state.SkillID != "local/demo" {
+		t.Fatalf("resumed target mismatch: %#v %v", state, err)
+	}
+	if _, err := os.Lstat(op.Tombstone); !os.IsNotExist(err) {
+		t.Fatalf("completed recovery left tombstone: %v", err)
+	}
+}
+
+func TestReconcileParentSwapAfterAnchorCannotWriteOutside(t *testing.T) {
+	root := t.TempDir()
+	library := filepath.Join(root, "library", "skills")
+	makeSkill(t, library, "local/demo")
+	project := filepath.Join(root, "project")
+	parent := filepath.Join(project, ".cursor", "skills")
+	target := filepath.Join(parent, "demo")
+	outside := filepath.Join(root, "outside")
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	op, err := link.NewReconcileOperation("reconcile-race", config.Scope{Project: "p", ProjectPath: project, Agent: "cursor"}, target, "local/demo", library, "forward")
+	if err != nil {
+		t.Fatal(err)
+	}
+	moved := filepath.Join(project, ".cursor", "skills-original")
+	r := link.RecoverWithOps(library, []config.PendingOperation{op}, link.Selector{}, false, link.FileOps{BeforeReconcileMutation: func() {
+		if err := os.Rename(parent, moved); err != nil {
+			panic(err)
+		}
+		if err := os.Symlink(outside, parent); err != nil {
+			panic(err)
+		}
+	}})
+	if len(r.Completed) != 0 || len(r.Issues) != 1 || r.Issues[0].Kind != link.IssueUnsafePath {
+		t.Fatalf("parent swap was accepted: %#v", r)
+	}
+	if _, err := os.Lstat(filepath.Join(outside, "demo")); !os.IsNotExist(err) {
+		t.Fatalf("reconcile wrote outside anchored parent: %v", err)
 	}
 }
 

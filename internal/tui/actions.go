@@ -1,0 +1,833 @@
+package tui
+
+import (
+	"fmt"
+	"strings"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/silenceper/aikit/internal/app"
+	"github.com/silenceper/aikit/internal/updatecheck"
+	"github.com/silenceper/aikit/pkg/config"
+)
+
+type uiAction int
+
+const (
+	uiNone uiAction = iota
+	uiMoveUp
+	uiMoveDown
+	uiToggle
+	uiActivate
+	uiCancel
+	uiConfirm
+	uiRefresh
+	uiBack
+)
+
+func (m Model) perform(action uiAction) (tea.Model, tea.Cmd) {
+	if m.MutationBusy || m.Busy {
+		return m, nil
+	}
+	switch action {
+	case uiMoveUp:
+		if m.Cursor > 0 {
+			m.Cursor--
+		}
+		m.ensureVisible()
+	case uiMoveDown:
+		if m.Cursor+1 < len(m.rows()) {
+			m.Cursor++
+		}
+		m.ensureVisible()
+	case uiToggle:
+		return m.toggleSelected()
+	case uiActivate:
+		return m.activate()
+	case uiCancel:
+		return m.cancel()
+	case uiConfirm:
+		return m.confirmAction()
+	case uiRefresh:
+		return m.startInventory()
+	case uiBack:
+		if m.Detail || m.Scope.Level != "" {
+			m.back()
+		} else if m.ActiveView != ViewOverview {
+			m.switchView(ViewOverview)
+		}
+	}
+	return m, nil
+}
+
+func (m Model) refreshStatus() (tea.Model, tea.Cmd) {
+	m.Mode, m.Busy, m.Status = ModeTable, true, "Refreshing status and update checks..."
+	return m, refreshSnapshotCmd(m.ctx, m.service)
+}
+
+func (m Model) toggleSelected() (tea.Model, tea.Cmd) {
+	rows := m.rows()
+	if m.Cursor < 0 || m.Cursor >= len(rows) {
+		return m, nil
+	}
+	current := rows[m.Cursor]
+	if m.ActiveView == ViewMigration || m.Mode == ModeScan || m.Mode == ModeUpdates || m.Mode == ModeAddSelect {
+		key := current.selectionKey()
+		m.Selected[key] = !m.Selected[key]
+		return m, nil
+	}
+	if m.ActiveView == ViewLibrary {
+		key := current.selectionKey()
+		m.Selected[key] = !m.Selected[key]
+		m.Status = fmt.Sprintf("%d library skill(s) selected", m.librarySelectionCount())
+		return m, nil
+	}
+	if m.ActiveView == ViewWorkspaces && m.Scope.Level == "agent-skills" {
+		request := app.BindingPreviewRequest{Binding: app.BindingRequest{SkillID: current.ID, Agent: m.Scope.Agent}, Enable: !current.Enabled}
+		m.pendingBinding, m.confirm = request, ActionBinding
+		m.Busy, m.Status = true, "Building binding preview..."
+		return m, bindingPreviewCmd(m.ctx, m.service, request)
+	}
+	if m.ActiveView == ViewWorkspaces && m.Scope.Level == "project-skills" {
+		request := app.BindingPreviewRequest{Binding: app.BindingRequest{SkillID: current.ID, Project: m.Scope.Project, Agent: m.Scope.Agent}, Enable: !current.Enabled}
+		m.pendingBinding, m.confirm = request, ActionBinding
+		m.Busy, m.Status = true, "Building binding preview..."
+		return m, bindingPreviewCmd(m.ctx, m.service, request)
+	}
+	if m.ActiveView == ViewPresets && m.Scope.Level == "preset-skills" {
+		m.Selected[current.ID] = !m.Selected[current.ID]
+		m.Status = "Preset members changed locally; choose Save to preview"
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m Model) activate() (tea.Model, tea.Cmd) {
+	if m.Mode == ModeConfirm {
+		return m.confirmAction()
+	}
+	rows := m.rows()
+	if m.Cursor < 0 || m.Cursor >= len(rows) {
+		return m, nil
+	}
+	current := rows[m.Cursor]
+	if m.Mode == ModeUpdates || m.Mode == ModeScan {
+		sourceMode := m.Mode
+		if !m.Selected[current.selectionKey()] {
+			m.Selected[current.selectionKey()] = true
+		}
+		m.enterConfirm(ActionScan)
+		if m.filterParent == ModeUpdates || sourceMode == ModeUpdates {
+			m.confirm = ActionUpdate
+		}
+		m.Status = "Review the exact change, then confirm"
+		return m, nil
+	}
+	if m.Mode == ModeAddSelect {
+		if !m.Selected[current.selectionKey()] {
+			m.Selected[current.selectionKey()] = true
+		}
+		m.pendingAdd.Skills = m.selectedIDs()
+		m.enterConfirm(ActionAdd)
+		m.Preview = app.MutationPreview{Title: "Add selected skills", Summary: fmt.Sprintf("Add %d selected skill(s) from %s", len(m.pendingAdd.Skills), m.pendingAdd.Source), RequiresConfirmation: true}
+		m.Status = "Review selected skills, then confirm"
+		return m, nil
+	}
+	if m.ActiveView == ViewMigration {
+		for _, item := range m.migrationItems() {
+			if item.Action != m.scanActionForKey(current.Key) {
+				delete(m.Selected, item.Key)
+			}
+		}
+		m.Selected[current.selectionKey()] = true
+		request := app.ScanRequest{Selectors: m.selectedSelectors(), Targets: m.selectedTargets(), DryRun: true}
+		request.Adopt = m.migrationActionAdopts(current)
+		m.pendingScan = request
+		m.pendingScan.DryRun = false
+		m.confirm = ActionScan
+		m.Busy, m.Status = true, "Building exact migration preview..."
+		return m, migrationPreviewCmd(m.ctx, m.migration, request)
+	}
+	switch m.ActiveView {
+	case ViewOverview:
+		switch current.ID {
+		case "migration":
+			m.switchView(ViewMigration)
+		case "status":
+			m.switchView(ViewStatus)
+		case "updates":
+			m.openUpdates()
+		}
+	case ViewLibrary:
+		m.Detail, m.DetailScroll, m.pendingDetailID, m.Status = true, 0, current.ID, "Loading skill detail..."
+		return m, skillDetailCmd(m.ctx, m.service, current.ID)
+	case ViewStatus:
+		m.Detail = true
+	case ViewWorkspaces:
+		switch m.Scope.Level {
+		case "":
+			if current.ID == "agents" {
+				m.Scope.Level = "workspace-agents"
+			} else if current.ID == "projects" {
+				m.Scope.Level = "workspace-projects"
+			} else {
+				m.Detail = true
+			}
+		case "workspace-agents":
+			m.Scope = Scope{Agent: current.ID, Level: "agent-skills"}
+		case "workspace-projects":
+			m.Scope = Scope{Project: current.ID, Level: "project-targets"}
+		case "project-targets":
+			m.Scope.Level = "project-skills"
+			if current.ID == "common" {
+				m.Scope.Agent = ""
+			} else {
+				m.Scope.Agent = current.ID
+			}
+		default:
+			m.Detail = true
+		}
+		m.Cursor, m.Scroll = 0, 0
+	case ViewPresets:
+		if m.Scope.Level == "" {
+			m.Scope = Scope{Preset: current.ID, Level: "preset-skills"}
+			m.Cursor, m.Scroll = 0, 0
+			m.Selected = make(map[string]bool)
+			if preset, ok := findPreset(m.Snapshot.Config.Presets, current.ID); ok {
+				for _, skillID := range preset.Skills {
+					m.Selected[skillID] = true
+				}
+			}
+		} else {
+			m.Detail = true
+		}
+	}
+	return m, nil
+}
+
+func (m Model) scanActionForKey(key string) app.ScanAction {
+	for _, item := range m.migrationItems() {
+		if item.Key == key {
+			return item.Action
+		}
+	}
+	return app.ScanActionNone
+}
+
+func (m Model) cancel() (tea.Model, tea.Cmd) {
+	if m.Help {
+		m.Help = false
+		return m, nil
+	}
+	if m.Mode == ModeConfiguration {
+		m.Mode = ModeTable
+		return m, nil
+	}
+	if m.Mode == ModeInput {
+		m.Mode = ModeTable
+		m.Input = inputState{}
+		m.pendingBatch = app.BatchRequest{}
+		m.pendingProject = app.ProjectEditRequest{}
+		m.pendingPreset = app.PresetMutationRequest{}
+		m.Status = "Cancelled; no changes made"
+		return m, nil
+	}
+	if m.Mode == ModeAddSelect {
+		m.Mode = ModeTable
+		m.Input = inputState{}
+		m.AddPreview = app.AddPreview{}
+		m.Selected = make(map[string]bool)
+		m.Status = "Cancelled; no changes made"
+		return m, nil
+	}
+	if m.Mode == ModeMore {
+		m.Mode, m.ActionIndex = ModeTable, 0
+		if m.Detail {
+			m.Focus = FocusDetail
+		} else {
+			m.Focus = FocusList
+		}
+		return m, nil
+	}
+	if m.Mode == ModeErrorDetail {
+		parent := m.errorDetailParent
+		if parent == "" || parent == ModeErrorDetail {
+			parent = ModeTable
+		}
+		m.Mode, m.FullError, m.errorDetailParent = parent, "", ""
+		return m, nil
+	}
+	if m.Mode == ModeFilter {
+		m.Mode = m.filterParent
+		return m, nil
+	}
+	if m.Mode == ModeConfirm {
+		if m.confirm == ActionUpdate {
+			m.Mode = ModeUpdates
+		} else if m.confirm == ActionScan && len(m.Scan.Items) > 0 {
+			m.Mode = ModeScan
+		} else {
+			m.Mode = ModeTable
+		}
+		m.confirm, m.pendingID = ActionNone, ""
+		m.Preview = app.MutationPreview{}
+		m.PlanPreview = app.Result{}
+		m.OverlayScroll = 0
+		m.forceAcknowledged = false
+		m.pendingBatch = app.BatchRequest{}
+		m.pendingUpdate = app.UpdateRequest{}
+		m.pendingProject = app.ProjectEditRequest{}
+		m.ProjectPreview = app.ProjectEditPreview{}
+		m.pendingPreset = app.PresetMutationRequest{}
+		m.Status = "Cancelled; no changes made"
+		return m, nil
+	}
+	if m.Detail {
+		m.Detail, m.DetailScroll = false, 0
+		m.pendingDetailID = ""
+		return m, nil
+	}
+	if m.Mode == ModeUpdates || m.Mode == ModeScan {
+		m.Mode = ModeTable
+		m.Selected = make(map[string]bool)
+		m.Status = "Cancelled; no changes made"
+		return m, nil
+	}
+	if m.Scope.Level != "" {
+		m.back()
+		return m, nil
+	}
+	m.cancelInventory()
+	return m, tea.Quit
+}
+
+func (m Model) confirmAction() (tea.Model, tea.Cmd) {
+	if m.Mode != ModeConfirm {
+		return m, nil
+	}
+	m.Busy, m.MutationBusy = true, true
+	switch m.confirm {
+	case ActionUpdate:
+		m.Status = "Updating selected skills..."
+		return m, updateCmd(m.ctx, m.service, m.updateRequest())
+	case ActionScan:
+		m.Status = "Applying selected migration action..."
+		request := m.pendingScan
+		if len(request.Selectors) == 0 {
+			request = app.ScanRequest{Adopt: true, Selectors: m.selectedSelectors(), Targets: m.selectedTargets()}
+		}
+		request.DryRun = false
+		return m, adoptCmd(m.ctx, m.migration, request)
+	case ActionBinding:
+		m.Status = "Applying binding change..."
+		return m, bindingCmd(m.ctx, m.service, m.pendingBinding.Binding, m.pendingBinding.Enable)
+	case ActionSync:
+		m.Status = "Applying sync plan..."
+		return m, syncCmd(m.ctx, m.service, m.pendingSync)
+	case ActionAdd:
+		m.Status = "Adding selected skills..."
+		return m, addCmd(m.ctx, m.service, m.pendingAdd)
+	case ActionPreset:
+		if m.pendingPreset.Operation == app.PresetDelete && m.Preview.RequiresForce && !m.pendingPreset.Force {
+			m.Busy, m.MutationBusy = false, false
+			m.enterConfirm(ActionForcePresetDelete)
+			m.Status = "Force deletion will detach every listed preset reference; confirm again"
+			return m, nil
+		}
+		m.Status = "Applying preset mutation..."
+		m.pendingPreset.Confirmed = true
+		return m, mutatePresetCmd(m.ctx, m.service, m.pendingPreset)
+	case ActionForcePresetDelete:
+		m.Status = "Force deleting preset..."
+		m.pendingPreset.Force, m.pendingPreset.Confirmed = true, true
+		return m, mutatePresetCmd(m.ctx, m.service, m.pendingPreset)
+	case ActionBatch:
+		if m.pendingBatch.Operation == app.BatchRemove && m.Preview.RequiresForce && !m.pendingBatch.Force {
+			m.Busy, m.MutationBusy = false, false
+			m.enterConfirm(ActionForceBatchRemove)
+			m.Status = "Force removal will detach every listed reference; confirm again"
+			return m, nil
+		}
+		m.Status = "Applying library batch..."
+		m.pendingBatch.Confirmed = true
+		return m, batchCmd(m.ctx, m.service, m.pendingBatch)
+	case ActionForceBatchRemove:
+		m.Status = "Force removing selected skills..."
+		m.pendingBatch.Force, m.pendingBatch.Confirmed = true, true
+		return m, batchCmd(m.ctx, m.service, m.pendingBatch)
+	case ActionRef:
+		m.Status = "Changing skill ref..."
+		m.pendingUpdate.Confirmed = true
+		return m, updateCmd(m.ctx, m.service, m.pendingUpdate)
+	case ActionProjectEdit:
+		m.Status = "Applying project edit..."
+		m.pendingProject.Confirmed = true
+		return m, projectEditCmd(m.ctx, m.service, m.pendingProject)
+	case ActionRemoveSkill:
+		if m.Preview.RequiresForce && !m.forceAcknowledged {
+			m.forceAcknowledged = true
+			m.Busy, m.MutationBusy = false, false
+			m.enterConfirm(ActionForceRemove)
+			m.Status = "Force removal will detach references; confirm again"
+			return m, nil
+		}
+		m.Status = "Removing skill..."
+		m.pendingRemove.Force = m.forceAcknowledged
+		return m, removeSkillCmd(m.ctx, m.service, m.pendingRemove)
+	case ActionForceRemove:
+		m.Status = "Force removing skill..."
+		m.pendingRemove.Force = true
+		return m, removeSkillCmd(m.ctx, m.service, m.pendingRemove)
+	case ActionRemoveProject:
+		m.Status = "Removing project..."
+		return m, removeProjectCmd(m.ctx, m.service, app.ProjectRemoveRequest{Project: m.pendingID, Confirmed: true})
+	case ActionRecovery:
+		for _, operation := range m.RecoveryPreview.Operations {
+			if !operation.CanResume {
+				m.Busy, m.MutationBusy = false, false
+				m.Err, m.Status = "selected recovery group cannot resume", "Recovery cannot resume; review issues"
+				return m, nil
+			}
+		}
+		m.Status = "Resuming exact recovery operations..."
+		m.pendingRecovery.Confirmed = true
+		return m, resumeRecoveryCmd(m.ctx, m.service, m.pendingRecovery)
+	default:
+		m.Busy, m.MutationBusy = false, false
+	}
+	return m, nil
+}
+
+func (m Model) confirmCurrent(action Action) (tea.Model, tea.Cmd) {
+	rows := m.rows()
+	if m.Cursor < 0 || m.Cursor >= len(rows) {
+		return m, nil
+	}
+	m.pendingID = rows[m.Cursor].ID
+	if action == ActionRemoveSkill {
+		m.pendingRemove = app.RemoveRequest{SkillID: m.pendingID}
+		m.confirm, m.Busy = action, true
+		m.Status = "Building remove preview..."
+		return m, removePreviewCmd(m.ctx, m.service, m.pendingRemove)
+	}
+	m.enterConfirm(action)
+	m.Status = "Review the exact change, then confirm"
+	return m, nil
+}
+
+func (m Model) previewCurrentProjectRemove() (tea.Model, tea.Cmd) {
+	rows := m.rows()
+	if m.Cursor < 0 || m.Cursor >= len(rows) {
+		return m, nil
+	}
+	m.pendingID, m.confirm = rows[m.Cursor].ID, ActionRemoveProject
+	m.Busy, m.Status = true, "Building exact project removal preview..."
+	return m, projectRemovePreviewCmd(m.ctx, m.service, app.ProjectRemoveRequest{Project: m.pendingID})
+}
+
+func (m Model) submitInput() (tea.Model, tea.Cmd) {
+	value := strings.TrimSpace(m.Input.Value)
+	if value == "" {
+		m.Err = m.Input.Prompt + " is required"
+		return m, nil
+	}
+	switch m.Input.Kind {
+	case inputAddSource:
+		m.pendingAdd = app.AddRequest{Source: value}
+		m.Busy, m.Status = true, "Discovering source without mutation..."
+		return m, addPreviewCmd(m.ctx, m.service, app.AddPreviewRequest{Source: value})
+	case inputPresetCreate:
+		m.pendingPreset = app.PresetMutationRequest{Operation: app.PresetCreate, Name: value}
+		m.confirm = ActionPreset
+		m.Busy, m.Status = true, "Building preset preview..."
+		return m, presetMutationPreviewCmd(m.ctx, m.service, m.pendingPreset)
+	case inputPresetDuplicate:
+		m.pendingPreset = app.PresetMutationRequest{Operation: app.PresetDuplicate, Name: m.pendingID, NewName: value}
+		m.confirm, m.Busy, m.Status = ActionPreset, true, "Building duplicate preset preview..."
+		return m, presetMutationPreviewCmd(m.ctx, m.service, m.pendingPreset)
+	case inputPresetRename:
+		m.pendingPreset = app.PresetMutationRequest{Operation: app.PresetRename, Name: m.pendingID, NewName: value}
+		m.confirm, m.Busy, m.Status = ActionPreset, true, "Building rename preset preview..."
+		return m, presetMutationPreviewCmd(m.ctx, m.service, m.pendingPreset)
+	case inputPresetApply:
+		binding, err := m.parsePresetApplyTarget(value)
+		if err != nil {
+			m.Err = err.Error()
+			return m, nil
+		}
+		binding.Preset = m.pendingID
+		m.pendingPreset = app.PresetMutationRequest{Operation: app.PresetApply, Name: m.pendingID, Binding: binding}
+		m.confirm, m.Busy, m.Status = ActionPreset, true, "Building exact preset apply preview..."
+		return m, presetMutationPreviewCmd(m.ctx, m.service, m.pendingPreset)
+	case inputRefChange:
+		kind, refValue, ok := strings.Cut(value, ":")
+		if !ok || refValue == "" || (kind != "branch" && kind != "tag" && kind != "commit") {
+			m.Err = "ref must be branch:<name>, tag:<name>, or commit:<full-object-id>"
+			return m, nil
+		}
+		ids := m.selectedLibraryIDs()
+		if len(ids) != 1 {
+			m.Err = "change ref requires exactly one selected library skill"
+			return m, nil
+		}
+		skillID := ids[0]
+		m.pendingUpdate = app.UpdateRequest{
+			SkillIDs: []string{skillID}, Ref: &config.Ref{Kind: kind, Value: refValue}, Force: true,
+			Expected: map[string]app.ExpectedUpdate{skillID: {Ref: findSkillRef(m.Snapshot.Config, skillID), Resolved: findSkillResolved(m.Snapshot.Config, skillID)}},
+		}
+		m.enterConfirm(ActionRef)
+		m.Preview = app.MutationPreview{
+			Title: "Change skill ref", Summary: fmt.Sprintf("Change %s to %s:%s; the application will roll back the previous ref and content if the update fails", skillID, kind, refValue), RequiresConfirmation: true,
+		}
+		m.Status = "Review the ref change and rollback guarantee, then confirm"
+		return m, nil
+	case inputBatchScope:
+		bindingScope, err := m.parseBatchBindingScope(value)
+		if err != nil {
+			m.Err = err.Error()
+			return m, nil
+		}
+		ids := m.selectedLibraryIDs()
+		if len(ids) == 0 {
+			m.Err = "select at least one library skill"
+			return m, nil
+		}
+		m.pendingBatch.Bindings = nil
+		for _, skillID := range ids {
+			binding := bindingScope
+			binding.SkillID = skillID
+			m.pendingBatch.Bindings = append(m.pendingBatch.Bindings, binding)
+		}
+		m.confirm = ActionBatch
+		m.Busy, m.Status = true, "Building exact binding preview..."
+		return m, batchBindingPreviewCmd(m.ctx, m.service, m.pendingBatch)
+	case inputProjectCreate, inputProjectEdit:
+		request, err := m.parseProjectEditInput(value)
+		if err != nil {
+			m.Err = err.Error()
+			return m, nil
+		}
+		m.pendingProject = request
+		m.Busy, m.Status = true, "Building project edit preview..."
+		return m, projectPreviewCmd(m.ctx, m.service, request)
+	default:
+		m.Err = "Unsupported input action"
+		return m, nil
+	}
+}
+
+func (m Model) parseProjectEditInput(value string) (app.ProjectEditRequest, error) {
+	parts := strings.Split(value, "|")
+	want := 3
+	if m.Input.Kind == inputProjectEdit {
+		want = 4
+	}
+	if len(parts) != want {
+		return app.ProjectEditRequest{}, fmt.Errorf("expected %d pipe-separated fields", want)
+	}
+	for i := range parts {
+		parts[i] = strings.TrimSpace(parts[i])
+	}
+	request := app.ProjectEditRequest{Name: parts[0], Path: parts[1], AddAgents: splitAgents(parts[2])}
+	if m.Input.Kind == inputProjectCreate {
+		if request.Name == "" || request.Path == "" {
+			return app.ProjectEditRequest{}, fmt.Errorf("new project name and path are required")
+		}
+		return request, nil
+	}
+	request.Project = m.pendingID
+	request.RemoveAgents = splitAgents(parts[3])
+	if request.Project == "" {
+		return app.ProjectEditRequest{}, fmt.Errorf("select a project to edit")
+	}
+	if request.Name == "" && request.Path == "" && len(request.AddAgents) == 0 && len(request.RemoveAgents) == 0 {
+		return app.ProjectEditRequest{}, fmt.Errorf("project edit requires at least one change")
+	}
+	return request, nil
+}
+
+func splitAgents(value string) []string {
+	var agents []string
+	for _, name := range strings.Split(value, ",") {
+		name = strings.TrimSpace(name)
+		if name != "" && !contains(agents, name) {
+			agents = append(agents, name)
+		}
+	}
+	return agents
+}
+
+func (m Model) parsePresetApplyTarget(value string) (app.BindingRequest, error) {
+	parts := strings.Split(value, ":")
+	switch {
+	case len(parts) == 2 && parts[0] == "agent":
+		if _, ok := m.Snapshot.Config.Agents[parts[1]]; !ok {
+			return app.BindingRequest{}, fmt.Errorf("global agent %q is not configured", parts[1])
+		}
+		return app.BindingRequest{Agent: parts[1]}, nil
+	case len(parts) == 2 && parts[0] == "project":
+		if _, ok := findProject(m.Snapshot.Config.Projects, parts[1]); !ok {
+			return app.BindingRequest{}, fmt.Errorf("project %q is not registered", parts[1])
+		}
+		return app.BindingRequest{Project: parts[1]}, nil
+	case len(parts) == 3 && parts[0] == "project-agent":
+		project, ok := findProject(m.Snapshot.Config.Projects, parts[1])
+		if !ok {
+			return app.BindingRequest{}, fmt.Errorf("project %q is not registered", parts[1])
+		}
+		if !contains(project.Agents, parts[2]) {
+			return app.BindingRequest{}, fmt.Errorf("agent %q is not declared by project %q", parts[2], parts[1])
+		}
+		return app.BindingRequest{Project: parts[1], Agent: parts[2]}, nil
+	default:
+		return app.BindingRequest{}, fmt.Errorf("target must be agent:name, project:name, or project-agent:project:agent")
+	}
+}
+
+func (m Model) selectedErrorDetail() string {
+	rows := m.rows()
+	if m.Cursor < 0 || m.Cursor >= len(rows) {
+		return m.Err
+	}
+	current := rows[m.Cursor]
+	if strings.HasPrefix(current.Key, "status:update-failure:") {
+		skillID := strings.TrimPrefix(current.Key, "status:update-failure:")
+		for _, result := range m.Snapshot.Updates.Results {
+			if result.SkillID == skillID && result.State == updatecheck.StateCheckFailed {
+				return firstNonEmpty(result.Error, current.Detail, m.Err)
+			}
+		}
+	}
+	if strings.HasPrefix(current.Key, "status:item:") {
+		for _, item := range m.Snapshot.Status.Items {
+			if current.Key == statusItemKey(item) {
+				return firstNonEmpty(item.Message, item.Path, m.Err)
+			}
+		}
+	}
+	if strings.HasPrefix(current.Key, "inventory-issue:") {
+		return firstNonEmpty(current.Detail, current.Source, m.Err)
+	}
+	return firstNonEmpty(current.Detail, m.Err)
+}
+
+func (m Model) migrationActionAdopts(current row) bool {
+	for _, item := range m.migrationItems() {
+		if item.Key != current.Key {
+			continue
+		}
+		return item.Action == app.ScanActionAdopt || item.Action == app.ScanActionLinkExisting
+	}
+	return true
+}
+
+func (m *Model) back() {
+	switch m.Scope.Level {
+	case "project-skills":
+		m.Scope.Agent, m.Scope.Level = "", "project-targets"
+	case "agent-skills":
+		m.Scope = Scope{Level: "workspace-agents"}
+	case "project-targets":
+		m.Scope = Scope{Level: "workspace-projects"}
+	default:
+		m.Scope = Scope{}
+	}
+	m.Cursor, m.Scroll = 0, 0
+	m.Detail = false
+	m.DetailScroll = 0
+}
+
+func (m Model) selectedIDs() []string {
+	if m.confirm == ActionScan || m.Mode == ModeScan || m.ActiveView == ViewMigration {
+		return m.selectedTargets()
+	}
+	ids := make([]string, 0, len(m.Selected))
+	for id, selected := range m.Selected {
+		if selected {
+			ids = append(ids, id)
+		}
+	}
+	sortStrings(ids)
+	return ids
+}
+
+func (m Model) librarySelectionCount() int {
+	count := 0
+	for _, skill := range m.Snapshot.Config.Library.Skills {
+		if m.Selected["library:"+skill.ID] {
+			count++
+		}
+	}
+	return count
+}
+
+func (m Model) selectedLibraryIDs() []string {
+	ids := make([]string, 0, m.librarySelectionCount())
+	for _, skill := range m.Snapshot.Config.Library.Skills {
+		if m.Selected["library:"+skill.ID] {
+			ids = append(ids, skill.ID)
+		}
+	}
+	sortStrings(ids)
+	return ids
+}
+
+func (m Model) libraryBatchRequest(operation app.BatchOperation) (app.BatchRequest, error) {
+	ids := m.selectedLibraryIDs()
+	if len(ids) == 0 {
+		return app.BatchRequest{}, fmt.Errorf("select at least one library skill")
+	}
+	request := app.BatchRequest{Operation: operation}
+	switch operation {
+	case app.BatchEnable, app.BatchDisable:
+		return app.BatchRequest{}, fmt.Errorf("enable or disable requires an explicit binding scope")
+	case app.BatchUpdate:
+		request.SkillIDs = ids
+		request.Expected = make(map[string]app.ExpectedUpdate, len(ids))
+		for _, skillID := range ids {
+			skill, ok := snapshotSkill(m.Snapshot.Config, skillID)
+			if !ok || skill.Source == "" || skill.Ref == nil || skill.Ref.Kind != "branch" || skill.Ref.Value == "" {
+				return app.BatchRequest{}, fmt.Errorf("skill %q has no updateable source ref", skillID)
+			}
+			checked, ok := snapshotUpdate(m.Snapshot, skillID)
+			if !ok || checked.State != updatecheck.StateUpdateAvailable || checked.Current == "" || checked.Remote == "" || checked.Current != skill.Resolved {
+				return app.BatchRequest{}, fmt.Errorf("skill %q does not have a complete current update-available result", skillID)
+			}
+			request.Expected[skillID] = app.ExpectedUpdate{
+				Ref: &config.Ref{Kind: skill.Ref.Kind, Value: skill.Ref.Value}, Resolved: checked.Current, Remote: checked.Remote,
+			}
+		}
+	case app.BatchRemove:
+		request.SkillIDs = ids
+	default:
+		return app.BatchRequest{}, fmt.Errorf("unsupported library batch %q", operation)
+	}
+	return request, nil
+}
+
+func (m Model) parseBatchBindingScope(value string) (app.BindingRequest, error) {
+	parts := strings.Split(value, ":")
+	switch {
+	case len(parts) == 2 && parts[0] == "agent":
+		if _, ok := m.Snapshot.Config.Agents[parts[1]]; !ok {
+			return app.BindingRequest{}, fmt.Errorf("global agent %q is not configured", parts[1])
+		}
+		return app.BindingRequest{Agent: parts[1]}, nil
+	case len(parts) == 2 && parts[0] == "project":
+		if _, ok := findProject(m.Snapshot.Config.Projects, parts[1]); !ok {
+			return app.BindingRequest{}, fmt.Errorf("project %q is not registered", parts[1])
+		}
+		return app.BindingRequest{Project: parts[1]}, nil
+	case len(parts) == 3 && parts[0] == "project-agent":
+		project, ok := findProject(m.Snapshot.Config.Projects, parts[1])
+		if !ok {
+			return app.BindingRequest{}, fmt.Errorf("project %q is not registered", parts[1])
+		}
+		if !contains(project.Agents, parts[2]) {
+			return app.BindingRequest{}, fmt.Errorf("agent %q is not declared by project %q", parts[2], parts[1])
+		}
+		return app.BindingRequest{Project: parts[1], Agent: parts[2]}, nil
+	default:
+		return app.BindingRequest{}, fmt.Errorf("scope must be agent:<name>, project:<name>, or project-agent:<project>:<agent>")
+	}
+}
+
+func snapshotSkill(cfg config.Config, id string) (config.Skill, bool) {
+	for _, skill := range cfg.Library.Skills {
+		if skill.ID == id {
+			return skill, true
+		}
+	}
+	return config.Skill{}, false
+}
+
+func snapshotUpdate(snapshot app.Snapshot, id string) (updatecheck.Result, bool) {
+	for _, item := range snapshot.Updates.Results {
+		if item.SkillID == id {
+			return item, true
+		}
+	}
+	return updatecheck.Result{}, false
+}
+
+func findSkillResolved(cfg config.Config, id string) string {
+	for _, skill := range cfg.Library.Skills {
+		if skill.ID == id {
+			return skill.Resolved
+		}
+	}
+	return ""
+}
+
+func findRemoteUpdate(snapshot app.Snapshot, id string) string {
+	for _, item := range snapshot.Updates.Results {
+		if item.SkillID == id {
+			return item.Remote
+		}
+	}
+	return ""
+}
+
+func (m Model) migrationItems() []app.ScanItem {
+	if len(m.Scan.Items) > 0 && (m.Mode == ModeScan || m.filterParent == ModeScan || (m.Mode == ModeConfirm && m.confirm == ActionScan)) {
+		return m.Scan.Items
+	}
+	return m.Inventory.Items
+}
+
+func (m Model) selectedTargets() []string {
+	var targets []string
+	for _, item := range m.migrationItems() {
+		key := item.Key
+		if key == "" {
+			key = row{Origin: item.Origin, Target: item.Target}.selectionKey()
+		}
+		if m.Selected[key] {
+			targets = append(targets, item.Target)
+		}
+	}
+	sortStrings(targets)
+	return targets
+}
+
+func (m Model) selectedSelectors() []app.ScanSelector {
+	var selectors []app.ScanSelector
+	for _, item := range m.migrationItems() {
+		if !m.Selected[item.Key] || item.Key == "" {
+			continue
+		}
+		selectors = append(selectors, app.ScanSelector{
+			Key: item.Key, Origin: item.Origin, Target: item.Target,
+			ExpectedHash: item.ContentHash, ExpectedObjectID: item.ObjectID, ExpectedRootID: item.RootObjectID,
+			ExpectedState: item.State, ExpectedSkillID: item.Skill.ID, ExpectedLibraryHash: item.MatchedLibraryHash,
+		})
+	}
+	return selectors
+}
+
+func sortStrings(values []string) {
+	for i := 1; i < len(values); i++ {
+		for j := i; j > 0 && strings.Compare(values[j], values[j-1]) < 0; j-- {
+			values[j], values[j-1] = values[j-1], values[j]
+		}
+	}
+}
+
+func (m Model) updateRequest() app.UpdateRequest {
+	expected := make(map[string]app.ExpectedUpdate)
+	for _, item := range m.Snapshot.Updates.Results {
+		if !m.Selected[item.SkillID] {
+			continue
+		}
+		expected[item.SkillID] = app.ExpectedUpdate{Ref: findSkillRef(m.Snapshot.Config, item.SkillID), Resolved: item.Current, Remote: item.Remote}
+	}
+	return app.UpdateRequest{SkillIDs: m.selectedIDs(), Expected: expected, Confirmed: true, Refresh: true}
+}
+
+func findSkillRef(cfg config.Config, id string) *config.Ref {
+	for _, skill := range cfg.Library.Skills {
+		if skill.ID == id {
+			return skill.Ref
+		}
+	}
+	return nil
+}

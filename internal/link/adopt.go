@@ -66,7 +66,76 @@ func NewCleanupOperation(id string, scope config.Scope, target, skillID, reason 
 			return config.PendingOperation{}, err
 		}
 	}
-	return config.PendingOperation{ID: id, Kind: config.OperationCleanup, Scope: scope, Target: target, SkillID: skillID, Reason: reason}, nil
+	operation := config.PendingOperation{ID: id, Kind: config.OperationCleanup, Scope: scope, Target: target, SkillID: skillID, Reason: reason}
+	operation.Tombstone = filepath.Join(filepath.Dir(target), ".aikit-cleanup-"+id)
+	if _, statErr := os.Lstat(operation.Tombstone); statErr == nil {
+		return config.PendingOperation{}, fmt.Errorf("cleanup tombstone already exists")
+	} else if !os.IsNotExist(statErr) {
+		return config.PendingOperation{}, statErr
+	}
+	if _, statErr := os.Lstat(target); os.IsNotExist(statErr) {
+		operation.ExpectedAbsent = true
+	} else if statErr != nil {
+		return config.PendingOperation{}, statErr
+	} else {
+		fingerprint, fingerprintErr := FingerprintPath(target)
+		if fingerprintErr != nil {
+			return config.PendingOperation{}, fingerprintErr
+		}
+		operation.ExpectedSkillID = skillID
+		operation.Expected = &fingerprint
+	}
+	return operation, nil
+}
+
+func NewReconcileOperation(id string, scope config.Scope, target, skillID, libraryRoot, reason string) (config.PendingOperation, error) {
+	if !filepath.IsAbs(target) || filepath.Clean(target) != target {
+		return config.PendingOperation{}, fmt.Errorf("reconcile target must be a clean absolute path")
+	}
+	state, err := Inspect(target, libraryRoot)
+	if err != nil {
+		return config.PendingOperation{}, err
+	}
+	operation := config.PendingOperation{Kind: config.OperationReconcile, Scope: scope, Target: target, SkillID: skillID, Reason: reason}
+	switch state.Kind {
+	case StateAbsent:
+		operation.ExpectedAbsent = true
+	case StateManagedLink:
+		fingerprint, fingerprintErr := FingerprintPath(target)
+		if fingerprintErr != nil {
+			return config.PendingOperation{}, fingerprintErr
+		}
+		operation.ExpectedSkillID = state.SkillID
+		operation.Expected = &fingerprint
+	default:
+		return config.PendingOperation{}, fmt.Errorf("reconcile target is not absent or aikit-managed")
+	}
+	if id == "" {
+		id, err = operationID("reconcile")
+		if err != nil {
+			return config.PendingOperation{}, err
+		}
+	}
+	operation.ID = id
+	operation.Tombstone = filepath.Join(filepath.Dir(target), ".aikit-reconcile-"+id)
+	if _, statErr := os.Lstat(operation.Tombstone); statErr == nil {
+		return config.PendingOperation{}, fmt.Errorf("reconcile tombstone already exists")
+	} else if !os.IsNotExist(statErr) {
+		return config.PendingOperation{}, statErr
+	}
+	return operation, nil
+}
+
+func ExpectedManagedFingerprint(libraryRoot, skillID string) (*config.Fingerprint, error) {
+	path, safe := libraryPath(libraryRoot, skillID)
+	if !safe {
+		return nil, fmt.Errorf("unsafe skill id %q", skillID)
+	}
+	content, err := FingerprintPath(path)
+	if err != nil {
+		return nil, err
+	}
+	return &config.Fingerprint{Kind: "symlink", Hash: content.Hash, LinkTarget: path}, nil
 }
 
 func operationID(prefix string) (string, error) {

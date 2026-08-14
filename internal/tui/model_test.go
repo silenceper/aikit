@@ -14,16 +14,179 @@ import (
 
 type fakeService struct {
 	app.Service
-	snapshot           app.Snapshot
-	snapshotCalls      int
-	updateCalls        int
-	lastUpdate         app.UpdateRequest
-	removeCalls        int
-	lastRemove         app.RemoveRequest
-	projectRemoveCalls int
-	lastProjectRemove  app.ProjectRemoveRequest
-	presetCalls        int
-	lastPreset         app.PresetRequest
+	snapshot                   app.Snapshot
+	snapshotCalls              int
+	lastSnapshot               app.StatusRequest
+	updateCalls                int
+	lastUpdate                 app.UpdateRequest
+	updateResult               app.Result
+	removeCalls                int
+	lastRemove                 app.RemoveRequest
+	projectRemoveCalls         int
+	lastProjectRemove          app.ProjectRemoveRequest
+	projectRemoveResult        app.Result
+	projectRemovePreviewCalls  int
+	lastProjectRemovePreview   app.ProjectRemoveRequest
+	projectRemovePreview       app.MutationPreview
+	projectPreviewCalls        int
+	lastProjectPreview         app.ProjectEditRequest
+	projectPreview             app.ProjectEditPreview
+	projectEditCalls           int
+	lastProjectEdit            app.ProjectEditRequest
+	presetCalls                int
+	lastPreset                 app.PresetRequest
+	previewAddCalls            int
+	lastPreviewAdd             app.AddPreviewRequest
+	addPreview                 app.AddPreview
+	addCalls                   int
+	lastAdd                    app.AddRequest
+	detailCalls                int
+	detail                     app.SkillDetail
+	previewBindingCalls        int
+	lastBindingPreview         app.BindingPreviewRequest
+	bindingPreview             app.MutationPreview
+	bindingCalls               int
+	lastBinding                app.BindingRequest
+	lastBindingEnable          bool
+	previewRemoveCalls         int
+	removePreview              app.MutationPreview
+	removePreviews             map[string]app.MutationPreview
+	previewPresetCalls         int
+	lastPresetPreview          app.PresetPreviewRequest
+	presetPreview              app.MutationPreview
+	previewPresetMutationCalls int
+	lastPresetMutationPreview  app.PresetMutationRequest
+	presetMutationPreview      app.MutationPreview
+	mutatePresetCalls          int
+	lastPresetMutation         app.PresetMutationRequest
+	syncCalls                  int
+	lastSync                   app.SyncRequest
+	syncResult                 app.Result
+	configurationCalls         int
+	configuration              app.ConfigurationDetail
+	validateConfigurationCalls int
+	configurationValidation    app.ConfigurationValidation
+	compareCalls               int
+	lastCompare                app.CompareRequest
+	compareResult              app.CompareResult
+	batchCalls                 int
+	lastBatch                  app.BatchRequest
+	batchResult                app.BatchResult
+	previewRecoveryCalls       int
+	lastRecoveryPreview        app.RecoveryRequest
+	recoveryPreview            app.RecoveryPreview
+	resumeRecoveryCalls        int
+	lastRecoveryResume         app.RecoveryRequest
+	recoveryResult             app.RecoveryResult
+}
+
+func (f *fakeService) PreviewRecovery(_ context.Context, request app.RecoveryRequest) (app.RecoveryPreview, error) {
+	f.previewRecoveryCalls++
+	f.lastRecoveryPreview = request
+	return f.recoveryPreview, nil
+}
+
+func (f *fakeService) ResumeRecovery(_ context.Context, request app.RecoveryRequest) (app.RecoveryResult, error) {
+	f.resumeRecoveryCalls++
+	f.lastRecoveryResume = request
+	return f.recoveryResult, nil
+}
+
+func (f *fakeService) Batch(_ context.Context, request app.BatchRequest) (app.BatchResult, error) {
+	f.batchCalls++
+	f.lastBatch = request
+	if f.batchResult.Items != nil || f.batchResult.Issues != nil {
+		return f.batchResult, nil
+	}
+	return app.BatchResult{Result: app.Result{Changed: true}}, nil
+}
+
+func (f *fakeService) PreviewAdd(_ context.Context, request app.AddPreviewRequest) (app.AddPreview, error) {
+	f.previewAddCalls++
+	f.lastPreviewAdd = request
+	return f.addPreview, nil
+}
+
+func (f *fakeService) Add(_ context.Context, request app.AddRequest) (app.Result, error) {
+	f.addCalls++
+	f.lastAdd = request
+	return app.Result{Changed: true}, nil
+}
+
+func (f *fakeService) SkillDetail(_ context.Context, _ string) (app.SkillDetail, error) {
+	f.detailCalls++
+	return f.detail, nil
+}
+
+func (f *fakeService) PreviewBinding(_ context.Context, request app.BindingPreviewRequest) (app.MutationPreview, error) {
+	f.previewBindingCalls++
+	f.lastBindingPreview = request
+	return f.bindingPreview, nil
+}
+
+func (f *fakeService) Enable(_ context.Context, request app.BindingRequest) (app.Result, error) {
+	f.bindingCalls++
+	f.lastBinding = request
+	f.lastBindingEnable = true
+	return app.Result{Changed: true}, nil
+}
+
+func (f *fakeService) Disable(_ context.Context, request app.BindingRequest) (app.Result, error) {
+	f.bindingCalls++
+	f.lastBinding = request
+	f.lastBindingEnable = false
+	return app.Result{Changed: true}, nil
+}
+
+func (f *fakeService) PreviewRemove(_ context.Context, request app.RemoveRequest) (app.MutationPreview, error) {
+	f.previewRemoveCalls++
+	if preview, ok := f.removePreviews[request.SkillID]; ok {
+		return preview, nil
+	}
+	return f.removePreview, nil
+}
+
+func (f *fakeService) PreviewPreset(_ context.Context, request app.PresetPreviewRequest) (app.MutationPreview, error) {
+	f.previewPresetCalls++
+	f.lastPresetPreview = request
+	return f.presetPreview, nil
+}
+
+func (f *fakeService) PreviewPresetMutation(_ context.Context, request app.PresetMutationRequest) (app.MutationPreview, error) {
+	f.previewPresetMutationCalls++
+	f.lastPresetMutationPreview = request
+	if f.presetMutationPreview.Title != "" || f.presetMutationPreview.Summary != "" || len(f.presetMutationPreview.References) > 0 || len(f.presetMutationPreview.AffectedScopes) > 0 || len(f.presetMutationPreview.Plan.Actions) > 0 || f.presetMutationPreview.RequiresForce {
+		return f.presetMutationPreview, nil
+	}
+	return f.presetPreview, nil
+}
+
+func (f *fakeService) MutatePreset(_ context.Context, request app.PresetMutationRequest) (app.Result, error) {
+	f.mutatePresetCalls++
+	f.lastPresetMutation = request
+	return app.Result{Changed: true}, nil
+}
+
+func (f *fakeService) Sync(_ context.Context, request app.SyncRequest) (app.Result, error) {
+	f.syncCalls++
+	f.lastSync = request
+	return f.syncResult, nil
+}
+
+func (f *fakeService) Configuration(_ context.Context) (app.ConfigurationDetail, error) {
+	f.configurationCalls++
+	return f.configuration, nil
+}
+
+func (f *fakeService) ValidateConfiguration(_ context.Context) (app.ConfigurationValidation, error) {
+	f.validateConfigurationCalls++
+	return f.configurationValidation, nil
+}
+
+func (f *fakeService) Compare(_ context.Context, request app.CompareRequest) (app.CompareResult, error) {
+	f.compareCalls++
+	f.lastCompare = request
+	return f.compareResult, nil
 }
 
 func (f *fakeService) Remove(_ context.Context, request app.RemoveRequest) (app.Result, error) {
@@ -35,6 +198,27 @@ func (f *fakeService) Remove(_ context.Context, request app.RemoveRequest) (app.
 func (f *fakeService) RemoveProject(_ context.Context, request app.ProjectRemoveRequest) (app.Result, error) {
 	f.projectRemoveCalls++
 	f.lastProjectRemove = request
+	if f.projectRemoveResult.Changed || len(f.projectRemoveResult.Warnings) > 0 || len(f.projectRemoveResult.Link.Warnings) > 0 || len(f.projectRemoveResult.Link.Issues) > 0 {
+		return f.projectRemoveResult, nil
+	}
+	return app.Result{Changed: true}, nil
+}
+
+func (f *fakeService) PreviewProjectRemove(_ context.Context, request app.ProjectRemoveRequest) (app.MutationPreview, error) {
+	f.projectRemovePreviewCalls++
+	f.lastProjectRemovePreview = request
+	return f.projectRemovePreview, nil
+}
+
+func (f *fakeService) PreviewProjectEdit(_ context.Context, request app.ProjectEditRequest) (app.ProjectEditPreview, error) {
+	f.projectPreviewCalls++
+	f.lastProjectPreview = request
+	return f.projectPreview, nil
+}
+
+func (f *fakeService) EditProject(_ context.Context, request app.ProjectEditRequest) (app.Result, error) {
+	f.projectEditCalls++
+	f.lastProjectEdit = request
 	return app.Result{Changed: true}, nil
 }
 
@@ -44,14 +228,18 @@ func (f *fakeService) PutPreset(_ context.Context, request app.PresetRequest) (a
 	return app.Result{Changed: true}, nil
 }
 
-func (f *fakeService) Snapshot(context.Context, app.StatusRequest) (app.Snapshot, error) {
+func (f *fakeService) Snapshot(_ context.Context, request app.StatusRequest) (app.Snapshot, error) {
 	f.snapshotCalls++
+	f.lastSnapshot = request
 	return f.snapshot, nil
 }
 
 func (f *fakeService) Update(_ context.Context, request app.UpdateRequest) (app.Result, error) {
 	f.updateCalls++
 	f.lastUpdate = request
+	if f.updateResult.Updates.Results != nil || f.updateResult.Updates.Warnings != nil {
+		return f.updateResult, nil
+	}
 	return app.Result{Changed: true}, nil
 }
 
@@ -66,6 +254,13 @@ func (f *fakeMigration) Scan(_ context.Context, request app.ScanRequest) (app.Sc
 	f.scanCalls++
 	f.requests = append(f.requests, request)
 	return f.result, nil
+}
+
+func (f *fakeMigration) Inventory(_ context.Context, request app.InventoryRequest) <-chan app.InventoryEvent {
+	events := make(chan app.InventoryEvent, 1)
+	events <- app.InventoryEvent{Generation: request.Generation, Done: true}
+	close(events)
+	return events
 }
 
 func testSnapshot() app.Snapshot {
@@ -123,13 +318,13 @@ func TestModelViewKeysNavigationFilterHelpAndDetail(t *testing.T) {
 	service := &fakeService{snapshot: testSnapshot()}
 	m := loadedModel(t, service, &fakeMigration{})
 
-	for input, want := range map[string]View{"1": ViewLibrary, "2": ViewAgents, "3": ViewProjects, "4": ViewPresets, "5": ViewStatus} {
+	for input, want := range map[string]View{"1": ViewOverview, "2": ViewLibrary, "3": ViewWorkspaces, "4": ViewPresets, "5": ViewMigration, "6": ViewStatus} {
 		m, _ = apply(m, input)
 		if m.ActiveView != want {
 			t.Fatalf("key %s selected %s, want %s", input, m.ActiveView, want)
 		}
 	}
-	m, _ = apply(m, "1")
+	m, _ = apply(m, "2")
 	m, _ = apply(m, "j")
 	if m.Cursor != 1 {
 		t.Fatalf("j cursor = %d, want 1", m.Cursor)
@@ -166,7 +361,14 @@ func TestModelViewKeysNavigationFilterHelpAndDetail(t *testing.T) {
 func TestAgentsProjectsAndPresetsEnterSubViews(t *testing.T) {
 	m := loadedModel(t, &fakeService{snapshot: testSnapshot()}, &fakeMigration{})
 
-	m, _ = apply(m, "2")
+	m, _ = apply(m, "3")
+	for i, row := range m.rows() {
+		if row.ID == "agents" {
+			m.Cursor = i
+			break
+		}
+	}
+	m, _ = apply(m, "enter")
 	for i, row := range m.rows() {
 		if row.ID == "codex" {
 			m.Cursor = i
@@ -175,12 +377,23 @@ func TestAgentsProjectsAndPresetsEnterSubViews(t *testing.T) {
 	}
 	m, _ = apply(m, "enter")
 	if m.Scope.Agent != "codex" || len(m.rows()) != 2 {
-		t.Fatalf("agent subview = %#v rows=%d", m.Scope, len(m.rows()))
+		t.Fatalf("agent subview = %#v cursor=%d active=%q rows=%#v", m.Scope, m.Cursor, m.rows()[m.Cursor].ID, m.rows())
 	}
 	m, _ = apply(m, "esc")
 	m, _ = apply(m, "3")
+	for i, row := range m.rows() {
+		if row.ID == "projects" {
+			m.Cursor = i
+			break
+		}
+	}
 	m, _ = apply(m, "enter")
-	if m.Scope.Project != "aikit" || m.rows()[0].ID != "common" {
+	m, _ = apply(m, "enter")
+	foundCommon := false
+	for _, row := range m.rows() {
+		foundCommon = foundCommon || row.ID == "common"
+	}
+	if m.Scope.Project != "aikit" || !foundCommon {
 		t.Fatalf("project subview = %#v rows=%#v", m.Scope, m.rows())
 	}
 	m, _ = apply(m, "esc")
@@ -219,7 +432,7 @@ func TestUpdateCancelAndAsyncConfirmation(t *testing.T) {
 	}
 	next, refresh := m.Update(msg)
 	m = next.(Model)
-	if !strings.Contains(m.Status, "updated") || refresh == nil {
+	if !strings.Contains(strings.ToLower(m.Status), "updated") || refresh == nil {
 		t.Fatalf("async result status=%q refresh=%v", m.Status, refresh != nil)
 	}
 }
@@ -270,7 +483,7 @@ func TestStatusAdoptPreviewsOnlySelectedTarget(t *testing.T) {
 	target := "/work/.codex/skills/loose"
 	migration := &fakeMigration{result: app.ScanResult{Items: []app.ScanItem{{Origin: "p/aikit/codex", Target: target, Skill: config.Skill{ID: "local/loose", Name: "loose"}}}}}
 	m := loadedModel(t, &fakeService{snapshot: testSnapshot()}, migration)
-	m, _ = apply(m, "5")
+	m, _ = apply(m, "6")
 	m, cmd := apply(m, "A")
 	if cmd == nil || migration.scanCalls != 0 {
 		t.Fatal("status adopt preview must be deferred")
@@ -327,7 +540,12 @@ func TestFilterRestoresParentSubtableMode(t *testing.T) {
 func TestLibraryDeleteAndProjectRemoveRequireConfirmation(t *testing.T) {
 	service := &fakeService{snapshot: testSnapshot()}
 	m := loadedModel(t, service, &fakeMigration{})
-	m, _ = apply(m, "d")
+	m, preview := apply(m, "d")
+	if preview == nil {
+		t.Fatal("delete preview was not deferred")
+	}
+	next, _ := m.Update(preview())
+	m = next.(Model)
 	if m.Mode != ModeConfirm || service.removeCalls != 0 {
 		t.Fatalf("delete mutated before confirm: mode=%s calls=%d", m.Mode, service.removeCalls)
 	}
@@ -335,7 +553,9 @@ func TestLibraryDeleteAndProjectRemoveRequireConfirmation(t *testing.T) {
 	if service.removeCalls != 0 {
 		t.Fatal("cancelled delete mutated")
 	}
-	m, _ = apply(m, "d")
+	m, preview = apply(m, "d")
+	next, _ = m.Update(preview())
+	m = next.(Model)
 	m, cmd := apply(m, "enter")
 	if cmd == nil || service.removeCalls != 0 {
 		t.Fatal("confirmed delete was not deferred")
@@ -348,7 +568,19 @@ func TestLibraryDeleteAndProjectRemoveRequireConfirmation(t *testing.T) {
 	service.snapshotCalls = 0
 	m = loadedModel(t, service, &fakeMigration{})
 	m, _ = apply(m, "3")
-	m, _ = apply(m, "x")
+	for i, row := range m.rows() {
+		if row.ID == "projects" {
+			m.Cursor = i
+			break
+		}
+	}
+	m, _ = apply(m, "enter")
+	m, preview = apply(m, "x")
+	if preview == nil || service.projectRemovePreviewCalls != 0 {
+		t.Fatal("project remove preview was not deferred")
+	}
+	next, _ = m.Update(preview())
+	m = next.(Model)
 	if m.Mode != ModeConfirm || service.projectRemoveCalls != 0 {
 		t.Fatal("project remove mutated before confirm")
 	}
@@ -362,7 +594,7 @@ func TestLibraryDeleteAndProjectRemoveRequireConfirmation(t *testing.T) {
 	}
 }
 
-func TestPresetMemberSpaceTogglesViaAppCommand(t *testing.T) {
+func TestPresetMemberSpaceStagesWithoutMutation(t *testing.T) {
 	service := &fakeService{snapshot: testSnapshot()}
 	m := loadedModel(t, service, &fakeMigration{})
 	m, _ = apply(m, "4")
@@ -377,11 +609,7 @@ func TestPresetMemberSpaceTogglesViaAppCommand(t *testing.T) {
 		}
 	}
 	m, cmd := apply(m, "space")
-	if cmd == nil || service.presetCalls != 0 {
-		t.Fatal("preset toggle was not deferred")
-	}
-	_ = cmd()
-	if service.presetCalls != 1 || service.lastPreset.Name != "review" || len(service.lastPreset.Skills) != 1 || service.lastPreset.Skills[0] != "acme/beta" || service.lastPreset.Remove {
-		t.Fatalf("preset add request = %#v", service.lastPreset)
+	if cmd != nil || service.presetCalls != 0 || service.mutatePresetCalls != 0 || !m.Selected["acme/beta"] {
+		t.Fatalf("preset toggle was not staged: cmd=%v putCalls=%d mutationCalls=%d selected=%v", cmd != nil, service.presetCalls, service.mutatePresetCalls, m.Selected)
 	}
 }

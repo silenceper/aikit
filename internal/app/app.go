@@ -19,6 +19,14 @@ type LibraryService interface {
 	PrepareAdd(context.Context, AddPrepareRequest, []config.Skill) (LibraryMutation, error)
 	PrepareUpdate(context.Context, []UpdatePrepareItem) (LibraryMutation, error)
 	PrepareRemove(context.Context, config.Skill) (LibraryMutation, error)
+	PrepareRemoveBatch(context.Context, []config.Skill) (LibraryMutation, error)
+}
+
+// AddDiscoverer performs source discovery without acquiring the config lock or
+// changing config, the central library, or the persistent cache. A remote
+// source may be reported as NetworkRequired for an explicit follow-up action.
+type AddDiscoverer interface {
+	Preview(context.Context, AddPreviewRequest) (AddPreview, error)
 }
 
 type AddPrepareRequest struct {
@@ -51,15 +59,19 @@ type LibraryRecovery interface {
 }
 
 type Dependencies struct {
-	Store           config.Store
-	Paths           config.Paths
-	UserHome        string
-	Library         LibraryService
-	Updates         UpdateChecker
-	LibraryRecovery LibraryRecovery
-	Execute         func(link.Plan, bool) link.Result
-	Recover         func(string, []config.PendingOperation, link.Selector, bool) link.Result
-	Inspect         func(*config.Config, string, string) status.Report
+	Store                 config.Store
+	Paths                 config.Paths
+	UserHome              string
+	Library               LibraryService
+	AddDiscoverer         AddDiscoverer
+	Updates               UpdateChecker
+	LibraryRecovery       LibraryRecovery
+	Execute               func(link.Plan, bool) link.Result
+	Recover               func(string, []config.PendingOperation, link.Selector, bool) link.Result
+	Inspect               func(*config.Config, string, string) status.Report
+	OpenSkillRoot         func(string, string) (library.VerifiedSkillRoot, error)
+	AfterRemovePrepare    func()
+	AfterRemoveCheckpoint func()
 }
 
 type App struct{ deps Dependencies }
@@ -75,6 +87,11 @@ func New(deps Dependencies) *App {
 	if deps.Library == nil {
 		deps.Library = NewLibraryService(service)
 	}
+	if deps.AddDiscoverer == nil {
+		if discoverer, ok := deps.Library.(AddDiscoverer); ok {
+			deps.AddDiscoverer = discoverer
+		}
+	}
 	if deps.LibraryRecovery == nil {
 		deps.LibraryRecovery = service
 	}
@@ -86,6 +103,9 @@ func New(deps Dependencies) *App {
 	}
 	if deps.Inspect == nil {
 		deps.Inspect = status.Inspect
+	}
+	if deps.OpenSkillRoot == nil {
+		deps.OpenSkillRoot = library.OpenVerifiedSkillRoot
 	}
 	return &App{deps: deps}
 }
@@ -118,12 +138,15 @@ func (a *App) Snapshot(ctx context.Context, request StatusRequest) (Snapshot, er
 	return snapshot, nil
 }
 
-func (a *App) beforeMutation(ctx context.Context, ledger []config.Skill) error {
+func (a *App) beforeMutation(ctx context.Context, cfg *config.Config) error {
+	if len(cfg.PendingOperations) > 0 {
+		return pendingRecoveryError(cfg.PendingOperations)
+	}
 	if a.deps.LibraryRecovery != nil {
 		if err := os.MkdirAll(a.deps.Paths.LibrarySkills, 0o755); err != nil {
 			return err
 		}
-		issues, err := a.deps.LibraryRecovery.RecoverBatches(ctx, ledger)
+		issues, err := a.deps.LibraryRecovery.RecoverBatches(ctx, cfg.Library.Skills)
 		if err != nil {
 			return err
 		}
@@ -134,6 +157,14 @@ func (a *App) beforeMutation(ctx context.Context, ledger []config.Skill) error {
 		return fmt.Errorf("library recovery service is required for mutations")
 	}
 	return nil
+}
+
+func pendingRecoveryError(pending []config.PendingOperation) error {
+	operations := make([]RecoveryOperation, len(pending))
+	for i, operation := range pending {
+		operations[i] = RecoveryOperation{Operation: operation, CanResume: true}
+	}
+	return &PendingRecoveryError{Operations: operations}
 }
 
 func (a *App) recoverLibrary(ctx context.Context, ledger []config.Skill) error {
@@ -169,6 +200,9 @@ func removeCompleted(cfg *config.Config, ids []string) {
 	kept := cfg.PendingOperations[:0]
 	for _, operation := range cfg.PendingOperations {
 		if _, ok := done[operation.ID]; !ok {
+			if _, parentCompleted := done[operation.ParentOperationID]; parentCompleted {
+				operation.ParentOperationID = ""
+			}
 			kept = append(kept, operation)
 		}
 	}

@@ -448,28 +448,32 @@ func validateRemoveJournal(root string, journal batchJournal) error {
 	if journal.Phase != "prepared" && journal.Phase != "mutating" && journal.Phase != "committed" {
 		return fmt.Errorf("invalid remove phase %q", journal.Phase)
 	}
-	if len(journal.Copies) != 1 {
-		return fmt.Errorf("remove journal must contain one copy")
+	if len(journal.Copies) == 0 {
+		return fmt.Errorf("remove journal must contain copies")
 	}
-	copy := journal.Copies[0]
-	destination, err := canonicalRecoveryPath(copy.Destination)
-	if err != nil || !isWithin(root, destination) {
-		return fmt.Errorf("remove destination escapes library root")
-	}
-	relative, err := filepath.Rel(root, destination)
-	if err != nil || validateID(filepath.ToSlash(relative)) != nil || strings.HasPrefix(filepath.ToSlash(relative), ".aikit-batch-") {
-		return fmt.Errorf("invalid remove destination")
-	}
-	wantQuarantine := batchArtifactPath(filepath.Dir(copy.Destination), "quarantine", journal.ID, 0)
-	if copy.Quarantine != wantQuarantine || copy.Old.Identity == "" || copy.Old.Fingerprint == "" || copy.Staging != "" || copy.Backup != "" {
-		return fmt.Errorf("invalid remove artifact record")
-	}
-	if copy.Operation != "remove" || copy.OldSkill == nil || copy.OldSkill.ID != filepath.ToSlash(relative) || copy.NewSkill != nil {
-		return fmt.Errorf("invalid remove skill metadata")
-	}
-	quarantine, err := canonicalRecoveryPath(copy.Quarantine)
-	if err != nil || !isWithin(root, quarantine) {
-		return fmt.Errorf("remove quarantine escapes library root")
+	for index, copy := range journal.Copies {
+		destination, err := canonicalRecoveryPath(copy.Destination)
+		if err != nil || !isWithin(root, destination) {
+			return fmt.Errorf("remove destination escapes library root")
+		}
+		relative, err := filepath.Rel(root, destination)
+		if err != nil || validateID(filepath.ToSlash(relative)) != nil || strings.HasPrefix(filepath.ToSlash(relative), ".aikit-batch-") {
+			return fmt.Errorf("invalid remove destination")
+		}
+		wantQuarantine := batchArtifactPath(filepath.Dir(copy.Destination), "quarantine", journal.ID, index)
+		if copy.Quarantine != wantQuarantine || copy.Staging != "" || copy.Backup != "" {
+			return fmt.Errorf("invalid remove artifact record")
+		}
+		if copy.Existed && (copy.Old.Identity == "" || copy.Old.Fingerprint == "") || !copy.Existed && (copy.Old.Identity != "" || copy.Old.Fingerprint != "") {
+			return fmt.Errorf("invalid remove owner record")
+		}
+		if copy.Operation != "remove" || copy.OldSkill == nil || copy.OldSkill.ID != filepath.ToSlash(relative) || copy.NewSkill != nil {
+			return fmt.Errorf("invalid remove skill metadata")
+		}
+		quarantine, err := canonicalRecoveryPath(copy.Quarantine)
+		if err != nil || !isWithin(root, quarantine) {
+			return fmt.Errorf("remove quarantine escapes library root")
+		}
 	}
 	return nil
 }
@@ -692,33 +696,69 @@ func recoverRemoveJournal(ctx context.Context, path string, journal batchJournal
 	if err := ctx.Err(); err != nil {
 		return []RecoveryIssue{{Journal: path, Action: "preserved", Detail: err.Error()}}
 	}
-	copy := journal.Copies[0]
-	oldOwner := ownerFromJournal(copy.Old)
-	if copy.OldSkill != nil {
-		if current, exists := ledger[copy.OldSkill.ID]; exists {
-			if skillRecoveryMatch(current, *copy.OldSkill) {
-				return rollbackRemoveJournal(path, journal, journalOwner, copy, oldOwner)
-			}
+	rollback := true
+	for _, copy := range journal.Copies {
+		current, exists := ledger[copy.OldSkill.ID]
+		if exists && skillRecoveryMatch(current, *copy.OldSkill) {
+			continue
+		}
+		if exists {
 			return []RecoveryIssue{{Journal: path, Path: copy.Destination, Action: "preserved", Detail: "ledger skill does not match recorded remove metadata"}}
 		}
+		rollback = false
 	}
-	if _, err := os.Lstat(copy.Quarantine); err == nil {
-		if err := removeOwnedTree(copy.Quarantine, oldOwner); err != nil {
-			return []RecoveryIssue{{Journal: path, Path: copy.Quarantine, Action: "preserved", Detail: err.Error()}}
+	var issues []RecoveryIssue
+	for _, copy := range journal.Copies {
+		oldOwner := ownerFromJournal(copy.Old)
+		var err error
+		if rollback {
+			err = rollbackRemoveCopy(copy, oldOwner)
+		} else {
+			err = rollForwardRemoveCopy(copy, oldOwner)
 		}
-	} else if !os.IsNotExist(err) {
-		return []RecoveryIssue{{Journal: path, Path: copy.Quarantine, Action: "preserved", Detail: err.Error()}}
-	} else if _, err := os.Lstat(copy.Destination); err == nil {
-		if err := removeOwnedArtifact(copy.Destination, copy.Quarantine, oldOwner, moveNoReplace); err != nil {
-			return []RecoveryIssue{{Journal: path, Path: copy.Destination, Action: "preserved", Detail: err.Error()}}
+		if err != nil {
+			issues = append(issues, RecoveryIssue{Journal: path, Path: copy.Destination, Action: "preserved", Detail: err.Error()})
 		}
-	} else if !os.IsNotExist(err) {
-		return []RecoveryIssue{{Journal: path, Path: copy.Destination, Action: "preserved", Detail: err.Error()}}
+	}
+	if len(issues) > 0 {
+		return issues
 	}
 	if err := removeOwnedJournal(filepath.Dir(path), path, journal.ID, journalOwner); err != nil {
 		return []RecoveryIssue{{Journal: path, Action: "preserved", Detail: err.Error()}}
 	}
 	return nil
+}
+
+func rollForwardRemoveCopy(copy journalCopy, oldOwner ownedTree) error {
+	if !copy.Existed {
+		return nil
+	}
+	if _, err := os.Lstat(copy.Quarantine); err == nil {
+		return removeOwnedTree(copy.Quarantine, oldOwner)
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if _, err := os.Lstat(copy.Destination); err == nil {
+		return removeOwnedArtifact(copy.Destination, copy.Quarantine, oldOwner, moveNoReplace)
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+func rollbackRemoveCopy(copy journalCopy, oldOwner ownedTree) error {
+	if !copy.Existed {
+		return nil
+	}
+	if _, err := os.Lstat(copy.Destination); err == nil {
+		return verifyOwnedTree(copy.Destination, oldOwner)
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if err := verifyOwnedTree(copy.Quarantine, oldOwner); err != nil {
+		return fmt.Errorf("old destination and authenticated quarantine are unavailable")
+	}
+	return moveNoReplace(copy.Quarantine, copy.Destination)
 }
 
 func skillRecoveryMatch(current, recorded config.Skill) bool {

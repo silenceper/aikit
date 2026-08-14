@@ -58,7 +58,7 @@ func defaultDependencies() Dependencies {
 	migration := migrate.New(migrate.Dependencies{Store: config.Store{Paths: paths}, Paths: paths, UserHome: home, WorkingDir: workingDir, Library: lib})
 	deps := Dependencies{Service: service, Migration: migration, WorkingDir: workingDir}
 	deps.LaunchTUI = func(ctx context.Context, selected string) error {
-		view, action := tui.ViewLibrary, tui.ActionNone
+		view, action := tui.ViewOverview, tui.ActionNone
 		switch selected {
 		case "agents":
 			view = tui.ViewAgents
@@ -208,6 +208,27 @@ func (s errorService) Snapshot(context.Context, app.StatusRequest) (app.Snapshot
 func (s errorService) PreviewAdd(context.Context, app.AddPreviewRequest) (app.AddPreview, error) {
 	return app.AddPreview{}, s.fail()
 }
+func (s errorService) PreviewBinding(context.Context, app.BindingPreviewRequest) (app.MutationPreview, error) {
+	return app.MutationPreview{}, s.fail()
+}
+func (s errorService) PreviewRemove(context.Context, app.RemoveRequest) (app.MutationPreview, error) {
+	return app.MutationPreview{}, s.fail()
+}
+func (s errorService) PreviewPreset(context.Context, app.PresetPreviewRequest) (app.MutationPreview, error) {
+	return app.MutationPreview{}, s.fail()
+}
+func (s errorService) PreviewPresetMutation(context.Context, app.PresetMutationRequest) (app.MutationPreview, error) {
+	return app.MutationPreview{}, s.fail()
+}
+func (s errorService) SkillDetail(context.Context, string) (app.SkillDetail, error) {
+	return app.SkillDetail{}, s.fail()
+}
+func (s errorService) Configuration(context.Context) (app.ConfigurationDetail, error) {
+	return app.ConfigurationDetail{}, s.fail()
+}
+func (s errorService) ValidateConfiguration(context.Context) (app.ConfigurationValidation, error) {
+	return app.ConfigurationValidation{}, s.fail()
+}
 func (s errorService) Add(context.Context, app.AddRequest) (app.Result, error) {
 	return app.Result{}, s.fail()
 }
@@ -238,6 +259,27 @@ func (s errorService) EditProject(context.Context, app.ProjectEditRequest) (app.
 func (s errorService) PreviewProjectEdit(context.Context, app.ProjectEditRequest) (app.ProjectEditPreview, error) {
 	return app.ProjectEditPreview{}, s.fail()
 }
+func (s errorService) PreviewProjectRemove(context.Context, app.ProjectRemoveRequest) (app.MutationPreview, error) {
+	return app.MutationPreview{}, s.fail()
+}
 func (s errorService) RemoveProject(context.Context, app.ProjectRemoveRequest) (app.Result, error) {
 	return app.Result{}, s.fail()
+}
+func (s errorService) Batch(context.Context, app.BatchRequest) (app.BatchResult, error) {
+	return app.BatchResult{}, s.fail()
+}
+func (s errorService) MutatePreset(context.Context, app.PresetMutationRequest) (app.Result, error) {
+	return app.Result{}, s.fail()
+}
+func (s errorService) Compare(context.Context, app.CompareRequest) (app.CompareResult, error) {
+	return app.CompareResult{}, s.fail()
+}
+func (s errorService) PreviewRecovery(context.Context, app.RecoveryRequest) (app.RecoveryPreview, error) {
+	return app.RecoveryPreview{}, s.fail()
+}
+func (s errorService) ResumeRecovery(context.Context, app.RecoveryRequest) (app.RecoveryResult, error) {
+	return app.RecoveryResult{}, s.fail()
+}
+func (s errorService) RollbackRecovery(context.Context, app.RecoveryRequest) (app.RecoveryResult, error) {
+	return app.RecoveryResult{}, s.fail()
 }

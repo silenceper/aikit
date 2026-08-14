@@ -23,11 +23,11 @@ type Mutation struct {
 	committed bool
 }
 
-type removeMutation struct {
+type removeBatchMutation struct {
 	service Service
 	journal batchJournal
 	path    string
-	owner   ownedTree
+	owners  []ownedTree
 }
 
 func (m *Mutation) Commit(ctx context.Context) error {
@@ -66,74 +66,104 @@ func (m *Mutation) Abort() error {
 }
 
 func (s Service) PrepareRemove(ctx context.Context, skill config.Skill) (*Mutation, error) {
+	return s.PrepareRemoveBatch(ctx, []config.Skill{skill})
+}
+
+func (s Service) PrepareRemoveBatch(ctx context.Context, skills []config.Skill) (*Mutation, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	destination, err := SafeLibraryPath(s.LibraryRoot, skill.ID)
-	if err != nil {
-		return nil, err
-	}
-	owner, err := inspectOwnedTree(destination)
-	if err != nil {
-		if os.IsNotExist(err) {
-			removed := skill
-			return &Mutation{Removed: &removed}, nil
-		}
-		return nil, err
+	if len(skills) == 0 {
+		return nil, fmt.Errorf("remove batch is empty")
 	}
 	id, err := newBatchID()
 	if err != nil {
 		return nil, err
 	}
-	journalPath := filepath.Join(filepath.Dir(destination), ".aikit-batch-"+id+".journal")
-	journal := batchJournal{
-		Version: batchJournalVersion, ID: id, Operation: "remove", Phase: "prepared",
-		Copies: []journalCopy{{Operation: "remove", Destination: destination, Quarantine: batchArtifactPath(filepath.Dir(destination), "quarantine", id, 0), Existed: true, Old: ownerForJournal(owner), OldSkill: &skill}},
+	journal := batchJournal{Version: batchJournalVersion, ID: id, Operation: "remove", Phase: "prepared"}
+	owners := make([]ownedTree, 0, len(skills))
+	seen := make(map[string]struct{}, len(skills))
+	for index, skill := range skills {
+		destination, err := SafeLibraryPath(s.LibraryRoot, skill.ID)
+		if err != nil {
+			return nil, err
+		}
+		if _, duplicate := seen[destination]; duplicate {
+			return nil, fmt.Errorf("duplicate remove destination %q", destination)
+		}
+		seen[destination] = struct{}{}
+		owner, err := inspectOwnedTree(destination)
+		if err != nil {
+			if os.IsNotExist(err) {
+				owner = ownedTree{}
+			} else {
+				return nil, err
+			}
+		}
+		owners = append(owners, owner)
+		journal.Copies = append(journal.Copies, journalCopy{
+			Operation: "remove", Destination: destination,
+			Quarantine: batchArtifactPath(filepath.Dir(destination), "quarantine", id, index),
+			Existed:    owner.identity != "", Old: ownerForJournal(owner), OldSkill: &skills[index],
+		})
+	}
+	journalPath := filepath.Join(s.LibraryRoot, ".aikit-batch-"+id+".journal")
+	if err := os.MkdirAll(s.LibraryRoot, 0o755); err != nil {
+		return nil, err
 	}
 	if _, err := writeBatchJournalWithSync(journalPath, journal, s.syncDirectory); err != nil {
 		return nil, err
 	}
-	plan := &removeMutation{service: s, journal: journal, path: journalPath, owner: owner}
-	removed := skill
-	return &Mutation{
-		Removed: &removed,
-		commit:  plan.commit,
-		abort:   plan.abort,
-	}, nil
+	plan := &removeBatchMutation{service: s, journal: journal, path: journalPath, owners: owners}
+	entries := append([]config.Skill(nil), skills...)
+	mutation := &Mutation{
+		Skills: entries,
+		commit: plan.commit,
+		abort:  plan.abort,
+	}
+	if len(entries) == 1 {
+		mutation.Removed = &mutation.Skills[0]
+	}
+	return mutation, nil
 }
 
-func (p *removeMutation) commit(ctx context.Context) error {
+func (p *removeBatchMutation) commit(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	p.journal.Phase = "mutating"
-	visible, err := writeBatchJournalWithSync(p.path, p.journal, p.service.syncDirectory)
-	if err != nil {
-		if visible {
-			return fmt.Errorf("remove journal became visible; run RecoverBatches: %w", err)
+	for index, copy := range p.journal.Copies {
+		if !copy.Existed {
+			continue
 		}
-		return err
+		if err := verifyOwnedTree(copy.Destination, p.owners[index]); err != nil {
+			return fmt.Errorf("remove library batch preflight: %w", err)
+		}
 	}
-	copy := p.journal.Copies[0]
-	if err := verifyOwnedTree(copy.Destination, p.owner); err != nil {
-		return fmt.Errorf("remove library skill; run RecoverBatches: %w", err)
+	p.journal.Phase = "mutating"
+	if _, err := writeBatchJournalWithSync(p.path, p.journal, p.service.syncDirectory); err != nil {
+		return fmt.Errorf("remove batch journal became visible; run RecoverBatches: %w", err)
 	}
-	if err := p.service.rename(copy.Destination, copy.Quarantine); err != nil {
-		return fmt.Errorf("remove library skill; run RecoverBatches: %w", err)
-	}
-	if err := verifyOwnedTree(copy.Quarantine, p.owner); err != nil {
-		return fmt.Errorf("verify removed library skill; run RecoverBatches: %w", err)
+	for index, copy := range p.journal.Copies {
+		if !copy.Existed {
+			continue
+		}
+		if err := p.service.rename(copy.Destination, copy.Quarantine); err != nil {
+			return fmt.Errorf("remove library batch; run RecoverBatches: %w", err)
+		}
+		if err := verifyOwnedTree(copy.Quarantine, p.owners[index]); err != nil {
+			return fmt.Errorf("verify removed library batch; run RecoverBatches: %w", err)
+		}
 	}
 	p.journal.Phase = "committed"
 	if _, err := writeBatchJournalWithSync(p.path, p.journal, p.service.syncDirectory); err != nil {
-		return fmt.Errorf("commit remove journal; run RecoverBatches: %w", err)
+		return fmt.Errorf("commit remove batch journal; run RecoverBatches: %w", err)
 	}
 	return nil
 }
 
-func (p *removeMutation) abort() error {
+func (p *removeBatchMutation) abort() error {
 	if p.journal.Phase != "prepared" {
-		return fmt.Errorf("remove mutation phase %q requires RecoverBatches", p.journal.Phase)
+		return fmt.Errorf("remove batch phase %q requires RecoverBatches", p.journal.Phase)
 	}
 	journalOwner, err := journalOwnerAt(filepath.Dir(p.path), p.path)
 	if os.IsNotExist(err) {

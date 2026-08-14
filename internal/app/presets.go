@@ -14,7 +14,7 @@ func (a *App) PutPreset(ctx context.Context, request PresetRequest) (Result, err
 	}
 	var output Result
 	err := a.deps.Store.WithLock(ctx, func(tx *config.Tx) error {
-		if err := a.beforeMutation(ctx, tx.Config.Library.Skills); err != nil {
+		if err := a.beforeMutation(ctx, tx.Config); err != nil {
 			return err
 		}
 		preset, findErr := findPreset(tx.Config, request.Name)
@@ -69,7 +69,7 @@ func (a *App) RemovePreset(ctx context.Context, request PresetRemoveRequest) (Re
 	}
 	var output Result
 	err := a.deps.Store.WithLock(ctx, func(tx *config.Tx) error {
-		if err := a.beforeMutation(ctx, tx.Config.Library.Skills); err != nil {
+		if err := a.beforeMutation(ctx, tx.Config); err != nil {
 			return err
 		}
 		index := -1

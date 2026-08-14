@@ -53,6 +53,13 @@ func (s *Service) Migrate(ctx context.Context, request app.MigrateRequest) (app.
 	}
 	var result app.MigrateResult
 	err := s.deps.Store.WithLock(ctx, func(tx *config.Tx) error {
+		if len(tx.Config.PendingOperations) > 0 {
+			operations := make([]app.RecoveryOperation, len(tx.Config.PendingOperations))
+			for i, operation := range tx.Config.PendingOperations {
+				operations[i] = app.RecoveryOperation{Operation: operation, CanResume: true}
+			}
+			return &app.PendingRecoveryError{Operations: operations}
+		}
 		if err := s.recoverLibrary(ctx, tx.Config.Library.Skills); err != nil {
 			return err
 		}
@@ -90,18 +97,6 @@ func (s *Service) Migrate(ctx context.Context, request app.MigrateRequest) (app.
 			}
 			if err := tx.Checkpoint(); err != nil {
 				return err
-			}
-			projectRoots := rootsForProject(tx.Config.Projects[index])
-			if request.Adopt {
-				warnings, failed, recoverErr := s.recoverPendingForRoots(tx, projectRoots)
-				result.Warnings = append(result.Warnings, warnings...)
-				if recoverErr != nil {
-					return recoverErr
-				}
-				if failed {
-					result.Failed++
-					continue
-				}
 			}
 			for _, asset := range project.Assets.Skills {
 				bindingAdded := false

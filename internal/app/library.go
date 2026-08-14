@@ -13,25 +13,10 @@ func (a *App) PreviewAdd(ctx context.Context, request AddPreviewRequest) (AddPre
 	if request.Source == "" {
 		return AddPreview{}, fmt.Errorf("source is required")
 	}
-	if a.deps.Library == nil {
-		return AddPreview{}, fmt.Errorf("library mutation service is required")
+	if a.deps.AddDiscoverer == nil {
+		return AddPreview{}, fmt.Errorf("add discovery service is required")
 	}
-	var preview AddPreview
-	err := a.deps.Store.WithLock(ctx, func(tx *config.Tx) error {
-		if err := a.beforeMutation(ctx, tx.Config.Library.Skills); err != nil {
-			return err
-		}
-		mutation, err := a.deps.Library.PrepareAdd(ctx, AddPrepareRequest{Source: request.Source, SourcePath: request.SourcePath, Ref: request.Ref}, tx.Config.Library.Skills)
-		if err != nil {
-			return err
-		}
-		defer mutation.Abort()
-		for _, skill := range mutation.Entries() {
-			preview.Candidates = append(preview.Candidates, Candidate{Name: skill.Name, Description: skill.Description, RelativePath: skill.SourcePath, Hash: skill.Hash})
-		}
-		return nil
-	})
-	return preview, err
+	return a.deps.AddDiscoverer.Preview(ctx, request)
 }
 
 func (a *App) Add(ctx context.Context, request AddRequest) (Result, error) {
@@ -43,7 +28,7 @@ func (a *App) Add(ctx context.Context, request AddRequest) (Result, error) {
 	}
 	var output Result
 	err := a.deps.Store.WithLock(ctx, func(tx *config.Tx) error {
-		if err := a.beforeMutation(ctx, tx.Config.Library.Skills); err != nil {
+		if err := a.beforeMutation(ctx, tx.Config); err != nil {
 			return err
 		}
 		var selectors []link.Selector
@@ -154,7 +139,7 @@ func (a *App) Remove(ctx context.Context, request RemoveRequest) (Result, error)
 	}
 	var output Result
 	err := a.deps.Store.WithLock(ctx, func(tx *config.Tx) error {
-		if err := a.beforeMutation(ctx, tx.Config.Library.Skills); err != nil {
+		if err := a.beforeMutation(ctx, tx.Config); err != nil {
 			return err
 		}
 		skill, err := findSkill(tx.Config, request.SkillID)
@@ -173,8 +158,10 @@ func (a *App) Remove(ctx context.Context, request RemoveRequest) (Result, error)
 		}
 		selectors = uniqueSelectors(selectors)
 		recovered, err := a.recoverSelectors(tx, selectors)
+		output.Plan = link.Plan{Actions: append([]link.Action(nil), recovered.Actions...), Issues: append([]link.Issue(nil), recovered.Issues...), Warnings: append([]link.Issue(nil), recovered.Warnings...)}
 		if err != nil {
-			output = Result{Link: recovered, Exit: ExitPartial}
+			output.Link = recovered
+			output.Exit = ExitPartial
 			return err
 		}
 		mutation, err := a.deps.Library.PrepareRemove(ctx, skill)
@@ -198,6 +185,7 @@ func (a *App) Remove(ctx context.Context, request RemoveRequest) (Result, error)
 		if err := tx.Config.Validate(); err != nil {
 			return err
 		}
+		mergePlan(&output.Plan, cleanupPlan(a.deps.Paths.LibrarySkills, cleanup))
 		if err := tx.Checkpoint(); err != nil {
 			return err
 		}
@@ -205,7 +193,9 @@ func (a *App) Remove(ctx context.Context, request RemoveRequest) (Result, error)
 		cleanupResult := a.deps.Recover(a.deps.Paths.LibrarySkills, cleanup, link.Selector{}, false)
 		mergeLinkResult(&cleanupResult, recovered)
 		if !completedWithoutFailures(cleanupResult) {
-			output = Result{Link: cleanupResult, Changed: true, Exit: ExitPartial}
+			output.Link = cleanupResult
+			output.Changed = true
+			output.Exit = ExitPartial
 			return nil
 		}
 		removeCompleted(tx.Config, cleanupResult.Completed)
@@ -218,7 +208,9 @@ func (a *App) Remove(ctx context.Context, request RemoveRequest) (Result, error)
 			return err
 		}
 		if err := mutation.Commit(ctx); err != nil {
-			output = Result{Link: cleanupResult, Changed: true, Exit: ExitPartial}
+			output.Link = cleanupResult
+			output.Changed = true
+			output.Exit = ExitPartial
 			commitErr := err
 			*tx.Config = *cloneConfig(preRemove)
 			if restoreErr := tx.Checkpoint(); restoreErr != nil {
@@ -229,10 +221,23 @@ func (a *App) Remove(ctx context.Context, request RemoveRequest) (Result, error)
 			}
 			return commitErr
 		}
-		output = Result{Link: cleanupResult, Changed: true, Exit: ExitOK}
+		output.Link = cleanupResult
+		output.Changed = true
+		output.Exit = ExitOK
 		return nil
 	})
 	return output, err
+}
+
+func cleanupPlan(libraryRoot string, operations []config.PendingOperation) link.Plan {
+	result := link.Recover(libraryRoot, operations, link.Selector{}, true)
+	return link.Plan{Actions: result.Actions, Issues: result.Issues, Warnings: result.Warnings}
+}
+
+func mergePlan(dst *link.Plan, src link.Plan) {
+	dst.Actions = append(dst.Actions, src.Actions...)
+	dst.Issues = append(dst.Issues, src.Issues...)
+	dst.Warnings = append(dst.Warnings, src.Warnings...)
 }
 
 func cleanupForSkill(cfg *config.Config, home, id string, selectors []link.Selector) ([]config.PendingOperation, error) {

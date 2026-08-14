@@ -2,8 +2,6 @@ package app
 
 import (
 	"context"
-	"fmt"
-	"os"
 
 	"github.com/silenceper/aikit/internal/library"
 	"github.com/silenceper/aikit/pkg/config"
@@ -15,18 +13,45 @@ func NewLibraryService(service library.Service) LibraryService {
 	return libraryAdapter{service: service}
 }
 
-func (adapter libraryAdapter) PrepareAdd(ctx context.Context, request AddPrepareRequest, existing []config.Skill) (LibraryMutation, error) {
-	if info, err := os.Stat(request.Source); err == nil {
-		if !info.IsDir() {
-			return nil, fmt.Errorf("local source %q is not a directory", request.Source)
+func (adapter libraryAdapter) Preview(ctx context.Context, request AddPreviewRequest) (AddPreview, error) {
+	if err := ctx.Err(); err != nil {
+		return AddPreview{}, err
+	}
+	kind, err := library.ClassifyAddSource(request.Source)
+	if err != nil {
+		return AddPreview{}, err
+	}
+	if kind == library.AddSourceLocal {
+		candidates, err := library.Discover(request.Source)
+		if err != nil {
+			return AddPreview{}, err
 		}
+		preview := AddPreview{Candidates: make([]Candidate, len(candidates))}
+		for i, candidate := range candidates {
+			preview.Candidates[i] = Candidate{
+				Name: candidate.Name, Description: candidate.Description,
+				RelativePath: candidate.RelativePath, Hash: candidate.Hash,
+			}
+		}
+		return preview, nil
+	}
+	return AddPreview{
+		NetworkRequired: true,
+		Warnings:        []string{"remote source discovery requires an explicit network-enabled add action"},
+	}, nil
+}
+
+func (adapter libraryAdapter) PrepareAdd(ctx context.Context, request AddPrepareRequest, existing []config.Skill) (LibraryMutation, error) {
+	kind, err := library.ClassifyAddSource(request.Source)
+	if err != nil {
+		return nil, err
+	}
+	if kind == library.AddSourceLocal {
 		mutation, err := adapter.service.PrepareLocal(ctx, request.Source, request.Selections, existing)
 		if err != nil {
 			return nil, err
 		}
 		return libraryMutation{mutation}, nil
-	} else if !os.IsNotExist(err) {
-		return nil, err
 	}
 	mutation, err := adapter.service.PrepareGit(ctx, request.Source, library.GitAddOptions{
 		SourcePath: request.SourcePath, Ref: request.Ref, Skills: request.Selections,
@@ -52,6 +77,14 @@ func (adapter libraryAdapter) PrepareUpdate(ctx context.Context, items []UpdateP
 
 func (adapter libraryAdapter) PrepareRemove(ctx context.Context, skill config.Skill) (LibraryMutation, error) {
 	mutation, err := adapter.service.PrepareRemove(ctx, skill)
+	if err != nil {
+		return nil, err
+	}
+	return libraryMutation{mutation}, nil
+}
+
+func (adapter libraryAdapter) PrepareRemoveBatch(ctx context.Context, skills []config.Skill) (LibraryMutation, error) {
+	mutation, err := adapter.service.PrepareRemoveBatch(ctx, skills)
 	if err != nil {
 		return nil, err
 	}

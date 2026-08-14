@@ -13,7 +13,7 @@ func TestRenderFullAndNarrowLayoutsWithStableFooterAndErrors(t *testing.T) {
 	m = next.(Model)
 	m.Err = "fetch failed"
 	full := m.ViewString()
-	for _, wanted := range []string{"library", "agents", "projects", "presets", "status", "↑ 1 updates", "acme/alpha", "fetch failed", "/ filter", "? help"} {
+	for _, wanted := range []string{"Overview", "Library", "Workspaces", "Presets", "Migration", "Status", "alpha", "fetch failed", "/ Search", "? Help"} {
 		if !strings.Contains(full, wanted) {
 			t.Fatalf("full render missing %q:\n%s", wanted, full)
 		}
@@ -21,7 +21,7 @@ func TestRenderFullAndNarrowLayoutsWithStableFooterAndErrors(t *testing.T) {
 	next, _ = m.Update(tea.WindowSizeMsg{Width: 38, Height: 12})
 	m = next.(Model)
 	narrow := m.ViewString()
-	if !strings.Contains(narrow, "1 lib") || !strings.Contains(narrow, "fetch failed") || !strings.Contains(narrow, "q") {
+	if !strings.Contains(narrow, "aikit / Library") || !strings.Contains(narrow, "fetch failed") || !strings.Contains(narrow, "Enter Open") {
 		t.Fatalf("narrow render lost navigation/footer/error:\n%s", narrow)
 	}
 }
@@ -30,7 +30,7 @@ func TestFilterAndHelpOverlaysRender(t *testing.T) {
 	m := loadedModel(t, &fakeService{snapshot: testSnapshot()}, &fakeMigration{})
 	m, _ = apply(m, "/")
 	m, _ = apply(m, "a")
-	if got := m.ViewString(); !strings.Contains(got, "filter: a") {
+	if got := m.ViewString(); !strings.Contains(got, "Search: a") {
 		t.Fatalf("filter overlay missing:\n%s", got)
 	}
 	m, _ = apply(m, "esc")

@@ -13,6 +13,9 @@ func (a *App) Update(ctx context.Context, request UpdateRequest) (Result, error)
 	if err != nil {
 		return Result{}, err
 	}
+	if request.Confirmed && !request.Offline && !request.CheckOnly && len(cfg.PendingOperations) > 0 {
+		return Result{}, pendingRecoveryError(cfg.PendingOperations)
+	}
 	if request.Offline {
 		report := updatecheck.CheckReport{Results: make([]updatecheck.Result, 0, len(cfg.Library.Skills))}
 		for _, skill := range cfg.Library.Skills {
@@ -56,7 +59,7 @@ func (a *App) Update(ctx context.Context, request UpdateRequest) (Result, error)
 	}
 	var output Result
 	err = a.deps.Store.WithLock(ctx, func(tx *config.Tx) error {
-		if err := a.beforeMutation(ctx, tx.Config.Library.Skills); err != nil {
+		if err := a.beforeMutation(ctx, tx.Config); err != nil {
 			return err
 		}
 		oldConfig := cloneConfig(tx.Config)

@@ -126,6 +126,54 @@ func TestMigrateDryRunDoesNotWriteConfigLibraryOrCache(t *testing.T) {
 	}
 }
 
+func TestMigratePendingRecoveryBlocksAdoptAndNonAdoptWithoutWrites(t *testing.T) {
+	for _, adopt := range []bool{false, true} {
+		t.Run(map[bool]string{false: "non-adopt", true: "adopt"}[adopt], func(t *testing.T) {
+			service, paths, home := testService(t)
+			seedLegacyRepository(t, paths, "acme/repo", "review", "cache")
+			writeFile(t, filepath.Join(paths.Home, "catalog.yaml"), "skills:\n  - name: review\n    source: acme/repo\n")
+			target := filepath.Join(home, ".cursor", "skills", "pending")
+			op, err := link.NewCleanupOperation("pending-legacy", config.Scope{Agent: "cursor"}, target, "local/pending", "test")
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg := config.New()
+			cfg.Library.Skills = []config.Skill{{ID: "local/pending", Name: "pending", Hash: "pending"}}
+			cfg.PendingOperations = []config.PendingOperation{op}
+			if err := (config.Store{Paths: paths}).Save(context.Background(), cfg); err != nil {
+				t.Fatal(err)
+			}
+			beforeConfig, err := os.ReadFile(paths.Config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			recoveryCalls := 0
+			service.deps.Recover = func(string, []config.PendingOperation, link.Selector, bool) link.Result {
+				recoveryCalls++
+				return link.Result{}
+			}
+			_, err = service.Migrate(context.Background(), app.MigrateRequest{Adopt: adopt})
+			var pending *app.PendingRecoveryError
+			if !errors.As(err, &pending) {
+				t.Fatalf("migration pending error = %T %v", err, err)
+			}
+			if recoveryCalls != 0 {
+				t.Fatalf("migration called recovery %d times", recoveryCalls)
+			}
+			afterConfig, err := os.ReadFile(paths.Config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(beforeConfig, afterConfig) {
+				t.Fatal("blocked migration changed config bytes")
+			}
+			if _, err := os.Stat(filepath.Join(paths.LibrarySkills, "acme", "repo", "review")); !os.IsNotExist(err) {
+				t.Fatalf("blocked migration changed library: %v", err)
+			}
+		})
+	}
+}
+
 func TestMigrateConflictIsPartialAndDoesNotOverwriteExistingEntry(t *testing.T) {
 	service, paths, _ := testService(t)
 	seedLegacyRepository(t, paths, "acme/repo", "review", "new-cache")

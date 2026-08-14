@@ -43,6 +43,9 @@ type OperationKind string
 const (
 	OperationCleanup OperationKind = "cleanup"
 	OperationAdopt   OperationKind = "adopt"
+	// OperationReconcile is an authenticated request to converge one exact
+	// overlay path back to the skill recorded in the durable config.
+	OperationReconcile OperationKind = "reconcile"
 )
 
 type Scope struct {
@@ -57,6 +60,14 @@ type Fingerprint struct {
 	LinkTarget string `yaml:"link_target,omitempty" json:"link_target,omitempty"`
 }
 
+type TransactionPhase string
+
+const (
+	TransactionForward        TransactionPhase = "forward"
+	TransactionRollbackSource TransactionPhase = "rollback-source"
+	TransactionRollback       TransactionPhase = "rollback"
+)
+
 type PendingOperation struct {
 	ID       string        `yaml:"id" json:"id"`
 	Kind     OperationKind `yaml:"kind" json:"kind"`
@@ -70,6 +81,20 @@ type PendingOperation struct {
 	// JournalHash binds an adopt delete manifest to the operation authorized
 	// before any user content is moved. Recovery must fail closed if it differs.
 	JournalHash string `yaml:"journal_hash,omitempty" json:"journal_hash,omitempty"`
+	// TransactionID and TransactionPhase group link operations checkpointed
+	// before the first filesystem action. Recovery follows this durable
+	// direction rather than inferring intent from a partially changed overlay.
+	TransactionID    string           `yaml:"transaction_id,omitempty" json:"transaction_id,omitempty"`
+	TransactionPhase TransactionPhase `yaml:"transaction_phase,omitempty" json:"transaction_phase,omitempty"`
+	// Reconcile is authorized only for the exact object observed when the
+	// transaction was checkpointed. ExpectedAbsent may additionally authorize
+	// creating a missing target after an interrupted cleanup.
+	ExpectedSkillID   string            `yaml:"expected_skill_id,omitempty" json:"expected_skill_id,omitempty"`
+	Expected          *Fingerprint      `yaml:"expected,omitempty" json:"expected,omitempty"`
+	ExpectedAbsent    bool              `yaml:"expected_absent,omitempty" json:"expected_absent,omitempty"`
+	Tombstone         string            `yaml:"tombstone,omitempty" json:"tombstone,omitempty"`
+	Rollback          *PendingOperation `yaml:"rollback,omitempty" json:"rollback,omitempty"`
+	ParentOperationID string            `yaml:"parent_operation_id,omitempty" json:"parent_operation_id,omitempty"`
 }
 
 type Config struct {

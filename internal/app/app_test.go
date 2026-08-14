@@ -100,12 +100,14 @@ func TestEnableGlobalAndProjectAgentScopes(t *testing.T) {
 }
 
 type fakeLibrary struct {
-	root        string
-	added       config.Skill
-	updateCalls int
-	commits     int
-	aborts      int
-	commitErr   error
+	root             string
+	added            config.Skill
+	updateCalls      int
+	commits          int
+	aborts           int
+	commitErr        error
+	commitPanic      bool
+	removeBatchPanic bool
 }
 
 type fakeMutation struct {
@@ -119,6 +121,9 @@ func (mutation *fakeMutation) Entries() []config.Skill {
 }
 func (mutation *fakeMutation) Commit(context.Context) error {
 	mutation.owner.commits++
+	if mutation.owner.commitPanic {
+		panic("injected crash during commit")
+	}
 	if mutation.owner.commitErr != nil {
 		return mutation.owner.commitErr
 	}
@@ -131,6 +136,12 @@ func (mutation *fakeMutation) Commit(context.Context) error {
 type recordingRecovery struct {
 	ledgers [][]config.Skill
 	err     error
+}
+
+type recoveryFunc func(context.Context, []config.Skill) ([]library.RecoveryIssue, error)
+
+func (fn recoveryFunc) RecoverBatches(ctx context.Context, ledger []config.Skill) ([]library.RecoveryIssue, error) {
+	return fn(ctx, ledger)
 }
 
 func (recovery *recordingRecovery) RecoverBatches(_ context.Context, ledger []config.Skill) ([]library.RecoveryIssue, error) {
@@ -165,6 +176,20 @@ func (f *fakeLibrary) PrepareUpdate(_ context.Context, items []UpdatePrepareItem
 func (f *fakeLibrary) PrepareRemove(_ context.Context, skill config.Skill) (LibraryMutation, error) {
 	return &fakeMutation{owner: f, entries: []config.Skill{skill}, commit: func() error {
 		return os.RemoveAll(filepath.Join(f.root, filepath.FromSlash(skill.ID)))
+	}}, nil
+}
+
+func (f *fakeLibrary) PrepareRemoveBatch(_ context.Context, skills []config.Skill) (LibraryMutation, error) {
+	if f.removeBatchPanic {
+		panic("injected crash during remove prepare")
+	}
+	return &fakeMutation{owner: f, entries: append([]config.Skill(nil), skills...), commit: func() error {
+		for _, skill := range skills {
+			if err := os.RemoveAll(filepath.Join(f.root, filepath.FromSlash(skill.ID))); err != nil {
+				return err
+			}
+		}
+		return nil
 	}}, nil
 }
 
@@ -568,7 +593,7 @@ func TestEnableCheckpointsLedgerBeforeFilesystemReconcile(t *testing.T) {
 	}
 }
 
-func TestSyncFailureKeepsPendingOperation(t *testing.T) {
+func TestSyncDoesNotImplicitlyRecoverPendingOperation(t *testing.T) {
 	application, paths, _, project := testApp(t)
 	op, err := link.NewCleanupOperation("cleanup-test", config.Scope{Project: "demo", ProjectPath: project, Agent: "cursor"}, filepath.Join(project, ".cursor", "skills", "demo"), "local/demo", "test")
 	if err != nil {
@@ -585,12 +610,8 @@ func TestSyncFailureKeepsPendingOperation(t *testing.T) {
 	application.deps.Recover = func(string, []config.PendingOperation, link.Selector, bool) link.Result {
 		return link.Result{Issues: []link.Issue{{Kind: link.IssuePendingCleanup, Operation: op.ID, Message: "changed"}}}
 	}
-	result, err := application.Sync(context.Background(), SyncRequest{Project: "demo", Agent: "cursor"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Exit != ExitPartial {
-		t.Fatalf("exit = %v", result.Exit)
+	if _, err := application.Sync(context.Background(), SyncRequest{Project: "demo", Agent: "cursor"}); err == nil {
+		t.Fatal("sync accepted pending recovery")
 	}
 	cfg, err = (config.Store{Paths: paths}).Load(context.Background())
 	if err != nil {
@@ -601,7 +622,7 @@ func TestSyncFailureKeepsPendingOperation(t *testing.T) {
 	}
 }
 
-func TestSyncClearsOnlyCompletedPendingOperation(t *testing.T) {
+func TestResumeRecoveryClearsOnlyCompletedPendingOperation(t *testing.T) {
 	application, paths, _, project := testApp(t)
 	op, err := link.NewCleanupOperation("cleanup-complete", config.Scope{Project: "demo", ProjectPath: project, Agent: "cursor"}, filepath.Join(project, ".cursor", "skills", "demo"), "local/demo", "test")
 	if err != nil {
@@ -615,7 +636,7 @@ func TestSyncClearsOnlyCompletedPendingOperation(t *testing.T) {
 	if err := (config.Store{Paths: paths}).Save(context.Background(), cfg); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := application.Sync(context.Background(), SyncRequest{Project: "demo", Agent: "cursor"}); err != nil {
+	if _, err := application.ResumeRecovery(context.Background(), RecoveryRequest{OperationIDs: []string{op.ID}, Confirmed: true}); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err = (config.Store{Paths: paths}).Load(context.Background())

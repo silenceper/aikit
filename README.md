@@ -93,8 +93,39 @@ aikit sync
 ```
 
 Running `aikit` without arguments opens the full-screen TUI when stdin is a
-TTY. Missing required arguments never open a TUI in CI or another non-TTY
+TTY. On every launch it first renders the local ledger, then scans all
+supported global Agent roots and every registered project incrementally. This
+startup inventory is offline and read-only: it does not fetch Git sources,
+rewrite configuration, import skills, or adopt existing directories.
+
+The TUI is English-first and supports both keyboard and mouse input. Use `1`–`6`
+to switch sections, `j`/`k` or the arrow keys to move, `Tab` to move between the
+list, details, and actions, `Enter` to activate, `/` to filter, `?` for help,
+and the mouse wheel or clickable rows and buttons for the same operations.
+Mutating actions show a preview and explicit confirmation before writing.
+
+Missing required arguments never open a TUI in CI or another non-TTY
 environment.
+
+## TUI workspace
+
+The six top-level sections keep the first screen intentionally compact:
+
+- **Overview** summarizes library size, unmanaged skills, drift, updates, and
+  pending recovery.
+- **Library** shows centrally managed skills, details, add, remove, and update
+  entry points.
+- **Workspaces** groups global Agents and registered projects, including common
+  and per-Agent bindings.
+- **Presets** manages reusable skill sets.
+- **Migration** presents exact local origins and the planned Import, Adopt,
+  Link-existing, or Ignore action before confirmation.
+- **Status** shows reconciliation issues and previews sync work.
+
+Press `Ctrl+K` to open Configuration. The global YAML ledger is
+`$AIKIT_HOME/config.yaml`; when `AIKIT_HOME` is unset the path is
+`~/.aikit/config.yaml`. The configuration view also reports the resolved path,
+so changing `AIKIT_HOME` is visible before any operation.
 
 ## Commands
 

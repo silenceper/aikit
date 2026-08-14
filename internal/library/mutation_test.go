@@ -2,12 +2,50 @@ package library
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/silenceper/aikit/pkg/config"
 )
+
+func TestPrepareRemoveBatchSecondMoveFailureRecoversEveryDestination(t *testing.T) {
+	root := t.TempDir()
+	skills := []config.Skill{{ID: "local/one", Name: "one", Hash: "one"}, {ID: "local/two", Name: "two", Hash: "two"}}
+	for _, skill := range skills {
+		destination, _ := SafeLibraryPath(root, skill.ID)
+		writeTestFile(t, filepath.Join(destination, "SKILL.md"), skill.Name, 0o644)
+	}
+	moves := 0
+	service := Service{LibraryRoot: root, Rename: func(old, new string) error {
+		if strings.Contains(filepath.Base(new), ".aikit-batch-quarantine-") {
+			moves++
+			if moves == 2 {
+				return errors.New("injected second move failure")
+			}
+		}
+		return moveNoReplace(old, new)
+	}}
+	mutation, err := service.PrepareRemoveBatch(context.Background(), skills)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mutation.Commit(context.Background()); err == nil {
+		t.Fatal("second move failure was lost")
+	}
+	issues, err := service.RecoverBatches(context.Background(), skills)
+	if err != nil || len(issues) != 0 {
+		t.Fatalf("recover remove batch = %+v, %v", issues, err)
+	}
+	for _, skill := range skills {
+		destination, _ := SafeLibraryPath(root, skill.ID)
+		if got, err := os.ReadFile(filepath.Join(destination, "SKILL.md")); err != nil || string(got) != skill.Name {
+			t.Fatalf("skill %s not restored: %q %v", skill.ID, got, err)
+		}
+	}
+}
 
 func TestPrepareLocalStagesAllSelectionsWithoutChangingDestinations(t *testing.T) {
 	root := t.TempDir()
@@ -112,7 +150,7 @@ func TestRecoverMutatingRemoveFinishesAuthenticatedDeletion(t *testing.T) {
 	_ = plan
 	// Reopen the journal as a crash would, change only the durable phase, then
 	// let recovery complete the still-present authenticated destination.
-	entries, _ := filepath.Glob(filepath.Join(filepath.Dir(destination), ".aikit-batch-*.journal"))
+	entries, _ := filepath.Glob(filepath.Join(root, ".aikit-batch-*.journal"))
 	journal, _, err := readBatchJournal(root, entries[0])
 	if err != nil {
 		t.Fatal(err)

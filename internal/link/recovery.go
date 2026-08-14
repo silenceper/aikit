@@ -15,6 +15,16 @@ type FileOps struct {
 	Symlink       func(string, string) error
 	MoveNoReplace func(string, string) error
 	Remove        func(string) error
+	// Test-only crash/race seams around anchored reconcile operations.
+	BeforeReconcileMutation  func()
+	AfterReconcileMove       func()
+	BeforeCleanupMutation    func()
+	AfterCleanupMove         func()
+	AfterCleanupRollbackMove func()
+	FailReconcileSymlink     error
+	FailCleanupUnlink        error
+	BeforeDeleteQuarantine   func(string)
+	AfterDeleteQuarantine    func(string)
 }
 
 func defaultFileOps() FileOps {
@@ -27,13 +37,31 @@ func Recover(libraryRoot string, operations []config.PendingOperation, selector 
 
 func RecoverWithOps(libraryRoot string, operations []config.PendingOperation, selector Selector, dryRun bool, ops FileOps) Result {
 	result := Result{}
+	operationIDs := make(map[string]struct{}, len(operations))
+	completed := make(map[string]struct{}, len(operations))
+	for _, operation := range operations {
+		operationIDs[operation.ID] = struct{}{}
+	}
 	for _, op := range operations {
 		if !selector.Matches(op.Scope) {
 			continue
 		}
 		action := Action{Kind: ActionRecover, Scope: op.Scope, Path: op.Target, SkillID: op.SkillID, Operation: op.ID, Library: libraryRoot}
 		result.Actions = append(result.Actions, action)
+		if op.ParentOperationID != "" {
+			if _, selected := operationIDs[op.ParentOperationID]; selected {
+				if _, done := completed[op.ParentOperationID]; !done {
+					result.Issues = append(result.Issues, *recoveryIssue(IssuePendingReconcile, op, "rollback source artifact is unresolved", nil))
+					continue
+				}
+			}
+		}
 		if dryRun {
+			if issue := previewRecoveryOperation(libraryRoot, op); issue != nil {
+				result.Issues = append(result.Issues, *issue)
+			} else {
+				completed[op.ID] = struct{}{}
+			}
 			continue
 		}
 		if err := validateOperationScopeTarget(op); err != nil {
@@ -42,11 +70,17 @@ func RecoverWithOps(libraryRoot string, operations []config.PendingOperation, se
 		}
 		var complete bool
 		var issue *Issue
-		switch op.Kind {
-		case config.OperationCleanup:
+		switch {
+		case op.TransactionPhase == config.TransactionRollbackSource && op.Kind == config.OperationCleanup:
+			complete, issue = rollbackCleanup(libraryRoot, op, false, ops)
+		case op.TransactionPhase == config.TransactionRollbackSource && op.Kind == config.OperationReconcile:
+			complete, issue = rollbackReconcileSource(libraryRoot, op, false, ops)
+		case op.Kind == config.OperationCleanup:
 			complete, issue = recoverCleanup(libraryRoot, op, ops)
-		case config.OperationAdopt:
+		case op.Kind == config.OperationAdopt:
 			complete, issue = recoverAdopt(libraryRoot, op, ops)
+		case op.Kind == config.OperationReconcile:
+			complete, issue = recoverReconcile(libraryRoot, op, ops)
 		default:
 			i := Issue{Kind: IssueIO, Scope: op.Scope, Path: op.Target, Operation: op.ID, Message: "unknown pending operation"}
 			issue = &i
@@ -56,6 +90,7 @@ func RecoverWithOps(libraryRoot string, operations []config.PendingOperation, se
 			continue
 		}
 		if complete {
+			completed[op.ID] = struct{}{}
 			result.Completed = append(result.Completed, op.ID)
 			result.Applied = append(result.Applied, action)
 		}
@@ -63,25 +98,661 @@ func RecoverWithOps(libraryRoot string, operations []config.PendingOperation, se
 	return result
 }
 
-func recoverCleanup(libraryRoot string, op config.PendingOperation, ops FileOps) (bool, *Issue) {
+func previewRecoveryOperation(libraryRoot string, op config.PendingOperation) *Issue {
+	if err := validateOperationScopeTarget(op); err != nil {
+		return recoveryIssue(IssueUnsafePath, op, err.Error(), err)
+	}
+	if op.TransactionPhase == config.TransactionRollbackSource {
+		var complete bool
+		var issue *Issue
+		if op.Kind == config.OperationCleanup {
+			complete, issue = rollbackCleanup(libraryRoot, op, true, FileOps{})
+		} else if op.Kind == config.OperationReconcile {
+			complete, issue = rollbackReconcileSource(libraryRoot, op, true, FileOps{})
+		}
+		if issue != nil {
+			return issue
+		}
+		if complete {
+			return nil
+		}
+	}
 	state, err := Inspect(op.Target, libraryRoot)
 	if err != nil {
-		return false, recoveryIssue(IssuePendingCleanup, op, err.Error(), err)
+		return recoveryIssue(IssueIO, op, err.Error(), err)
 	}
-	if state.Kind == StateAbsent {
+	switch op.Kind {
+	case config.OperationCleanup:
+		if state.Kind != StateAbsent && (state.Kind != StateManagedLink || state.SkillID != op.SkillID) {
+			return recoveryIssue(IssuePendingCleanup, op, "target no longer matches the recorded aikit link", nil)
+		}
+	case config.OperationReconcile:
+		if state.Kind == StateManagedLink && state.SkillID == op.SkillID && !state.Broken {
+			return nil
+		}
+		if state.Kind == StateAbsent && op.ExpectedAbsent {
+			return nil
+		}
+		if state.Kind != StateManagedLink || state.SkillID != op.ExpectedSkillID {
+			return recoveryIssue(IssuePendingReconcile, op, "target does not match an authenticated reconcile state", nil)
+		}
+		matches, matchErr := matchesFingerprint(op.Target, op.Expected)
+		if matchErr != nil || !matches {
+			if matchErr == nil {
+				matchErr = fmt.Errorf("managed target fingerprint changed")
+			}
+			return recoveryIssue(IssuePendingReconcile, op, matchErr.Error(), matchErr)
+		}
+	}
+	return nil
+}
+
+func recoverReconcile(libraryRoot string, op config.PendingOperation, ops FileOps) (bool, *Issue) {
+	if err := validateOperationScopeTarget(op); err != nil {
+		return false, recoveryIssue(IssueUnsafePath, op, err.Error(), err)
+	}
+	lib, safe := libraryPath(libraryRoot, op.SkillID)
+	if !safe {
+		return false, recoveryIssue(IssuePendingReconcile, op, "unsafe library id", nil)
+	}
+	info, err := os.Stat(lib)
+	if err != nil || !info.IsDir() {
+		return false, recoveryIssue(IssuePendingReconcile, op, "library directory is missing", err)
+	}
+	parent, err := openReconcileParent(op)
+	if err != nil {
+		return false, recoveryIssue(IssueUnsafePath, op, err.Error(), err)
+	}
+	defer parent.Close()
+	targetName, err := reconcileBaseName(op.Target)
+	if err != nil {
+		return false, recoveryIssue(IssueUnsafePath, op, err.Error(), err)
+	}
+	tombstoneName, err := reconcileBaseName(op.Tombstone)
+	if err != nil {
+		return false, recoveryIssue(IssueUnsafePath, op, err.Error(), err)
+	}
+	if ops.BeforeReconcileMutation != nil {
+		ops.BeforeReconcileMutation()
+	}
+	if current, currentErr := parent.StillCurrent(); currentErr != nil || !current {
+		if currentErr == nil {
+			currentErr = fmt.Errorf("reconcile parent changed after it was anchored")
+		}
+		return false, recoveryIssue(IssueUnsafePath, op, currentErr.Error(), currentErr)
+	}
+	targetState, err := parent.State(targetName, libraryRoot)
+	if err != nil {
+		return false, recoveryIssue(IssuePendingReconcile, op, err.Error(), err)
+	}
+	tombstoneState, err := parent.State(tombstoneName, libraryRoot)
+	if err != nil {
+		return false, recoveryIssue(IssuePendingReconcile, op, err.Error(), err)
+	}
+	matchesExpected := func(name string, state State) bool {
+		if op.Expected == nil || state.Kind != StateManagedLink || state.SkillID != op.ExpectedSkillID {
+			return false
+		}
+		fingerprint, fingerprintErr := parent.Fingerprint(name)
+		return fingerprintErr == nil && sameFingerprint(fingerprint, op.Expected)
+	}
+	desired := func(state State) bool {
+		return state.Kind == StateManagedLink && state.SkillID == op.SkillID && !state.Broken && filepath.Clean(state.LinkTarget) == filepath.Clean(lib)
+	}
+	if present, stateErr := parent.State(deleteQuarantineName(op, "tombstone"), libraryRoot); stateErr != nil {
+		return false, recoveryIssue(IssuePendingReconcile, op, stateErr.Error(), stateErr)
+	} else if present.Kind != StateAbsent {
+		if issue := deleteAuthenticatedEntry(parent, libraryRoot, op, tombstoneName, "tombstone", matchesExpected, ops, IssuePendingReconcile); issue != nil {
+			return false, issue
+		}
+		targetState, err = parent.State(targetName, libraryRoot)
+		if err != nil {
+			return false, recoveryIssue(IssuePendingReconcile, op, err.Error(), err)
+		}
+		tombstoneState, err = parent.State(tombstoneName, libraryRoot)
+		if err != nil {
+			return false, recoveryIssue(IssuePendingReconcile, op, err.Error(), err)
+		}
+	}
+	tombstoneExpected := matchesExpected(tombstoneName, tombstoneState)
+	if tombstoneState.Kind != StateAbsent && !tombstoneExpected {
+		return false, recoveryIssue(IssuePendingReconcile, op, "reconcile tombstone does not match the authenticated old link", nil)
+	}
+	if desired(targetState) {
+		if tombstoneExpected {
+			if issue := deleteAuthenticatedEntry(parent, libraryRoot, op, tombstoneName, "tombstone", matchesExpected, ops, IssuePendingReconcile); issue != nil {
+				return false, issue
+			}
+		}
+		if current, currentErr := parent.StillCurrent(); currentErr != nil || !current {
+			if currentErr == nil {
+				currentErr = fmt.Errorf("reconcile parent changed during recovery")
+			}
+			return false, recoveryIssue(IssueUnsafePath, op, currentErr.Error(), currentErr)
+		}
 		return true, nil
 	}
-	if state.Kind != StateManagedLink || state.SkillID != op.SkillID {
-		return false, recoveryIssue(IssuePendingCleanup, op, "target no longer matches the recorded aikit link", nil)
+	if matchesExpected(targetName, targetState) {
+		if tombstoneState.Kind != StateAbsent {
+			return false, recoveryIssue(IssuePendingReconcile, op, "reconcile target and tombstone both contain the old link", nil)
+		}
+		if err := parent.MoveNoReplace(targetName, tombstoneName); err != nil {
+			return false, recoveryIssue(IssuePendingReconcile, op, err.Error(), err)
+		}
+		if ops.AfterReconcileMove != nil {
+			ops.AfterReconcileMove()
+		}
+		tombstoneState, err = parent.State(tombstoneName, libraryRoot)
+		if err != nil || !matchesExpected(tombstoneName, tombstoneState) {
+			if err == nil {
+				err = fmt.Errorf("quarantined reconcile link changed")
+			}
+			return false, recoveryIssue(IssuePendingReconcile, op, err.Error(), err)
+		}
+		tombstoneExpected = true
+		targetState = State{Kind: StateAbsent}
 	}
-	tombstone, err := quarantineManaged(op.Target, op.SkillID, libraryRoot, ops, ".aikit-cleanup-delete-")
+	if targetState.Kind != StateAbsent || (!op.ExpectedAbsent && !tombstoneExpected) {
+		return false, recoveryIssue(IssuePendingReconcile, op, "target does not match an authenticated reconcile state", nil)
+	}
+	if current, currentErr := parent.StillCurrent(); currentErr != nil || !current {
+		if currentErr == nil {
+			currentErr = fmt.Errorf("reconcile parent changed before link creation")
+		}
+		return false, recoveryIssue(IssueUnsafePath, op, currentErr.Error(), currentErr)
+	}
+	if ops.FailReconcileSymlink != nil {
+		return false, recoveryIssue(IssuePendingReconcile, op, ops.FailReconcileSymlink.Error(), ops.FailReconcileSymlink)
+	}
+	if err := parent.Symlink(lib, targetName); err != nil {
+		return false, recoveryIssue(IssuePendingReconcile, op, err.Error(), err)
+	}
+	verified, err := parent.State(targetName, libraryRoot)
+	if err != nil || !desired(verified) {
+		if err == nil {
+			err = fmt.Errorf("reconciled target does not match skill")
+		}
+		return false, recoveryIssue(IssuePendingReconcile, op, err.Error(), err)
+	}
+	if tombstoneExpected {
+		if issue := deleteAuthenticatedEntry(parent, libraryRoot, op, tombstoneName, "tombstone", matchesExpected, ops, IssuePendingReconcile); issue != nil {
+			return false, issue
+		}
+	}
+	if current, currentErr := parent.StillCurrent(); currentErr != nil || !current {
+		if currentErr == nil {
+			currentErr = fmt.Errorf("reconcile parent changed during recovery")
+		}
+		return false, recoveryIssue(IssueUnsafePath, op, currentErr.Error(), currentErr)
+	}
+	return true, nil
+}
+
+func recoverCleanup(libraryRoot string, op config.PendingOperation, ops FileOps) (bool, *Issue) {
+	parent, err := openReconcileParent(op)
+	if err != nil {
+		return false, recoveryIssue(IssueUnsafePath, op, err.Error(), err)
+	}
+	defer parent.Close()
+	targetName, err := reconcileBaseName(op.Target)
+	if err != nil {
+		return false, recoveryIssue(IssueUnsafePath, op, err.Error(), err)
+	}
+	tombstoneName, err := reconcileBaseName(op.Tombstone)
+	if err != nil {
+		return false, recoveryIssue(IssueUnsafePath, op, err.Error(), err)
+	}
+	if ops.BeforeCleanupMutation != nil {
+		ops.BeforeCleanupMutation()
+	}
+	if current, currentErr := parent.StillCurrent(); currentErr != nil || !current {
+		if currentErr == nil {
+			currentErr = fmt.Errorf("cleanup parent changed after it was anchored")
+		}
+		return false, recoveryIssue(IssueUnsafePath, op, currentErr.Error(), currentErr)
+	}
+	targetState, err := parent.State(targetName, libraryRoot)
 	if err != nil {
 		return false, recoveryIssue(IssuePendingCleanup, op, err.Error(), err)
 	}
-	if err := ops.Remove(tombstone); err != nil {
+	tombstoneState, err := parent.State(tombstoneName, libraryRoot)
+	if err != nil {
 		return false, recoveryIssue(IssuePendingCleanup, op, err.Error(), err)
 	}
+	matchesExpected := func(name string, state State) bool {
+		if op.Expected == nil || op.ExpectedSkillID != op.SkillID {
+			return false
+		}
+		if state.Kind == StateExternalLink && state.Broken {
+			return filepath.Clean(state.LinkTarget) == filepath.Clean(op.Expected.LinkTarget)
+		}
+		if state.Kind != StateManagedLink || state.SkillID != op.ExpectedSkillID {
+			return false
+		}
+		fingerprint, fingerprintErr := parent.Fingerprint(name)
+		return fingerprintErr == nil && sameFingerprint(fingerprint, op.Expected)
+	}
+	if present, stateErr := parent.State(deleteQuarantineName(op, "tombstone"), libraryRoot); stateErr != nil {
+		return false, recoveryIssue(IssuePendingCleanup, op, stateErr.Error(), stateErr)
+	} else if present.Kind != StateAbsent {
+		if issue := deleteAuthenticatedEntry(parent, libraryRoot, op, tombstoneName, "tombstone", matchesExpected, ops, IssuePendingCleanup); issue != nil {
+			return false, issue
+		}
+		targetState, err = parent.State(targetName, libraryRoot)
+		if err != nil {
+			return false, recoveryIssue(IssuePendingCleanup, op, err.Error(), err)
+		}
+		tombstoneState, err = parent.State(tombstoneName, libraryRoot)
+		if err != nil {
+			return false, recoveryIssue(IssuePendingCleanup, op, err.Error(), err)
+		}
+	}
+	tombstoneExpected := matchesExpected(tombstoneName, tombstoneState)
+	if tombstoneState.Kind != StateAbsent && !tombstoneExpected {
+		return false, recoveryIssue(IssuePendingCleanup, op, "cleanup tombstone does not match the authenticated link", nil)
+	}
+	if matchesExpected(targetName, targetState) {
+		if tombstoneState.Kind != StateAbsent {
+			return false, recoveryIssue(IssuePendingCleanup, op, "cleanup target and tombstone both contain the authenticated link", nil)
+		}
+		if err := parent.MoveNoReplace(targetName, tombstoneName); err != nil {
+			return false, recoveryIssue(IssuePendingCleanup, op, err.Error(), err)
+		}
+		if ops.AfterCleanupMove != nil {
+			ops.AfterCleanupMove()
+		}
+		if current, currentErr := parent.StillCurrent(); currentErr != nil || !current {
+			if currentErr == nil {
+				currentErr = fmt.Errorf("cleanup parent changed after link move")
+			}
+			return false, recoveryIssue(IssueUnsafePath, op, currentErr.Error(), currentErr)
+		}
+		tombstoneState, err = parent.State(tombstoneName, libraryRoot)
+		if err != nil || !matchesExpected(tombstoneName, tombstoneState) {
+			if err == nil {
+				err = fmt.Errorf("quarantined cleanup link changed")
+			}
+			return false, recoveryIssue(IssuePendingCleanup, op, err.Error(), err)
+		}
+		tombstoneExpected = true
+		targetState = State{Kind: StateAbsent}
+	}
+	if targetState.Kind != StateAbsent {
+		return false, recoveryIssue(IssuePendingCleanup, op, "target no longer matches the authenticated aikit link", nil)
+	}
+	if tombstoneExpected {
+		if ops.FailCleanupUnlink != nil {
+			return false, recoveryIssue(IssuePendingCleanup, op, ops.FailCleanupUnlink.Error(), ops.FailCleanupUnlink)
+		}
+		if issue := deleteAuthenticatedEntry(parent, libraryRoot, op, tombstoneName, "tombstone", matchesExpected, ops, IssuePendingCleanup); issue != nil {
+			return false, issue
+		}
+		if current, currentErr := parent.StillCurrent(); currentErr != nil || !current {
+			if currentErr == nil {
+				currentErr = fmt.Errorf("cleanup parent changed after unlink")
+			}
+			return false, recoveryIssue(IssueUnsafePath, op, currentErr.Error(), currentErr)
+		}
+		return true, nil
+	}
+	if !op.ExpectedAbsent && op.Expected == nil {
+		return false, recoveryIssue(IssuePendingCleanup, op, "absent cleanup target has no authenticated prior evidence", nil)
+	}
 	return true, nil
+}
+
+func RollbackCleanup(libraryRoot string, operations []config.PendingOperation, dryRun bool) Result {
+	return RollbackCleanupWithOps(libraryRoot, operations, dryRun, defaultFileOps())
+}
+
+func RollbackCleanupWithOps(libraryRoot string, operations []config.PendingOperation, dryRun bool, ops FileOps) Result {
+	result := Result{}
+	for _, op := range operations {
+		action := Action{Kind: ActionRecover, Scope: op.Scope, Path: op.Target, SkillID: op.SkillID, Operation: op.ID, Library: libraryRoot}
+		result.Actions = append(result.Actions, action)
+		complete, issue := rollbackCleanup(libraryRoot, op, dryRun, ops)
+		if issue != nil {
+			result.Issues = append(result.Issues, *issue)
+			continue
+		}
+		if complete {
+			result.Completed = append(result.Completed, op.ID)
+			if !dryRun {
+				result.Applied = append(result.Applied, action)
+			}
+		}
+	}
+	return result
+}
+
+func rollbackCleanup(libraryRoot string, op config.PendingOperation, dryRun bool, ops FileOps) (bool, *Issue) {
+	rollbackSource := op.TransactionPhase == config.TransactionRollbackSource
+	if op.Kind != config.OperationCleanup || (op.TransactionPhase != "" && !rollbackSource) {
+		return false, recoveryIssue(IssuePendingCleanup, op, "cleanup cannot be rolled back in this transaction phase", nil)
+	}
+	if dryRun && op.ExpectedAbsent {
+		if _, err := os.Lstat(filepath.Dir(op.Target)); os.IsNotExist(err) {
+			return true, nil
+		}
+	}
+	var parent reconcileParent
+	var err error
+	if dryRun {
+		parent, err = openReconcileParentReadOnly(op)
+	} else {
+		parent, err = openReconcileParent(op)
+	}
+	if err != nil {
+		return false, recoveryIssue(IssueUnsafePath, op, err.Error(), err)
+	}
+	defer parent.Close()
+	targetName, _ := reconcileBaseName(op.Target)
+	tombstoneName, _ := reconcileBaseName(op.Tombstone)
+	targetState, err := parent.State(targetName, libraryRoot)
+	if err != nil {
+		return false, recoveryIssue(IssuePendingCleanup, op, err.Error(), err)
+	}
+	tombstoneState, err := parent.State(tombstoneName, libraryRoot)
+	if err != nil {
+		return false, recoveryIssue(IssuePendingCleanup, op, err.Error(), err)
+	}
+	matches := func(name string, state State) bool {
+		if op.Expected == nil || state.Kind != StateManagedLink || state.SkillID != op.ExpectedSkillID || state.SkillID != op.SkillID {
+			return false
+		}
+		fingerprint, fingerprintErr := parent.Fingerprint(name)
+		return fingerprintErr == nil && sameFingerprint(fingerprint, op.Expected)
+	}
+	if rollbackSource {
+		if restored, restoreIssue := restoreDeleteQuarantine(parent, libraryRoot, op, tombstoneName, "tombstone", matches, dryRun); restoreIssue != nil {
+			return false, restoreIssue
+		} else if restored && !dryRun {
+			targetState, err = parent.State(targetName, libraryRoot)
+			if err != nil {
+				return false, recoveryIssue(IssuePendingCleanup, op, err.Error(), err)
+			}
+			tombstoneState, err = parent.State(tombstoneName, libraryRoot)
+			if err != nil {
+				return false, recoveryIssue(IssuePendingCleanup, op, err.Error(), err)
+			}
+		}
+	}
+	if matches(targetName, targetState) && tombstoneState.Kind == StateAbsent {
+		return true, nil
+	}
+	if op.ExpectedAbsent && targetState.Kind == StateAbsent && tombstoneState.Kind == StateAbsent {
+		return true, nil
+	}
+	if rollbackSource && targetState.Kind == StateAbsent && tombstoneState.Kind == StateAbsent {
+		// The forward cleanup finished before rollback direction was persisted;
+		// its authenticated rollback child is responsible for restoring old state.
+		return true, nil
+	}
+	if targetState.Kind == StateAbsent && matches(tombstoneName, tombstoneState) {
+		if dryRun {
+			return true, nil
+		}
+		if current, currentErr := parent.StillCurrent(); currentErr != nil || !current {
+			return false, recoveryIssue(IssueUnsafePath, op, "cleanup parent changed before rollback", currentErr)
+		}
+		if err := parent.MoveNoReplace(tombstoneName, targetName); err != nil {
+			return false, recoveryIssue(IssuePendingCleanup, op, err.Error(), err)
+		}
+		if ops.AfterCleanupRollbackMove != nil {
+			ops.AfterCleanupRollbackMove()
+		}
+		if current, currentErr := parent.StillCurrent(); currentErr != nil || !current {
+			return false, recoveryIssue(IssueUnsafePath, op, "cleanup parent changed after rollback move", currentErr)
+		}
+		if state, stateErr := parent.State(targetName, libraryRoot); stateErr != nil || !matches(targetName, state) {
+			return false, recoveryIssue(IssuePendingCleanup, op, "restored cleanup target failed authentication", stateErr)
+		}
+		return true, nil
+	}
+	return false, recoveryIssue(IssuePendingCleanup, op, "cleanup execution state cannot be rolled back safely", nil)
+}
+
+// rollbackReconcileSource owns artifacts created by an interrupted forward
+// reconcile. It authenticates both the old tombstone and any installed
+// forward link before restoring the old target; the rollback child may run
+// only after this source operation completes.
+func rollbackReconcileSource(libraryRoot string, op config.PendingOperation, dryRun bool, ops FileOps) (bool, *Issue) {
+	var parent reconcileParent
+	var err error
+	if dryRun {
+		parent, err = openReconcileParentReadOnly(op)
+	} else {
+		parent, err = openReconcileParent(op)
+	}
+	if err != nil {
+		return false, recoveryIssue(IssueUnsafePath, op, err.Error(), err)
+	}
+	defer parent.Close()
+	targetName, _ := reconcileBaseName(op.Target)
+	tombstoneName, _ := reconcileBaseName(op.Tombstone)
+	targetState, err := parent.State(targetName, libraryRoot)
+	if err != nil {
+		return false, recoveryIssue(IssuePendingReconcile, op, err.Error(), err)
+	}
+	tombstoneState, err := parent.State(tombstoneName, libraryRoot)
+	if err != nil {
+		return false, recoveryIssue(IssuePendingReconcile, op, err.Error(), err)
+	}
+	matches := func(name string, state State, expectedID string, expected *config.Fingerprint) bool {
+		if expected == nil || state.Kind != StateManagedLink || state.SkillID != expectedID {
+			return false
+		}
+		fingerprint, fingerprintErr := parent.Fingerprint(name)
+		return fingerprintErr == nil && sameFingerprint(fingerprint, expected)
+	}
+	oldMatches := func(name string, state State) bool {
+		return matches(name, state, op.ExpectedSkillID, op.Expected)
+	}
+	if restored, restoreIssue := restoreDeleteQuarantine(parent, libraryRoot, op, tombstoneName, "tombstone", oldMatches, dryRun); restoreIssue != nil {
+		return false, restoreIssue
+	} else if restored && !dryRun {
+		targetState, err = parent.State(targetName, libraryRoot)
+		if err != nil {
+			return false, recoveryIssue(IssuePendingReconcile, op, err.Error(), err)
+		}
+		tombstoneState, err = parent.State(tombstoneName, libraryRoot)
+		if err != nil {
+			return false, recoveryIssue(IssuePendingReconcile, op, err.Error(), err)
+		}
+	}
+	oldTarget := matches(targetName, targetState, op.ExpectedSkillID, op.Expected)
+	oldTombstone := matches(tombstoneName, tombstoneState, op.ExpectedSkillID, op.Expected)
+	forwardTarget := false
+	if op.Rollback != nil {
+		forwardTarget = matches(targetName, targetState, op.Rollback.ExpectedSkillID, op.Rollback.Expected)
+	}
+	forwardMatches := func(name string, state State) bool {
+		return op.Rollback != nil && matches(name, state, op.Rollback.ExpectedSkillID, op.Rollback.Expected)
+	}
+	if present, stateErr := parent.State(deleteQuarantineName(op, "target"), libraryRoot); stateErr != nil {
+		return false, recoveryIssue(IssuePendingReconcile, op, stateErr.Error(), stateErr)
+	} else if present.Kind != StateAbsent {
+		if dryRun {
+			if !forwardMatches(deleteQuarantineName(op, "target"), present) {
+				return false, recoveryIssue(IssuePendingReconcile, op, "delete quarantine failed forward-link authentication", nil)
+			}
+		} else if issue := deleteAuthenticatedEntry(parent, libraryRoot, op, targetName, "target", forwardMatches, ops, IssuePendingReconcile); issue != nil {
+			return false, issue
+		}
+		targetState, err = parent.State(targetName, libraryRoot)
+		if err != nil {
+			return false, recoveryIssue(IssuePendingReconcile, op, err.Error(), err)
+		}
+		tombstoneState, err = parent.State(tombstoneName, libraryRoot)
+		if err != nil {
+			return false, recoveryIssue(IssuePendingReconcile, op, err.Error(), err)
+		}
+		oldTarget = matches(targetName, targetState, op.ExpectedSkillID, op.Expected)
+		oldTombstone = matches(tombstoneName, tombstoneState, op.ExpectedSkillID, op.Expected)
+		forwardTarget = forwardMatches(targetName, targetState)
+	}
+	if tombstoneState.Kind != StateAbsent && !oldTombstone {
+		return false, recoveryIssue(IssuePendingReconcile, op, "forward reconcile tombstone failed old-link authentication", nil)
+	}
+	if oldTarget && tombstoneState.Kind == StateAbsent {
+		return true, nil
+	}
+	if op.ExpectedAbsent && targetState.Kind == StateAbsent && tombstoneState.Kind == StateAbsent {
+		return true, nil
+	}
+	if forwardTarget && tombstoneState.Kind == StateAbsent {
+		// Forward completed and consumed its tombstone. The dependent rollback
+		// operation owns removing/replacing the authenticated forward target.
+		return true, nil
+	}
+	if targetState.Kind == StateAbsent && oldTombstone {
+		if dryRun {
+			return true, nil
+		}
+		if current, currentErr := parent.StillCurrent(); currentErr != nil || !current {
+			return false, recoveryIssue(IssueUnsafePath, op, "reconcile parent changed before source restore", currentErr)
+		}
+		if err := parent.MoveNoReplace(tombstoneName, targetName); err != nil {
+			return false, recoveryIssue(IssuePendingReconcile, op, err.Error(), err)
+		}
+		state, stateErr := parent.State(targetName, libraryRoot)
+		if stateErr != nil || !matches(targetName, state, op.ExpectedSkillID, op.Expected) {
+			return false, recoveryIssue(IssuePendingReconcile, op, "restored forward tombstone failed authentication", stateErr)
+		}
+		if current, currentErr := parent.StillCurrent(); currentErr != nil || !current {
+			return false, recoveryIssue(IssueUnsafePath, op, "reconcile parent changed after source restore", currentErr)
+		}
+		return true, nil
+	}
+	if forwardTarget && oldTombstone {
+		if dryRun {
+			return true, nil
+		}
+		if current, currentErr := parent.StillCurrent(); currentErr != nil || !current {
+			return false, recoveryIssue(IssueUnsafePath, op, "reconcile parent changed before source replacement", currentErr)
+		}
+		if issue := deleteAuthenticatedEntry(parent, libraryRoot, op, targetName, "target", forwardMatches, ops, IssuePendingReconcile); issue != nil {
+			return false, issue
+		}
+		if err := parent.MoveNoReplace(tombstoneName, targetName); err != nil {
+			return false, recoveryIssue(IssuePendingReconcile, op, err.Error(), err)
+		}
+		state, stateErr := parent.State(targetName, libraryRoot)
+		if stateErr != nil || !matches(targetName, state, op.ExpectedSkillID, op.Expected) {
+			return false, recoveryIssue(IssuePendingReconcile, op, "restored reconcile source failed authentication", stateErr)
+		}
+		if current, currentErr := parent.StillCurrent(); currentErr != nil || !current {
+			return false, recoveryIssue(IssueUnsafePath, op, "reconcile parent changed after source replacement", currentErr)
+		}
+		return true, nil
+	}
+	return false, recoveryIssue(IssuePendingReconcile, op, "reconcile rollback source state is unknown", nil)
+}
+
+func deleteQuarantineName(op config.PendingOperation, role string) string {
+	return ".aikit-delete-" + role + "-" + op.ID
+}
+
+func restoreDeleteQuarantine(parent reconcileParent, libraryRoot string, op config.PendingOperation, destinationName, role string, matches func(string, State) bool, dryRun bool) (bool, *Issue) {
+	quarantineName := deleteQuarantineName(op, role)
+	quarantineState, err := parent.State(quarantineName, libraryRoot)
+	if err != nil {
+		return false, recoveryIssue(IssuePendingReconcile, op, err.Error(), err)
+	}
+	if quarantineState.Kind == StateAbsent {
+		return false, nil
+	}
+	if !matches(quarantineName, quarantineState) {
+		return false, recoveryIssue(IssuePendingReconcile, op, "delete quarantine failed rollback-source authentication", nil)
+	}
+	destinationState, err := parent.State(destinationName, libraryRoot)
+	if err != nil {
+		return false, recoveryIssue(IssuePendingReconcile, op, err.Error(), err)
+	}
+	if destinationState.Kind != StateAbsent {
+		return false, recoveryIssue(IssuePendingReconcile, op, "rollback-source destination is occupied while delete quarantine remains", nil)
+	}
+	if dryRun {
+		return true, nil
+	}
+	if current, currentErr := parent.StillCurrent(); currentErr != nil || !current {
+		return false, recoveryIssue(IssueUnsafePath, op, "delete quarantine parent changed before rollback restore", currentErr)
+	}
+	if err := parent.MoveNoReplace(quarantineName, destinationName); err != nil {
+		return false, recoveryIssue(IssuePendingReconcile, op, err.Error(), err)
+	}
+	state, stateErr := parent.State(destinationName, libraryRoot)
+	if stateErr != nil || !matches(destinationName, state) {
+		return false, recoveryIssue(IssuePendingReconcile, op, "restored delete quarantine failed authentication", stateErr)
+	}
+	if current, currentErr := parent.StillCurrent(); currentErr != nil || !current {
+		return false, recoveryIssue(IssueUnsafePath, op, "delete quarantine parent changed after rollback restore", currentErr)
+	}
+	return true, nil
+}
+
+// deleteAuthenticatedEntry never unlinks the authenticated lexical entry
+// directly. It atomically moves whichever object currently owns the name to a
+// deterministic per-operation quarantine, authenticates that moved object,
+// verifies the anchored parent still owns the lexical scope, and only then
+// unlinks the quarantine. An unexpected moved object is restored when that can
+// be done without replacement; otherwise it remains locatable and pending.
+func deleteAuthenticatedEntry(parent reconcileParent, libraryRoot string, op config.PendingOperation, originalName, role string, matches func(string, State) bool, ops FileOps, issueKind IssueKind) *Issue {
+	quarantineName := deleteQuarantineName(op, role)
+	quarantineState, err := parent.State(quarantineName, libraryRoot)
+	if err != nil {
+		return recoveryIssue(issueKind, op, err.Error(), err)
+	}
+	if quarantineState.Kind == StateAbsent {
+		originalState, stateErr := parent.State(originalName, libraryRoot)
+		if stateErr != nil {
+			return recoveryIssue(issueKind, op, stateErr.Error(), stateErr)
+		}
+		if originalState.Kind == StateAbsent {
+			return nil
+		}
+		if !matches(originalName, originalState) {
+			return recoveryIssue(issueKind, op, "delete source no longer matches the authenticated object", nil)
+		}
+		if ops.BeforeDeleteQuarantine != nil {
+			ops.BeforeDeleteQuarantine(role)
+		}
+		if err := parent.MoveNoReplace(originalName, quarantineName); err != nil {
+			return recoveryIssue(issueKind, op, err.Error(), err)
+		}
+		if ops.AfterDeleteQuarantine != nil {
+			ops.AfterDeleteQuarantine(role)
+		}
+		quarantineState, err = parent.State(quarantineName, libraryRoot)
+		if err != nil {
+			return recoveryIssue(issueKind, op, err.Error(), err)
+		}
+	}
+	if !matches(quarantineName, quarantineState) {
+		originalState, stateErr := parent.State(originalName, libraryRoot)
+		if stateErr == nil && originalState.Kind == StateAbsent {
+			if current, currentErr := parent.StillCurrent(); currentErr == nil && current {
+				_ = parent.MoveNoReplace(quarantineName, originalName)
+			}
+		}
+		return recoveryIssue(issueKind, op, "delete quarantine failed authenticated object validation", nil)
+	}
+	if current, currentErr := parent.StillCurrent(); currentErr != nil || !current {
+		if currentErr == nil {
+			currentErr = fmt.Errorf("delete quarantine parent changed")
+		}
+		return recoveryIssue(IssueUnsafePath, op, currentErr.Error(), currentErr)
+	}
+	if err := parent.Remove(quarantineName); err != nil {
+		return recoveryIssue(issueKind, op, err.Error(), err)
+	}
+	if current, currentErr := parent.StillCurrent(); currentErr != nil || !current {
+		if currentErr == nil {
+			currentErr = fmt.Errorf("delete quarantine parent changed after unlink")
+		}
+		return recoveryIssue(IssueUnsafePath, op, currentErr.Error(), currentErr)
+	}
+	return nil
 }
 
 func validateOperationScopeTarget(op config.PendingOperation) error {

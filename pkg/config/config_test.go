@@ -81,6 +81,131 @@ func TestConfigRoundTripIncludesStructuredState(t *testing.T) {
 	}
 }
 
+func TestConfigRoundTripIncludesAuthenticatedReconcileTransaction(t *testing.T) {
+	projectPath := t.TempDir()
+	cfg := New()
+	cfg.Projects = []Project{{Name: "aikit", Path: projectPath, Agents: []string{"cursor"}}}
+	cfg.PendingOperations = []PendingOperation{{
+		ID: "reconcile-1", Kind: OperationReconcile,
+		Scope:  Scope{Project: "aikit", ProjectPath: projectPath, Agent: "cursor"},
+		Target: filepath.Join(projectPath, ".cursor", "skills", "review"), SkillID: "local/review",
+		TransactionID: "tx-1", TransactionPhase: TransactionRollback,
+		ExpectedSkillID: "local/old", Expected: &Fingerprint{Kind: "symlink", Hash: strings.Repeat("a", 64), LinkTarget: "/library/local/old"},
+		ExpectedAbsent: true, Tombstone: filepath.Join(projectPath, ".cursor", "skills", ".aikit-reconcile-reconcile-1"),
+	}}
+	b, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got Config
+	if err := yaml.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	if err := got.Validate(); err != nil {
+		t.Fatalf("round-tripped reconcile invalid: %v\n%s", err, b)
+	}
+	op := got.PendingOperations[0]
+	if op.TransactionID != "tx-1" || op.TransactionPhase != TransactionRollback || op.ExpectedSkillID != "local/old" || op.Expected == nil || !op.ExpectedAbsent || op.Tombstone == "" {
+		t.Fatalf("authenticated transaction fields lost: %#v", op)
+	}
+}
+
+func TestConfigRoundTripIncludesRollbackSourceDependency(t *testing.T) {
+	projectPath := t.TempDir()
+	target := filepath.Join(projectPath, ".cursor", "skills", "review")
+	fingerprint := &Fingerprint{Kind: "symlink", Hash: strings.Repeat("a", 64), LinkTarget: "/library/local/review"}
+	child := PendingOperation{
+		ID: "cleanup-child", Kind: OperationCleanup, Scope: Scope{Project: "aikit", ProjectPath: projectPath, Agent: "cursor"},
+		Target: target, SkillID: "local/review", TransactionID: "tx-1", TransactionPhase: TransactionRollback,
+		ExpectedSkillID: "local/review", Expected: fingerprint, Tombstone: filepath.Join(filepath.Dir(target), ".aikit-cleanup-cleanup-child"),
+	}
+	embedded := child
+	source := PendingOperation{
+		ID: "reconcile-source", Kind: OperationReconcile, Scope: child.Scope, Target: target, SkillID: "local/review",
+		TransactionID: "tx-1", TransactionPhase: TransactionRollbackSource, ExpectedAbsent: true,
+		Tombstone: filepath.Join(filepath.Dir(target), ".aikit-reconcile-reconcile-source"), Rollback: &embedded,
+	}
+	child.ParentOperationID = source.ID
+	cfg := New()
+	cfg.Projects = []Project{{Name: "aikit", Path: projectPath, Agents: []string{"cursor"}}}
+	cfg.PendingOperations = []PendingOperation{source, child}
+	b, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got Config
+	if err := yaml.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	if err := got.Validate(); err != nil {
+		t.Fatalf("round-tripped rollback source invalid: %v\n%s", err, b)
+	}
+	if got.PendingOperations[0].TransactionPhase != TransactionRollbackSource || got.PendingOperations[1].ParentOperationID != got.PendingOperations[0].ID {
+		t.Fatalf("rollback source ownership lost: %#v", got.PendingOperations)
+	}
+}
+
+func TestValidateRejectsNonBijectiveRollbackSourceChildren(t *testing.T) {
+	valid := func() *Config {
+		projectPath := t.TempDir()
+		target := filepath.Join(projectPath, ".cursor", "skills", "review")
+		fingerprint := &Fingerprint{Kind: "symlink", Hash: strings.Repeat("a", 64), LinkTarget: "/library/local/review"}
+		child := PendingOperation{
+			ID: "cleanup-child", Kind: OperationCleanup, Scope: Scope{Project: "aikit", ProjectPath: projectPath, Agent: "cursor"},
+			Target: target, SkillID: "local/review", TransactionID: "tx-1", TransactionPhase: TransactionRollback,
+			ExpectedSkillID: "local/review", Expected: fingerprint, Tombstone: filepath.Join(filepath.Dir(target), ".aikit-cleanup-cleanup-child"),
+		}
+		embedded := child
+		source := PendingOperation{
+			ID: "reconcile-source", Kind: OperationReconcile, Scope: child.Scope, Target: target, SkillID: "local/review",
+			TransactionID: "tx-1", TransactionPhase: TransactionRollbackSource, ExpectedAbsent: true,
+			Tombstone: filepath.Join(filepath.Dir(target), ".aikit-reconcile-reconcile-source"), Rollback: &embedded,
+		}
+		child.ParentOperationID = source.ID
+		cfg := New()
+		cfg.Projects = []Project{{Name: "aikit", Path: projectPath, Agents: []string{"cursor"}}}
+		cfg.PendingOperations = []PendingOperation{source, child}
+		return cfg
+	}
+	tests := map[string]func(*Config){
+		"missing child":  func(cfg *Config) { cfg.PendingOperations = cfg.PendingOperations[:1] },
+		"modified child": func(cfg *Config) { cfg.PendingOperations[1].Reason = "tampered" },
+		"duplicate child": func(cfg *Config) {
+			duplicate := cfg.PendingOperations[1]
+			duplicate.ID = "cleanup-duplicate"
+			duplicate.Tombstone = filepath.Join(filepath.Dir(duplicate.Target), ".aikit-cleanup-cleanup-duplicate")
+			cfg.PendingOperations = append(cfg.PendingOperations, duplicate)
+		},
+		"orphan child": func(cfg *Config) {
+			cfg.PendingOperations = cfg.PendingOperations[1:]
+		},
+		"source with parent": func(cfg *Config) { cfg.PendingOperations[0].ParentOperationID = cfg.PendingOperations[1].ID },
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			cfg := valid()
+			mutate(cfg)
+			if err := cfg.Validate(); err == nil {
+				t.Fatal("invalid rollback-source relationship was accepted")
+			}
+		})
+	}
+}
+
+func TestValidateRejectsUnauthenticatedReconcile(t *testing.T) {
+	projectPath := t.TempDir()
+	cfg := New()
+	cfg.Projects = []Project{{Name: "aikit", Path: projectPath, Agents: []string{"cursor"}}}
+	cfg.PendingOperations = []PendingOperation{{
+		ID: "reconcile-1", Kind: OperationReconcile,
+		Scope:  Scope{Project: "aikit", ProjectPath: projectPath, Agent: "cursor"},
+		Target: filepath.Join(projectPath, ".cursor", "skills", "review"), SkillID: "local/review",
+	}}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("unauthenticated reconcile was accepted")
+	}
+}
+
 func TestValidateRejectsInvalidReferencesAndPaths(t *testing.T) {
 	valid := func() *Config {
 		cfg := New()
@@ -248,7 +373,8 @@ func TestValidateAllowsCleanupAtHistoricalProjectPathAfterRebind(t *testing.T) {
 		ID: "cleanup-old-path", Kind: OperationCleanup,
 		Scope:   Scope{Project: "repo", ProjectPath: oldPath, Agent: "cursor"},
 		Target:  filepath.Join(oldPath, ".cursor", "skills", "review"),
-		SkillID: "local/review", Reason: "path-rebind",
+		SkillID: "local/review", Reason: "path-rebind", ExpectedAbsent: true,
+		Tombstone: filepath.Join(oldPath, ".cursor", "skills", ".aikit-cleanup-cleanup-old-path"),
 	}}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("historical path cleanup rejected: %v", err)
@@ -275,7 +401,8 @@ func TestStoreLoadDefaultsAndCheckpointDurability(t *testing.T) {
 		tx.Config.PendingOperations = append(tx.Config.PendingOperations, PendingOperation{
 			ID: "op-1", Kind: OperationCleanup,
 			Scope: Scope{Agent: "cursor"}, Target: filepath.Join(userHome, ".cursor", "skills", "review"),
-			SkillID: "local/review", Reason: "disable",
+			SkillID: "local/review", Reason: "disable", ExpectedAbsent: true,
+			Tombstone: filepath.Join(userHome, ".cursor", "skills", ".aikit-cleanup-op-1"),
 		})
 		if err := tx.Checkpoint(); err != nil {
 			return err

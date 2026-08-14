@@ -16,7 +16,7 @@ type Launcher struct {
 }
 
 func (l Launcher) Launch(ctx context.Context, initialView View, initialAction Action) error {
-	options := append([]tea.ProgramOption{tea.WithAltScreen(), tea.WithContext(ctx)}, l.ProgramOptions...)
+	options := append([]tea.ProgramOption{tea.WithAltScreen(), tea.WithContext(ctx), tea.WithMouseCellMotion()}, l.ProgramOptions...)
 	_, err := tea.NewProgram(NewModel(ctx, l.Service, l.Migration, initialView, initialAction), options...).Run()
 	return err
 }

@@ -34,6 +34,12 @@ func (f fakeMigration) Scan(context.Context, app.ScanRequest) (app.ScanResult, e
 	return f.scan, nil
 }
 
+func (f fakeMigration) Inventory(context.Context, app.InventoryRequest) <-chan app.InventoryEvent {
+	events := make(chan app.InventoryEvent)
+	close(events)
+	return events
+}
+
 func (f fakeMigration) Migrate(context.Context, app.MigrateRequest) (app.MigrateResult, error) {
 	return f.migrate, nil
 }
@@ -44,6 +50,27 @@ func (f *fakeService) Snapshot(context.Context, app.StatusRequest) (app.Snapshot
 }
 func (f *fakeService) PreviewAdd(context.Context, app.AddPreviewRequest) (app.AddPreview, error) {
 	return f.preview, nil
+}
+func (f *fakeService) PreviewBinding(context.Context, app.BindingPreviewRequest) (app.MutationPreview, error) {
+	return app.MutationPreview{}, nil
+}
+func (f *fakeService) PreviewRemove(context.Context, app.RemoveRequest) (app.MutationPreview, error) {
+	return app.MutationPreview{}, nil
+}
+func (f *fakeService) PreviewPreset(context.Context, app.PresetPreviewRequest) (app.MutationPreview, error) {
+	return app.MutationPreview{}, nil
+}
+func (f *fakeService) PreviewPresetMutation(context.Context, app.PresetMutationRequest) (app.MutationPreview, error) {
+	return app.MutationPreview{}, nil
+}
+func (f *fakeService) SkillDetail(context.Context, string) (app.SkillDetail, error) {
+	return app.SkillDetail{}, nil
+}
+func (f *fakeService) Configuration(context.Context) (app.ConfigurationDetail, error) {
+	return app.ConfigurationDetail{}, nil
+}
+func (f *fakeService) ValidateConfiguration(context.Context) (app.ConfigurationValidation, error) {
+	return app.ConfigurationValidation{Valid: true}, nil
 }
 func (f *fakeService) Add(_ context.Context, request app.AddRequest) (app.Result, error) {
 	f.last = "add"
@@ -89,8 +116,29 @@ func (f *fakeService) EditProject(_ context.Context, request app.ProjectEditRequ
 func (f *fakeService) PreviewProjectEdit(context.Context, app.ProjectEditRequest) (app.ProjectEditPreview, error) {
 	return app.ProjectEditPreview{}, nil
 }
+func (f *fakeService) PreviewProjectRemove(context.Context, app.ProjectRemoveRequest) (app.MutationPreview, error) {
+	return app.MutationPreview{}, nil
+}
 func (f *fakeService) RemoveProject(context.Context, app.ProjectRemoveRequest) (app.Result, error) {
 	return app.Result{}, nil
+}
+func (f *fakeService) Batch(context.Context, app.BatchRequest) (app.BatchResult, error) {
+	return app.BatchResult{}, nil
+}
+func (f *fakeService) MutatePreset(context.Context, app.PresetMutationRequest) (app.Result, error) {
+	return app.Result{}, nil
+}
+func (f *fakeService) Compare(context.Context, app.CompareRequest) (app.CompareResult, error) {
+	return app.CompareResult{}, nil
+}
+func (f *fakeService) PreviewRecovery(context.Context, app.RecoveryRequest) (app.RecoveryPreview, error) {
+	return app.RecoveryPreview{}, nil
+}
+func (f *fakeService) ResumeRecovery(context.Context, app.RecoveryRequest) (app.RecoveryResult, error) {
+	return app.RecoveryResult{}, nil
+}
+func (f *fakeService) RollbackRecovery(context.Context, app.RecoveryRequest) (app.RecoveryResult, error) {
+	return app.RecoveryResult{}, nil
 }
 
 func TestCommandTreeHasOnlySupportedTopLevelCommands(t *testing.T) {

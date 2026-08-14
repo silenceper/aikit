@@ -26,7 +26,7 @@ func (a *App) Sync(ctx context.Context, request SyncRequest) (Result, error) {
 	}
 	var output Result
 	err := a.deps.Store.WithLock(ctx, func(tx *config.Tx) error {
-		if err := a.beforeMutation(ctx, tx.Config.Library.Skills); err != nil {
+		if err := a.beforeMutation(ctx, tx.Config); err != nil {
 			return err
 		}
 		recovered := a.deps.Recover(a.deps.Paths.LibrarySkills, tx.Config.PendingOperations, selector, false)
@@ -64,7 +64,7 @@ func (a *App) changeBinding(ctx context.Context, request BindingRequest, enable 
 	}
 	var output Result
 	err := a.deps.Store.WithLock(ctx, func(tx *config.Tx) error {
-		if err := a.beforeMutation(ctx, tx.Config.Library.Skills); err != nil {
+		if err := a.beforeMutation(ctx, tx.Config); err != nil {
 			return err
 		}
 		selectors, err := bindingSelectors(tx.Config, request)

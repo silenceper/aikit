@@ -551,7 +551,7 @@ Drift:
 - adopt 在 temp 创建失败、原对象 rename 失败、第二次 rename 失败并成功回滚三种状态下，后续 sync 均能重试
 - 两个并发变更进程由 config.lock 串行，后获得锁者重读账本，不丢更新
 
-TUI：逻辑测底层 API；k9s 式主界面做一次手动走通（列表移动、项目 common/Agent 作用域切换、space enable、项目编辑、unmanaged adopt、`u` 确认更新）。CI 不模拟按键。
+TUI：默认进入英文 Overview，并提供 Overview、Library、Workspaces、Presets、Migration、Status 六个顶层区域。每次启动先离线读取 ledger/status，再增量扫描五个全局 Agent root 与全部已登记项目；扫描只读、不 fetch、不自动 import/adopt。宽屏为列表与详情双栏，窄屏进入详情后可返回；键盘与鼠标共享同一 action dispatcher，所有渲染按钮都可通过 `Tab`/方向键聚焦并以 `Enter` 执行。Library、Workspace binding、Migration、Preset、Status 操作都必须经过 typed preview 与 confirm；Busy 期间禁止重复 mutation。`Ctrl+K` 打开 Configuration overlay，显示实际 `$AIKIT_HOME/config.yaml` 路径。CI 覆盖键盘/鼠标等价、响应式布局、自动扫描零网络零写、取消零 mutation 与精确 origin selector。
 
 ## 10. 实现边界
 

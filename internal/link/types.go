@@ -70,14 +70,15 @@ type Action struct {
 type IssueKind string
 
 const (
-	IssueLibraryMissing IssueKind = "library-missing"
-	IssueConflict       IssueKind = "conflict"
-	IssueScopeConflict  IssueKind = "scope-conflict"
-	IssueIO             IssueKind = "io"
-	IssuePendingCleanup IssueKind = "pending-cleanup"
-	IssueAdoptRecovery  IssueKind = "adopt-recovery"
-	IssueProjectMissing IssueKind = "project-missing"
-	IssueUnsafePath     IssueKind = "unsafe-path"
+	IssueLibraryMissing   IssueKind = "library-missing"
+	IssueConflict         IssueKind = "conflict"
+	IssueScopeConflict    IssueKind = "scope-conflict"
+	IssueIO               IssueKind = "io"
+	IssuePendingCleanup   IssueKind = "pending-cleanup"
+	IssuePendingReconcile IssueKind = "pending-reconcile"
+	IssueAdoptRecovery    IssueKind = "adopt-recovery"
+	IssueProjectMissing   IssueKind = "project-missing"
+	IssueUnsafePath       IssueKind = "unsafe-path"
 )
 
 type Issue struct {
