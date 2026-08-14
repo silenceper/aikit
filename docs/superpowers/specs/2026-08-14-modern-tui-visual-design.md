@@ -24,6 +24,30 @@ and interaction polish only.
 - Avoid large filled backgrounds, dense borders, and simultaneous highlights.
 - Prefer whitespace, alignment, concise labels, and one obvious focal point.
 
+## Structural dividers
+
+Use a light k9s-inspired divider system to clarify large functional regions
+without turning every item into a boxed panel:
+
+- Render one horizontal divider below the app bar.
+- At widths 60 and above, render one vertical divider between navigation and
+  the main workspace. The segment beside the active navigation item uses the
+  blue-violet accent while the remaining divider stays muted.
+- Render one horizontal divider above the status and shortcut area.
+- Render confirmation, input, configuration, More, recovery, and error-detail
+  overlays with one complete thin border. The title is integrated into the top
+  border and the primary/cancel actions stay inside the bottom border.
+- Render detail groups with short local dividers such as `- Summary`,
+  `- Usage`, `- Files`, and `- Diagnostics`; do not extend these rules across
+  the full workspace.
+- Do not draw boxes around metrics, rows, badges, or individual buttons. Those
+  continue to use whitespace, a slim selection marker, and semantic labels.
+
+Divider characters come from one semantic glyph set. Unicode-capable output
+uses light box-drawing glyphs. `NO_COLOR`, reduced-capability, and explicit
+ASCII fallback modes use `-`, `|`, and `+`. Focus and region boundaries must
+remain understandable when ANSI styling is stripped.
+
 ## Responsive shell
 
 At 96 columns and above, render a vertical navigation rail on the left and one
@@ -36,7 +60,8 @@ than forcing a narrow split pane.
 
 Below 60 columns, render a single pane with a breadcrumb and a Back action. The
 active collection, details, and modal actions must remain reachable with both
-keyboard and mouse.
+keyboard and mouse. The navigation divider disappears in this mode; app-bar,
+breadcrumb, and footer dividers remain.
 
 The top app bar contains only `aikit`, the current context, and scan/busy
 status. The bottom bar shows only actions valid for the current focus.
@@ -98,6 +123,9 @@ other actions remain under More.
 - `styles.go`: adaptive semantic palette and reusable text/badge/panel styles.
 - `layout.go`: pure responsive shell, navigation, content, detail, overlay, and
   footer rectangles.
+- A shared divider/panel primitive owns glyph selection and exact line
+  geometry; shell rendering, overlay rendering, and mouse hit testing consume
+  that result rather than recalculating border positions.
 - `render.go`: shell and content composition only.
 - `rows.go`: semantic presentation fields for two-line collection items.
 - `input_mouse.go`: hit testing based exclusively on layout/render geometry.
@@ -113,6 +141,12 @@ other actions remain under More.
 - Empty, healthy, loading, partial, warning, and error states remain readable.
 - Keyboard/mouse parity remains valid after navigation and action placement
   changes.
+- Divider tests cover wide, compact, narrow, height 8, and height 12 layouts.
+  Lines never overwrite labels, row content, scroll indicators, or actions.
+- Overlay borders and their title/action slots remain completely visible and
+  clickable at supported minimum sizes.
+- Unicode and ASCII glyph profiles produce equivalent region boundaries after
+  ANSI stripping; CJK and emoji content remains within terminal cell bounds.
 - ANSI output is visually inspected in dark and light palette assumptions and
   semantically tested with `NO_COLOR` and a reduced 8/16-color fallback. Focus
   and severity assertions must pass after ANSI color is stripped.
