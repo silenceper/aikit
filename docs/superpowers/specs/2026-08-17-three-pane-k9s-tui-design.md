@@ -19,9 +19,21 @@ The redesign must make these common tasks obvious without prior documentation:
 4. create a preset, edit its members, and apply it to an exact target; and
 5. identify and resolve status, migration, or recovery work.
 
-This design supersedes the sparse-divider and two-line-collection presentation
-rules in `2026-08-14-modern-tui-visual-design.md`. It preserves the previously
-approved typed preview, recovery, path-safety, and mutation boundaries.
+This design supersedes the sparse-divider, two-line-collection, permanent
+navigation, and wide-workspace layout rules in
+`2026-08-14-modern-tui-visual-design.md`. It preserves that specification's
+adaptive palette, semantic color, `NO_COLOR`, glyph fallback, offline startup,
+and typed mutation boundaries.
+
+It changes only the visual placement of the project detail collection defined
+by `2026-08-17-path-first-project-management-design.md`; path-first creation,
+path identity, agent detection, exact project mutation previews, unknown-content
+preservation, and independent project operations remain authoritative. It also
+preserves `2026-08-17-tui-detail-and-exit-design.md` in full: bounded main
+details, the scrollable `View SKILL.md` surface and 64 KiB marker, `Esc` as
+cancel/back/no-op at the root, `Ctrl+Q` as the normal exit chord, and `Ctrl+C`
+as the emergency exit. The source parsing, discovery, and candidate contracts
+in `2026-08-17-skills-source-discovery-design.md` remain unchanged.
 
 ## Chosen structure
 
@@ -83,6 +95,19 @@ must come from the same layout primitives.
 - **Below 60 columns:** render one pane at a time with breadcrumb navigation.
   App bar, active pane frame, action row, and footer remain visible.
 
+Height degrades independently from width:
+
+- **12 rows and above:** app bar, active panes, overlays, and footer use their
+  complete frames.
+- **8-11 rows:** render only the active pane. The app bar and footer become
+  single unframed lines, while the active pane keeps one complete frame with an
+  integrated title. Its body scrolls and its action row remains inside the
+  frame. This yields a fixed budget of one app line, one footer line, and all
+  remaining rows for the active pane.
+- **Below 8 rows:** show a bounded `terminal too short; need 8 rows` message and
+  accept only resize, help, back/cancel, and exit input. No action or mutation
+  is reachable in this state.
+
 At all supported widths, content is clipped or wrapped by display cells and
 graphemes rather than runes. A long skill description, path, diagnostic, CJK
 text, or emoji must not escape its owning frame. Detail scrolling is independent
@@ -103,6 +128,19 @@ In the main Library collection:
 In nested single-choice pickers, clicking a row selects the value but does not
 submit or launch a mutation. A separate `[Apply]` or `[Confirm]` action advances
 the workflow. Picker selection must not reuse the Library batch-toggle path.
+
+All picker modes use one input contract:
+
+- Up/Down or `j`/`k` moves the highlighted row without choosing it;
+- Space or a single row click toggles a multi-choice item or chooses a
+  single-choice item without advancing;
+- Enter on a highlighted row performs that same choice and moves focus to the
+  picker action row without submitting;
+- Tab/Shift+Tab moves between picker collection, detail when present, and its
+  action row;
+- Enter or click on `[Apply]` builds the typed preview;
+- Enter or click on `[Cancel]`, or `Esc`, returns without mutation; and
+- only the following preview's `[Confirm]` action may execute the request.
 
 Keyboard and mouse call the same semantic action dispatcher. No visible mouse
 action may be unreachable from the keyboard, and no visible keyboard action may
@@ -149,6 +187,19 @@ The three project primary actions are `[Add skill]`, `[Apply preset]`, and
 and remove project. Project creation remains path-first: one directory input,
 derived name, detected agents, typed preview, and explicit confirmation.
 
+The Workspaces Collection pane always owns collection-level actions. With no
+project, it shows `[Create project]`; with projects present it shows
+`[Open] [Create project] [More]`. Selecting a global agent replaces these with
+the relevant open/configure actions but never removes the collection-level
+Create entry from More. An empty-state row explains that project registration
+needs only a directory path and exposes the same Create action to mouse and
+keyboard.
+
+Within Project Detail, Common and each configured agent are focusable scope
+rows. Up/Down moves among them, click selects one, and Enter or double click
+opens the corresponding scoped Library collection. Tab proceeds from scope
+rows to the three project actions; Shift+Tab returns to the scopes.
+
 Opening a project agent or Common scope reuses the Library skill collection,
 but the header and action plan retain the exact project/scope identity.
 
@@ -162,6 +213,12 @@ Editing members opens the Library checklist with current membership preselected.
 Applying a preset always chooses and displays one exact target: global agent,
 project common, or project agent. No preset operation depends on encoded text
 or hidden inferred scope.
+
+The Presets Collection pane always owns `[Create preset]`, including when no
+preset rows exist. With a selected preset it exposes `[Open] [Create preset]
+[More]`. The empty state and collection action bar share the same semantic
+Create action and hit geometry, so a mouse-only user can create the first
+preset.
 
 ### Status, Migration, and Recovery
 
@@ -224,8 +281,12 @@ Use strict RED/GREEN cycles and verify:
 5. nested picker selection without implicit preview submission or mutation;
 6. keyboard/mouse parity for every visible row, action, palette item, modal,
    paging control, and back path;
-7. Library add, project configure, and preset member/apply workflows in no more
-   than three deliberate interactions after choosing the owning item;
+7. Library add, project configure, and preset member/apply workflows reach an
+   exact preview in no more than three deliberate interactions after choosing
+   the owning page or item; the final safety Confirm is counted separately.
+   Concrete budgets are: Library Add -> source input -> candidate review;
+   Project Add skill -> combined scope/skill picker -> review; and Preset Apply
+   -> exact target picker -> review;
 8. exact preview/confirm request parity and cancel zero-write;
 9. stable row/scroll identity during filter, snapshot, and inventory updates;
 10. long real-world descriptions, paths, diagnostics, CJK, and emoji bounded
