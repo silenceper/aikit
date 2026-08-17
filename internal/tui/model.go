@@ -63,6 +63,8 @@ const (
 	ModeInput         Mode = "input"
 	ModeAddSelect     Mode = "add-select"
 	ModeProjectAgents Mode = "project-agents"
+	ModeScopePicker   Mode = "scope-picker"
+	ModePresetPicker  Mode = "preset-picker"
 	ModeMore          Mode = "more"
 	ModeErrorDetail   Mode = "error-detail"
 )
@@ -98,9 +100,7 @@ const (
 	inputPresetCreate    inputKind = "preset-create"
 	inputPresetDuplicate inputKind = "preset-duplicate"
 	inputPresetRename    inputKind = "preset-rename"
-	inputPresetApply     inputKind = "preset-apply"
 	inputRefChange       inputKind = "ref-change"
-	inputBatchScope      inputKind = "batch-scope"
 	inputProjectCreate   inputKind = "project-create"
 	inputProjectName     inputKind = "project-name"
 	inputProjectRename   inputKind = "project-rename"
@@ -241,6 +241,7 @@ type Model struct {
 	ProjectPreview      app.ProjectEditPreview
 	ProjectRegistration app.ProjectRegistrationPreview
 	ProjectResult       app.Result
+	Picker              pickerState
 	RecoveryPreview     app.RecoveryPreview
 	RecoveryResult      app.RecoveryResult
 	FullError           string
@@ -409,15 +410,15 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.enterConfirm(m.confirm)
 		m.Status = "Review the exact change, then confirm"
 		return m, nil
-	case batchRemovePreviewMsg:
+	case batchPreviewMsg:
 		m.Busy = false
 		if msg.err != nil {
-			m.Err, m.Status = msg.err.Error(), "Remove selected preview failed"
+			m.Err, m.Status = msg.err.Error(), "Batch preview failed"
 			return m, nil
 		}
-		m.Preview = msg.preview
+		m.Preview = msg.preview.MutationPreview
 		m.enterConfirm(ActionBatch)
-		m.Status = "Review every selected removal, then confirm"
+		m.Status = "Review the exact atomic batch, then confirm"
 		return m, nil
 	case syncPreviewMsg:
 		m.Busy = false

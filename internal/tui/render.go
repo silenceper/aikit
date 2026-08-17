@@ -291,6 +291,9 @@ func (m Model) renderRowLines(current row, active bool, width int) []string {
 		}
 	}
 	stateWidth := min(24, max(12, width*2/5))
+	if m.Mode == ModeScopePicker || m.Mode == ModePresetPicker {
+		stateWidth = min(8, max(1, width/5))
+	}
 	nameWidth := max(1, width-stateWidth-len([]rune(mark))-1)
 	name := clipPlain(current.Name, nameWidth)
 	namePadding := max(0, nameWidth-lipgloss.Width(name))
@@ -617,6 +620,9 @@ func (m Model) emptyState() string {
 }
 
 func (m Model) primaryActions() []string {
+	if m.Mode == ModeScopePicker || m.Mode == ModePresetPicker {
+		return []string{"Select", "Cancel"}
+	}
 	if m.Mode == ModeProjectAgents {
 		return []string{"Save agents", "Cancel"}
 	}
@@ -650,7 +656,14 @@ func (m Model) primaryActions() []string {
 			return append(actions, "Close")
 		case ViewWorkspaces:
 			if m.Scope.Level == "workspace-projects" || m.Scope.Level == "project-targets" || m.Scope.Level == "project-skills" {
-				return []string{"Rename project", "Manage agents", "Change project directory", "Remove project", "Close"}
+				return []string{"Apply preset", "Rename project", "Manage agents", "Change project directory", "Remove project", "Close"}
+			}
+			if m.Scope.Level == "workspace-global" {
+				actions := []string{"Apply preset"}
+				if len(m.selectedWorkspaceSkillIDs()) > 0 {
+					actions = append(actions, "Enable selected", "Disable selected", "Clear selection")
+				}
+				return append(actions, "Sync preview", "Close")
 			}
 			return []string{"Sync preview", "Close"}
 		case ViewPresets:
@@ -707,6 +720,9 @@ func (m Model) primaryActions() []string {
 		}
 		if m.Scope.Level == "project-targets" {
 			return []string{"Open", "Manage agents", "More"}
+		}
+		if m.Scope.Level == "workspace-global" {
+			return []string{"Open", "Apply preset", "More"}
 		}
 		return []string{"Open", "More"}
 	case ViewPresets:
@@ -827,7 +843,7 @@ func (m Model) breadcrumb() string {
 }
 
 func (m Model) selectionRendered() bool {
-	return m.ActiveView == ViewLibrary || m.ActiveView == ViewMigration || m.Mode == ModeScan || m.Mode == ModeUpdates || m.Mode == ModeAddSelect || m.Mode == ModeProjectAgents || (m.Mode == ModeFilter && (m.filterParent == ModeScan || m.filterParent == ModeUpdates || m.filterParent == ModeAddSelect || m.filterParent == ModeProjectAgents))
+	return m.ActiveView == ViewLibrary || m.ActiveView == ViewMigration || (m.ActiveView == ViewWorkspaces && m.Scope.Level == "workspace-global") || m.Mode == ModeScan || m.Mode == ModeUpdates || m.Mode == ModeAddSelect || m.Mode == ModeProjectAgents || (m.Mode == ModeFilter && (m.filterParent == ModeScan || m.filterParent == ModeUpdates || m.filterParent == ModeAddSelect || m.filterParent == ModeProjectAgents))
 }
 
 func joinColumns(left, right string, leftWidth, rightWidth int) string {

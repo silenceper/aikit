@@ -76,6 +76,9 @@ func (m Model) toggleSelected() (tea.Model, tea.Cmd) {
 		m.Selected[key] = !m.Selected[key]
 		return m, nil
 	}
+	if m.Mode == ModeScopePicker || m.Mode == ModePresetPicker {
+		return m.choosePicker()
+	}
 	if m.ActiveView == ViewMigration || m.Mode == ModeScan || m.Mode == ModeUpdates || m.Mode == ModeAddSelect {
 		key := current.selectionKey()
 		m.Selected[key] = !m.Selected[key]
@@ -85,6 +88,12 @@ func (m Model) toggleSelected() (tea.Model, tea.Cmd) {
 		key := current.selectionKey()
 		m.Selected[key] = !m.Selected[key]
 		m.Status = fmt.Sprintf("%d library skill(s) selected", m.librarySelectionCount())
+		return m, nil
+	}
+	if m.ActiveView == ViewWorkspaces && m.Scope.Level == "workspace-global" {
+		key := current.selectionKey()
+		m.Selected[key] = !m.Selected[key]
+		m.Status = fmt.Sprintf("%d global workspace skill(s) selected", len(m.selectedWorkspaceSkillIDs()))
 		return m, nil
 	}
 	if m.ActiveView == ViewWorkspaces && m.Scope.Level == "agent-skills" {
@@ -130,6 +139,9 @@ func (m Model) activate() (tea.Model, tea.Cmd) {
 		}
 		m.Status = "Review the exact change, then confirm"
 		return m, nil
+	}
+	if m.Mode == ModeScopePicker || m.Mode == ModePresetPicker {
+		return m.choosePicker()
 	}
 	if m.Mode == ModeAddSelect {
 		if !m.Selected[current.selectionKey()] {
@@ -181,6 +193,8 @@ func (m Model) activate() (tea.Model, tea.Cmd) {
 				m.Scope.Level = "workspace-agents"
 			} else if current.ID == "projects" {
 				m.Scope.Level = "workspace-projects"
+			} else if current.ID == "global" {
+				m.Scope = Scope{Level: "workspace-global"}
 			} else {
 				m.Detail = true
 			}
@@ -264,6 +278,16 @@ func (m Model) previewSelectedStatusAdopt() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) cancel() (tea.Model, tea.Cmd) {
+	if m.Mode == ModeScopePicker || m.Mode == ModePresetPicker {
+		if !m.restoreConfirmReturn() {
+			m.Mode, m.Focus = ModeTable, FocusList
+		}
+		m.Picker = pickerState{}
+		m.pendingBatch = app.BatchRequest{}
+		m.pendingPreset = app.PresetMutationRequest{}
+		m.Status = "Cancelled; no changes made"
+		return m, nil
+	}
 	if m.Help {
 		m.Help = false
 		return m, nil
@@ -505,16 +529,6 @@ func (m Model) submitInput() (tea.Model, tea.Cmd) {
 		m.pendingPreset = app.PresetMutationRequest{Operation: app.PresetRename, Name: m.pendingID, NewName: value}
 		m.confirm, m.Busy, m.Status = ActionPreset, true, "Building rename preset preview..."
 		return m, presetMutationPreviewCmd(m.ctx, m.service, m.pendingPreset)
-	case inputPresetApply:
-		binding, err := m.parsePresetApplyTarget(value)
-		if err != nil {
-			m.Err = err.Error()
-			return m, nil
-		}
-		binding.Preset = m.pendingID
-		m.pendingPreset = app.PresetMutationRequest{Operation: app.PresetApply, Name: m.pendingID, Binding: binding}
-		m.confirm, m.Busy, m.Status = ActionPreset, true, "Building exact preset apply preview..."
-		return m, presetMutationPreviewCmd(m.ctx, m.service, m.pendingPreset)
 	case inputRefChange:
 		kind, refValue, ok := strings.Cut(value, ":")
 		if !ok || refValue == "" || (kind != "branch" && kind != "tag" && kind != "commit") {
@@ -537,26 +551,6 @@ func (m Model) submitInput() (tea.Model, tea.Cmd) {
 		}
 		m.Status = "Review the ref change and rollback guarantee, then confirm"
 		return m, nil
-	case inputBatchScope:
-		bindingScope, err := m.parseBatchBindingScope(value)
-		if err != nil {
-			m.Err = err.Error()
-			return m, nil
-		}
-		ids := m.selectedLibraryIDs()
-		if len(ids) == 0 {
-			m.Err = "select at least one library skill"
-			return m, nil
-		}
-		m.pendingBatch.Bindings = nil
-		for _, skillID := range ids {
-			binding := bindingScope
-			binding.SkillID = skillID
-			m.pendingBatch.Bindings = append(m.pendingBatch.Bindings, binding)
-		}
-		m.confirm = ActionBatch
-		m.Busy, m.Status = true, "Building exact binding preview..."
-		return m, batchBindingPreviewCmd(m.ctx, m.service, m.pendingBatch)
 	case inputProjectCreate:
 		m.pendingProjectPath = value
 		m.Busy, m.Status = true, "Inspecting project directory without mutation..."
@@ -644,33 +638,6 @@ func (m Model) saveProjectAgents() (tea.Model, tea.Cmd) {
 	m.confirmReturnReady = true
 	m.Busy, m.Status = true, "Building exact project agent preview..."
 	return m, projectPreviewCmd(m.ctx, m.service, request)
-}
-
-func (m Model) parsePresetApplyTarget(value string) (app.BindingRequest, error) {
-	parts := strings.Split(value, ":")
-	switch {
-	case len(parts) == 2 && parts[0] == "agent":
-		if _, ok := m.Snapshot.Config.Agents[parts[1]]; !ok {
-			return app.BindingRequest{}, fmt.Errorf("global agent %q is not configured", parts[1])
-		}
-		return app.BindingRequest{Agent: parts[1]}, nil
-	case len(parts) == 2 && parts[0] == "project":
-		if _, ok := findProject(m.Snapshot.Config.Projects, parts[1]); !ok {
-			return app.BindingRequest{}, fmt.Errorf("project %q is not registered", parts[1])
-		}
-		return app.BindingRequest{Project: parts[1]}, nil
-	case len(parts) == 3 && parts[0] == "project-agent":
-		project, ok := findProject(m.Snapshot.Config.Projects, parts[1])
-		if !ok {
-			return app.BindingRequest{}, fmt.Errorf("project %q is not registered", parts[1])
-		}
-		if !contains(project.Agents, parts[2]) {
-			return app.BindingRequest{}, fmt.Errorf("agent %q is not declared by project %q", parts[2], parts[1])
-		}
-		return app.BindingRequest{Project: parts[1], Agent: parts[2]}, nil
-	default:
-		return app.BindingRequest{}, fmt.Errorf("target must be agent:name, project:name, or project-agent:project:agent")
-	}
 }
 
 func (m Model) selectedErrorDetail() string {
@@ -761,6 +728,24 @@ func (m Model) selectedLibraryIDs() []string {
 	return ids
 }
 
+func (m Model) selectedWorkspaceSkillIDs() []string {
+	ids := make([]string, 0)
+	for _, skill := range m.Snapshot.Config.Library.Skills {
+		if m.Selected["workspace-global:"+skill.ID] {
+			ids = append(ids, skill.ID)
+		}
+	}
+	sortStrings(ids)
+	return ids
+}
+
+func (m Model) selectedBatchSkillIDs() []string {
+	if m.ActiveView == ViewWorkspaces && m.Scope.Level == "workspace-global" {
+		return m.selectedWorkspaceSkillIDs()
+	}
+	return m.selectedLibraryIDs()
+}
+
 func (m Model) libraryBatchRequest(operation app.BatchOperation) (app.BatchRequest, error) {
 	ids := m.selectedLibraryIDs()
 	if len(ids) == 0 {
@@ -792,33 +777,6 @@ func (m Model) libraryBatchRequest(operation app.BatchOperation) (app.BatchReque
 		return app.BatchRequest{}, fmt.Errorf("unsupported library batch %q", operation)
 	}
 	return request, nil
-}
-
-func (m Model) parseBatchBindingScope(value string) (app.BindingRequest, error) {
-	parts := strings.Split(value, ":")
-	switch {
-	case len(parts) == 2 && parts[0] == "agent":
-		if _, ok := m.Snapshot.Config.Agents[parts[1]]; !ok {
-			return app.BindingRequest{}, fmt.Errorf("global agent %q is not configured", parts[1])
-		}
-		return app.BindingRequest{Agent: parts[1]}, nil
-	case len(parts) == 2 && parts[0] == "project":
-		if _, ok := findProject(m.Snapshot.Config.Projects, parts[1]); !ok {
-			return app.BindingRequest{}, fmt.Errorf("project %q is not registered", parts[1])
-		}
-		return app.BindingRequest{Project: parts[1]}, nil
-	case len(parts) == 3 && parts[0] == "project-agent":
-		project, ok := findProject(m.Snapshot.Config.Projects, parts[1])
-		if !ok {
-			return app.BindingRequest{}, fmt.Errorf("project %q is not registered", parts[1])
-		}
-		if !contains(project.Agents, parts[2]) {
-			return app.BindingRequest{}, fmt.Errorf("agent %q is not declared by project %q", parts[2], parts[1])
-		}
-		return app.BindingRequest{Project: parts[1], Agent: parts[2]}, nil
-	default:
-		return app.BindingRequest{}, fmt.Errorf("scope must be agent:<name>, project:<name>, or project-agent:<project>:<agent>")
-	}
 }
 
 func snapshotSkill(cfg config.Config, id string) (config.Skill, bool) {

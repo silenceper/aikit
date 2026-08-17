@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"fmt"
-
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/silenceper/aikit/internal/app"
 )
@@ -236,9 +234,14 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	for visibleIndex, rect := range regions.Rows {
 		if rect.Contains(msg.X, msg.Y) {
-			m.Cursor = start + visibleIndex
+			nextCursor := start + visibleIndex
+			activatePicker := (m.Mode == ModeScopePicker || m.Mode == ModePresetPicker) && m.Focus == FocusList && m.Cursor == nextCursor
+			m.Cursor = nextCursor
 			m.Focus, m.ActionIndex = FocusList, 0
 			m.ensureVisible()
+			if activatePicker {
+				return m.choosePicker()
+			}
 			return m, nil
 		}
 	}
@@ -285,6 +288,8 @@ func (m Model) performPrimaryAction(index int) (tea.Model, tea.Cmd) {
 		return m.submitInput()
 	}
 	switch actions[index] {
+	case "Select":
+		return m.choosePicker()
 	case "Validate":
 		m.Busy, m.Status = true, "Validating configuration without changes..."
 		return m, validateConfigurationCmd(m.ctx, m.service)
@@ -345,13 +350,12 @@ func (m Model) performPrimaryAction(index int) (tea.Model, tea.Cmd) {
 			operation = app.BatchRemove
 		}
 		if operation == app.BatchEnable || operation == app.BatchDisable {
-			if len(m.selectedLibraryIDs()) == 0 {
-				m.Err = "select at least one library skill"
+			if len(m.selectedBatchSkillIDs()) == 0 {
+				m.Err = "select at least one skill"
 				return m, nil
 			}
 			m.pendingBatch = app.BatchRequest{Operation: operation}
-			m.enterInput(inputState{Kind: inputBatchScope, Prompt: "Target scope (agent:name, project:name, project-agent:project:agent)"})
-			m.Status = "Choose one exact binding scope"
+			m.enterScopePicker(pickerBatchScope, "", "", false)
 			return m, nil
 		}
 		request, err := m.libraryBatchRequest(operation)
@@ -360,16 +364,8 @@ func (m Model) performPrimaryAction(index int) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.pendingBatch = request
-		if operation == app.BatchRemove {
-			m.Busy, m.Status = true, "Building selected removal preview..."
-			return m, batchRemovePreviewCmd(m.ctx, m.service, request.SkillIDs)
-		}
-		m.enterConfirm(ActionBatch)
-		m.Preview = app.MutationPreview{
-			Title: "Library batch " + string(operation), Summary: fmt.Sprintf("%s %d selected library skill(s)", title(string(operation)), len(m.selectedLibraryIDs())), RequiresConfirmation: true,
-		}
-		m.Status = "Review the library batch, then confirm"
-		return m, nil
+		m.confirm, m.Busy, m.Status = ActionBatch, true, "Building exact atomic batch preview..."
+		return m, batchPreviewCmd(m.ctx, m.service, request)
 	case "Open", "Review", "Import", "Link existing":
 		return m.perform(uiActivate)
 	case "Adopt":
@@ -421,6 +417,18 @@ func (m Model) performPrimaryAction(index int) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "Remove project":
 		return m.previewCurrentProjectRemove()
+	case "Apply preset":
+		if m.ActiveView == ViewWorkspaces && m.Scope.Level == "workspace-global" {
+			m.enterPresetPicker(pickerGlobalWorkspacePreset, "")
+			return m, nil
+		}
+		project := m.currentProjectName()
+		if project == "" {
+			m.Err = "select a project before applying a preset"
+			return m, nil
+		}
+		m.enterPresetPicker(pickerProjectPreset, project)
+		return m, nil
 	case "More":
 		m.enterMore()
 		return m, nil
@@ -445,7 +453,7 @@ func (m Model) performPrimaryAction(index int) (tea.Model, tea.Cmd) {
 		case "Rename":
 			m.enterInput(inputState{Kind: inputPresetRename, Prompt: "Rename preset to (new name)"})
 		case "Apply":
-			m.enterInput(inputState{Kind: inputPresetApply, Prompt: "Apply target (agent:name, project:name, project-agent:project:agent)"})
+			m.enterScopePicker(pickerPresetApplyScope, "", m.pendingID, false)
 		}
 		return m, nil
 	case "Delete":

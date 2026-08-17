@@ -51,6 +51,13 @@ func (m Model) rows() []row {
 		}
 		return m.filtered(rows)
 	}
+	if mode == ModeScopePicker || mode == ModePresetPicker {
+		rows := make([]row, 0, len(m.Picker.Choices))
+		for index, choice := range m.Picker.Choices {
+			rows = append(rows, row{Key: fmt.Sprintf("picker:%d:%s", index, choice.Label), ID: choice.Label, Name: choice.Label, State: "Select", Detail: choice.Label})
+		}
+		return m.filtered(rows)
+	}
 
 	var rows []row
 	switch m.ActiveView {
@@ -104,7 +111,7 @@ func (m Model) rows() []row {
 			rows = append(rows, row{Key: "status:update-warning:" + base64.RawURLEncoding.EncodeToString([]byte(warning)), ID: warning, Name: "Update check warning", State: "Update check failed", Detail: warning, Severity: rowSeverityError})
 		}
 	}
-	if m.ActiveView != ViewMigration && m.ActiveView != ViewOverview {
+	if m.ActiveView != ViewMigration && m.ActiveView != ViewOverview && !(m.ActiveView == ViewWorkspaces && m.Scope.Level == "") {
 		sort.SliceStable(rows, func(i, j int) bool { return rows[i].selectionKey() < rows[j].selectionKey() })
 	}
 	return m.filtered(rows)
@@ -274,6 +281,9 @@ func (m Model) scanRows(items []app.ScanItem) []row {
 }
 
 func (m Model) workspaceRows() []row {
+	if m.Scope.Level == "workspace-global" {
+		return globalWorkspaceRows(m.Snapshot.Config)
+	}
 	if m.Scope.Level == "agent-skills" {
 		binding := m.Snapshot.Config.Agents[m.Scope.Agent]
 		return bindingRows("agent:"+m.Scope.Agent, m.Snapshot.Config.Library.Skills, binding)

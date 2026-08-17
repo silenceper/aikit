@@ -116,14 +116,14 @@ func invokePresetMore(t *testing.T, m Model, label string, mouse bool) (Model, t
 
 func TestPresetDuplicateRenameAndExactApplyPreviewConfirmParity(t *testing.T) {
 	tests := []struct {
-		label, input string
-		want         app.PresetMutationRequest
+		label, input, target string
+		want                 app.PresetMutationRequest
 	}{
-		{"Duplicate", "copy", app.PresetMutationRequest{Operation: app.PresetDuplicate, Name: "review", NewName: "copy"}},
-		{"Rename", "renamed", app.PresetMutationRequest{Operation: app.PresetRename, Name: "review", NewName: "renamed"}},
-		{"Apply", "agent:codex", app.PresetMutationRequest{Operation: app.PresetApply, Name: "review", Binding: app.BindingRequest{Preset: "review", Agent: "codex"}}},
-		{"Apply", "project:aikit", app.PresetMutationRequest{Operation: app.PresetApply, Name: "review", Binding: app.BindingRequest{Preset: "review", Project: "aikit"}}},
-		{"Apply", "project-agent:aikit:codex", app.PresetMutationRequest{Operation: app.PresetApply, Name: "review", Binding: app.BindingRequest{Preset: "review", Project: "aikit", Agent: "codex"}}},
+		{"Duplicate", "copy", "", app.PresetMutationRequest{Operation: app.PresetDuplicate, Name: "review", NewName: "copy"}},
+		{"Rename", "renamed", "", app.PresetMutationRequest{Operation: app.PresetRename, Name: "review", NewName: "renamed"}},
+		{"Apply", "global-codex", "Global / codex", app.PresetMutationRequest{Operation: app.PresetApply, Name: "review", Binding: app.BindingRequest{Preset: "review", Agent: "codex"}}},
+		{"Apply", "project-common", "Project / aikit / Common", app.PresetMutationRequest{Operation: app.PresetApply, Name: "review", Binding: app.BindingRequest{Preset: "review", Project: "aikit"}}},
+		{"Apply", "project-codex", "Project / aikit / codex", app.PresetMutationRequest{Operation: app.PresetApply, Name: "review", Binding: app.BindingRequest{Preset: "review", Project: "aikit", Agent: "codex"}}},
 	}
 	for _, tt := range tests {
 		for _, mouse := range []bool{false, true} {
@@ -132,16 +132,25 @@ func TestPresetDuplicateRenameAndExactApplyPreviewConfirmParity(t *testing.T) {
 					presetMutationPreview: app.MutationPreview{References: []string{"agent:codex"}, AffectedScopes: []config.Scope{{Agent: "codex"}}, Plan: link.Plan{Actions: []link.Action{{Path: "/work/aikit/.codex/skills/alpha"}}}, RequiresConfirmation: true},
 				}
 				m, cmd := invokePresetMore(t, presetListModel(service), tt.label, mouse)
-				if cmd != nil || m.Mode != ModeInput || service.mutatePresetCalls != 0 {
+				wantMode := ModeInput
+				if tt.label == "Apply" {
+					wantMode = ModeScopePicker
+				}
+				if cmd != nil || m.Mode != wantMode || service.mutatePresetCalls != 0 {
 					t.Fatalf("entry mode=%s cmd=%v", m.Mode, cmd != nil)
 				}
-				m = enterProjectText(m, tt.input)
-				next, preview := m.Update(actionKey(tea.KeyEnter))
-				m = next.(Model)
+				var preview tea.Cmd
+				if tt.label == "Apply" {
+					m, preview = chooseRowByName(t, m, tt.target, mouse)
+				} else {
+					m = enterProjectText(m, tt.input)
+					next, cmd := m.Update(actionKey(tea.KeyEnter))
+					m, preview = next.(Model), cmd
+				}
 				if preview == nil || service.previewPresetMutationCalls != 0 {
 					t.Fatalf("preview not deferred: cmd=%v calls=%d", preview != nil, service.previewPresetMutationCalls)
 				}
-				next, _ = m.Update(preview())
+				next, _ := m.Update(preview())
 				m = next.(Model)
 				if m.Mode != ModeConfirm || !strings.Contains(m.ViewString(), "Global / codex") || service.mutatePresetCalls != 0 {
 					t.Fatalf("preview missing usage scope or mutated:\n%s", m.ViewString())

@@ -2,11 +2,9 @@ package tui
 
 import (
 	"context"
-	"fmt"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/silenceper/aikit/internal/app"
-	"github.com/silenceper/aikit/pkg/config"
 )
 
 type snapshotMsg struct {
@@ -28,11 +26,6 @@ type skillDetailMsg struct {
 
 type mutationPreviewMsg struct {
 	name    string
-	preview app.MutationPreview
-	err     error
-}
-
-type batchRemovePreviewMsg struct {
 	preview app.MutationPreview
 	err     error
 }
@@ -88,6 +81,11 @@ type batchOperationMsg struct {
 	name   string
 	result app.BatchResult
 	err    error
+}
+
+type batchPreviewMsg struct {
+	preview app.BatchPreview
+	err     error
 }
 
 type projectPreviewMsg struct {
@@ -243,30 +241,13 @@ func bindingPreviewCmd(ctx context.Context, service app.Service, request app.Bin
 	}
 }
 
-func batchBindingPreviewCmd(ctx context.Context, service app.Service, request app.BatchRequest) tea.Cmd {
+func batchPreviewCmd(ctx context.Context, service app.Service, request app.BatchRequest) tea.Cmd {
 	return func() tea.Msg {
 		if service == nil {
-			return mutationPreviewMsg{name: "batch binding", err: errUnavailable("app service")}
+			return batchPreviewMsg{err: errUnavailable("app service")}
 		}
-		combined := app.MutationPreview{
-			Title: "Library batch " + string(request.Operation), Summary: fmt.Sprintf("%s %d exact binding(s)", title(string(request.Operation)), len(request.Bindings)), RequiresConfirmation: true,
-		}
-		for _, binding := range request.Bindings {
-			preview, err := service.PreviewBinding(ctx, app.BindingPreviewRequest{Binding: binding, Enable: request.Operation == app.BatchEnable})
-			if err != nil {
-				return mutationPreviewMsg{name: "batch binding", err: err}
-			}
-			combined.AffectedScopes = append(combined.AffectedScopes, preview.AffectedScopes...)
-			if len(preview.AffectedScopes) == 0 {
-				combined.AffectedScopes = append(combined.AffectedScopes, config.Scope{Project: binding.Project, Agent: binding.Agent})
-			}
-			combined.Plan.Actions = append(combined.Plan.Actions, preview.Plan.Actions...)
-			combined.Plan.Issues = append(combined.Plan.Issues, preview.Plan.Issues...)
-			combined.Plan.Warnings = append(combined.Plan.Warnings, preview.Plan.Warnings...)
-			combined.Warnings = append(combined.Warnings, preview.Warnings...)
-			combined.Conflicts = append(combined.Conflicts, preview.Conflicts...)
-		}
-		return mutationPreviewMsg{name: "batch binding", preview: combined}
+		preview, err := service.PreviewBatch(ctx, request)
+		return batchPreviewMsg{preview: preview, err: err}
 	}
 }
 
@@ -277,32 +258,6 @@ func removePreviewCmd(ctx context.Context, service app.Service, request app.Remo
 		}
 		preview, err := service.PreviewRemove(ctx, request)
 		return mutationPreviewMsg{name: "remove", preview: preview, err: err}
-	}
-}
-
-func batchRemovePreviewCmd(ctx context.Context, service app.Service, skillIDs []string) tea.Cmd {
-	return func() tea.Msg {
-		if service == nil {
-			return batchRemovePreviewMsg{err: errUnavailable("app service")}
-		}
-		combined := app.MutationPreview{
-			Title: "Remove selected skills", Summary: fmt.Sprintf("Remove %d selected library skill(s)", len(skillIDs)), RequiresConfirmation: true,
-		}
-		for _, skillID := range skillIDs {
-			preview, err := service.PreviewRemove(ctx, app.RemoveRequest{SkillID: skillID})
-			if err != nil {
-				return batchRemovePreviewMsg{err: err}
-			}
-			combined.References = append(combined.References, preview.References...)
-			combined.AffectedScopes = append(combined.AffectedScopes, preview.AffectedScopes...)
-			combined.Plan.Actions = append(combined.Plan.Actions, preview.Plan.Actions...)
-			combined.Plan.Issues = append(combined.Plan.Issues, preview.Plan.Issues...)
-			combined.Plan.Warnings = append(combined.Plan.Warnings, preview.Plan.Warnings...)
-			combined.Warnings = append(combined.Warnings, preview.Warnings...)
-			combined.Conflicts = append(combined.Conflicts, preview.Conflicts...)
-			combined.RequiresForce = combined.RequiresForce || preview.RequiresForce
-		}
-		return batchRemovePreviewMsg{preview: combined}
 	}
 }
 

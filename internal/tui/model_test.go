@@ -76,6 +76,9 @@ type fakeService struct {
 	batchCalls                 int
 	lastBatch                  app.BatchRequest
 	batchResult                app.BatchResult
+	previewBatchCalls          int
+	lastBatchPreview           app.BatchRequest
+	batchPreview               app.BatchPreview
 	previewRecoveryCalls       int
 	lastRecoveryPreview        app.RecoveryRequest
 	recoveryPreview            app.RecoveryPreview
@@ -103,6 +106,15 @@ func (f *fakeService) Batch(_ context.Context, request app.BatchRequest) (app.Ba
 		return f.batchResult, nil
 	}
 	return app.BatchResult{Result: app.Result{Changed: true}}, nil
+}
+
+func (f *fakeService) PreviewBatch(_ context.Context, request app.BatchRequest) (app.BatchPreview, error) {
+	f.previewBatchCalls++
+	f.lastBatchPreview = request
+	if f.batchPreview.Title != "" || f.batchPreview.Summary != "" || len(f.batchPreview.Items) > 0 {
+		return f.batchPreview, nil
+	}
+	return app.BatchPreview{MutationPreview: app.MutationPreview{Title: "Batch preview", Summary: "Exact batch", RequiresConfirmation: true}}, nil
 }
 
 func (f *fakeService) PreviewAdd(_ context.Context, request app.AddPreviewRequest) (app.AddPreview, error) {
