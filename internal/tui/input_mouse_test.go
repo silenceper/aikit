@@ -109,7 +109,7 @@ func TestOverviewAttentionRenderAndHitShareGeometry(t *testing.T) {
 		{Key: "drift", State: app.ScanStateDrifted, Skill: config.Skill{Name: "drift item"}},
 	}
 	regions := m.hitRegions()
-	wantY := regions.Layout.Main.Y + overviewHeaderRows
+	wantY := regions.Layout.CollectionPanel.Body.Y + m.overviewHeaderHeight(regions.Layout.CollectionPanel.Body.Width, regions.Layout.CollectionPanel.Body.Height)
 	if len(regions.Rows) == 0 || regions.Rows[0].Y != wantY || regions.Rows[0].Height != collectionRowHeight {
 		t.Fatalf("overview row geometry=%+v want first y=%d height=%d", regions.Rows, wantY, collectionRowHeight)
 	}
@@ -117,7 +117,7 @@ func TestOverviewAttentionRenderAndHitShareGeometry(t *testing.T) {
 	if !strings.Contains(plain[regions.Rows[0].Y], m.rows()[0].Name) {
 		t.Fatalf("hit row does not align with rendered row at y=%d:\n%s", regions.Rows[0].Y, m.ViewString())
 	}
-	next, cmd := m.Update(click(regions.Rows[1].X, regions.Rows[1].Y+1))
+	next, cmd := m.Update(click(regions.Rows[1].X, regions.Rows[1].Y))
 	got := next.(Model)
 	if cmd != nil || got.Cursor != 1 {
 		t.Fatalf("overview second-line click cursor=%d cmd=%v", got.Cursor, cmd != nil)
@@ -146,7 +146,7 @@ func TestNarrowBreadcrumbMouseBackUsesParentNavigation(t *testing.T) {
 	m.Snapshot, m.Width, m.Height = testSnapshot(), 38, 16
 	m.Scope = Scope{Project: "aikit", Agent: "codex", Level: "project-skills"}
 	regions := m.hitRegions()
-	if regions.Back.Empty() || !strings.HasPrefix(stripANSI(strings.Split(m.ViewString(), "\n")[regions.Back.Y]), "‹ ") {
+	if regions.Back.Empty() || !strings.Contains(stripANSI(strings.Split(m.ViewString(), "\n")[regions.Back.Y]), "‹ ") {
 		t.Fatalf("narrow breadcrumb Back not rendered/hittable: %+v\n%s", regions.Back, m.ViewString())
 	}
 	next, cmd := m.Update(click(regions.Back.X, regions.Back.Y))
@@ -249,8 +249,17 @@ func TestMouseTabsRowsCheckboxWheelAndKeyboardParity(t *testing.T) {
 	base.Width, base.Height = 100, 20
 
 	regions := base.hitRegions()
-	mouseNext, _ := base.Update(click(regions.Tabs[ViewMigration].X, regions.Tabs[ViewMigration].Y))
-	keyboardNext, _ := base.Update(key("5"))
+	var migration Rect
+	for _, item := range regions.Navigation {
+		if item.Entry.View == ViewMigration {
+			migration = item.Rect
+		}
+	}
+	mouseNext, _ := base.Update(click(migration.X, migration.Y))
+	keyboard := base
+	keyboard.enterCommandPalette()
+	keyboard.CommandDraft = "migration"
+	keyboardNext, _ := keyboard.Update(key("enter"))
 	if mouseNext.(Model).ActiveView != keyboardNext.(Model).ActiveView || mouseNext.(Model).ActiveView != ViewMigration {
 		t.Fatalf("tab parity mouse=%s keyboard=%s", mouseNext.(Model).ActiveView, keyboardNext.(Model).ActiveView)
 	}

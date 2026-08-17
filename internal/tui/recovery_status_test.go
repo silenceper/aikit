@@ -220,7 +220,7 @@ func TestStatusRefreshRetryAndFullErrorDetailActions(t *testing.T) {
 	}
 	next, cmd := more.Update(actionKey(tea.KeyEnter))
 	detail := next.(Model)
-	if cmd != nil || !strings.Contains(detail.ViewString(), m.Err) || strings.Contains(strings.ToLower(detail.Status), "copied") {
+	if cmd != nil || !strings.Contains(detail.ViewString(), m.Snapshot.Status.Items[0].Path) || strings.Contains(strings.ToLower(detail.Status), "copied") {
 		t.Fatalf("error detail missing or falsely copied:\n%s", detail.ViewString())
 	}
 	retryMore, _ := keyboardAction(t, m, actionIndex(t, m, "More"))

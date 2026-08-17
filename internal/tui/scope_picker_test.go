@@ -180,19 +180,17 @@ func TestStructuredScopePickerPresetAndProjectApply(t *testing.T) {
 	t.Run("project workspace", func(t *testing.T) {
 		service := &fakeService{}
 		m := projectWorkspaceModel(service)
-		m, _ = keyboardAction(t, m, actionIndex(t, m, "More"))
 		m, _ = chooseVisibleAction(t, m, "Apply preset", false)
-		if m.Mode != ModePresetPicker {
-			t.Fatalf("project preset picker mode=%s", m.Mode)
+		if m.Scope.Level != "project-targets" || m.workspaceIntent != "apply-preset" {
+			t.Fatalf("project target choice scope=%+v intent=%q", m.Scope, m.workspaceIntent)
 		}
-		m, cmd := chooseRowByName(t, m, "review", false)
-		if cmd != nil || m.Mode != ModeScopePicker {
-			t.Fatalf("project target picker mode=%s cmd=%v", m.Mode, cmd != nil)
+		m.Cursor = 1 // codex
+		next, cmd := m.Update(actionKey(tea.KeyEnter))
+		m = next.(Model)
+		if cmd != nil || m.Mode != ModePresetPicker {
+			t.Fatalf("project preset picker mode=%s cmd=%v", m.Mode, cmd != nil)
 		}
-		if len(m.rows()) != 2 {
-			t.Fatalf("project target choices=%+v", m.rows())
-		}
-		m, cmd = chooseRowByName(t, m, "Project / aikit / codex", false)
+		m, cmd = chooseRowByName(t, m, "review", false)
 		if cmd == nil {
 			t.Fatal("project preset preview was not deferred")
 		}

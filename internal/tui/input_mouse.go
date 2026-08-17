@@ -427,6 +427,8 @@ func (m Model) performPrimaryAction(index int) (tea.Model, tea.Cmd) {
 		return m, batchPreviewCmd(m.ctx, m.service, request)
 	case "Open", "Review", "Import", "Link existing":
 		return m.perform(uiActivate)
+	case "Edit members":
+		return m.perform(uiActivate)
 	case "Adopt":
 		if m.ActiveView == ViewStatus {
 			return m.previewSelectedStatusAdopt()
@@ -459,6 +461,19 @@ func (m Model) performPrimaryAction(index int) (tea.Model, tea.Cmd) {
 		m.enterInput(inputState{Kind: inputProjectCreate, Prompt: "Project directory"})
 		m.Status = "Enter an existing project directory; agents will be detected automatically"
 		return m, nil
+	case "Add skill":
+		if m.ActiveView != ViewWorkspaces || m.Scope.Level != "workspace-projects" {
+			return m, nil
+		}
+		rows := m.rows()
+		if m.Cursor < 0 || m.Cursor >= len(rows) {
+			return m, nil
+		}
+		m.Scope = Scope{Project: rows[m.Cursor].ID, Level: "project-targets"}
+		m.workspaceIntent = "add-skill"
+		m.Cursor, m.Scroll = 0, 0
+		m.Status = "Choose Common or an agent for the new skill binding"
+		return m, nil
 	case "Rename project":
 		m.pendingID = m.currentProjectName()
 		m.enterInput(inputState{Kind: inputProjectRename, Prompt: "Project name"})
@@ -484,6 +499,17 @@ func (m Model) performPrimaryAction(index int) (tea.Model, tea.Cmd) {
 	case "Remove project":
 		return m.previewCurrentProjectRemove()
 	case "Apply preset":
+		if m.ActiveView == ViewWorkspaces && m.Scope.Level == "workspace-projects" {
+			rows := m.rows()
+			if m.Cursor < 0 || m.Cursor >= len(rows) {
+				return m, nil
+			}
+			m.Scope = Scope{Project: rows[m.Cursor].ID, Level: "project-targets"}
+			m.workspaceIntent = "apply-preset"
+			m.Cursor, m.Scroll = 0, 0
+			m.Status = "Choose the exact Common or agent target for this preset"
+			return m, nil
+		}
 		if m.ActiveView == ViewWorkspaces && m.Scope.Level == "workspace-global" {
 			m.enterPresetPicker(pickerGlobalWorkspacePreset, "")
 			return m, nil

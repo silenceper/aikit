@@ -22,21 +22,16 @@ func projectWorkspaceModel(service *fakeService) Model {
 
 func invokeProjectAction(t *testing.T, m Model, label string, mouse bool) (Model, tea.Cmd) {
 	t.Helper()
-	if label != "Create project" {
-		if mouse {
-			m, _ = mouseAction(t, m, actionIndex(t, m, "More"))
-		} else {
-			m, _ = keyboardAction(t, m, actionIndex(t, m, "More"))
-		}
+	if mouse {
+		m, _ = mouseAction(t, m, actionIndex(t, m, "More"))
+	} else {
+		m, _ = keyboardAction(t, m, actionIndex(t, m, "More"))
 	}
 	index := actionIndex(t, m, label)
 	if mouse {
 		region := m.hitRegions().Actions[index]
 		next, cmd := m.Update(click(region.X, region.Y))
 		return next.(Model), cmd
-	}
-	if label == "Create project" {
-		return keyboardAction(t, m, index)
 	}
 	for m.ActionIndex != index {
 		next, _ := m.Update(actionKey(tea.KeyRight))
@@ -209,7 +204,7 @@ func TestConfirmOverlayScrollKeyboardAndMouseInspectEveryPlanItem(t *testing.T) 
 		m.Preview.Plan.Actions = append(m.Preview.Plan.Actions, link.Action{Path: fmt.Sprintf("/cleanup/%02d", i)})
 	}
 	initial := m.ViewString()
-	if !strings.Contains(initial, "/cleanup/00") || strings.Contains(initial, "/cleanup/17") || !strings.Contains(initial, "/19") {
+	if !strings.Contains(initial, `Remove project "aikit"`) || strings.Contains(initial, "/cleanup/17") || !strings.Contains(initial, "/19") {
 		t.Fatalf("initial confirm viewport invalid:\n%s", initial)
 	}
 	for i := 0; i < 18; i++ {
@@ -220,9 +215,9 @@ func TestConfirmOverlayScrollKeyboardAndMouseInspectEveryPlanItem(t *testing.T) 
 		t.Fatalf("keyboard could not inspect final plan item:\n%s", m.ViewString())
 	}
 	m.OverlayScroll = 0
-	layout := ComputeLayout(m.Width, m.Height)
+	layout := layoutOverlayPanel(ComputeLayout(m.Width, m.Height), m.overlayPanelActions(), true, m.ActionIndex)
 	for i := 0; i < 18; i++ {
-		next, _ := m.Update(tea.MouseMsg{X: layout.List.X, Y: layout.List.Y, Button: tea.MouseButtonWheelDown})
+		next, _ := m.Update(tea.MouseMsg{X: layout.Body.X, Y: layout.Body.Y, Button: tea.MouseButtonWheelDown})
 		m = next.(Model)
 	}
 	if !strings.Contains(m.ViewString(), "/cleanup/17") {

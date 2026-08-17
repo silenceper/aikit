@@ -14,7 +14,7 @@ func TestNavigationShowsDirectNumberShortcuts(t *testing.T) {
 	m.Width, m.Height = 100, 24
 
 	view := stripANSI(m.ViewString())
-	for _, want := range []string{"1 Overview", "2 Library", "3 Workspaces", "4 Presets", "5 Migration", "6 Status"} {
+	for _, want := range []string{"1 Overview", "2 Library", "3 Workspaces", "4 Presets", "5 Status", "Tools", "Migration", "Configuration"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("navigation hides shortcut %q:\n%s", want, view)
 		}

@@ -33,7 +33,7 @@ func TestPresetConfirmRendersAllTypedDiagnostics(t *testing.T) {
 func TestEmptyPresetsStillRenderMouseCreate(t *testing.T) {
 	m := presetListModel(&fakeService{})
 	m.Snapshot.Config.Presets = nil
-	index := actionIndex(t, m, "Create")
+	index := actionIndex(t, m, "Create preset")
 	regions := m.hitRegions()
 	if index >= len(regions.Actions) {
 		t.Fatalf("empty preset Create has no mouse region: %+v", regions.Actions)
@@ -51,7 +51,7 @@ func TestNarrowEmptyCollectionActionBarsShareVisibleHitGeometry(t *testing.T) {
 		model Model
 		label string
 	}{
-		{"preset", presetListModel(&fakeService{}), "Create"},
+		{"preset", presetListModel(&fakeService{}), "Create preset"},
 		{"library", NewModel(nil, &fakeService{}, &fakeMigration{}, ViewLibrary, ActionNone), "Add source"},
 		{"project", projectWorkspaceModel(&fakeService{}), "Create project"},
 	}

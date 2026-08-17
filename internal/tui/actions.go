@@ -255,6 +255,16 @@ func (m Model) activate() (tea.Model, tea.Cmd) {
 			} else {
 				m.Scope.Agent = current.ID
 			}
+			intent := m.workspaceIntent
+			m.workspaceIntent = ""
+			if intent == "add-skill" {
+				m.enterWorkspaceSkills()
+				return m, nil
+			}
+			if intent == "apply-preset" {
+				m.enterPresetPickerForProjectTarget(m.Scope.Project, m.Scope.Agent)
+				return m, nil
+			}
 		default:
 			m.Detail = true
 		}

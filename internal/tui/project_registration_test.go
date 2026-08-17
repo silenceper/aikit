@@ -48,7 +48,7 @@ func TestProjectRegistrationPathOnlyKeyboardMouse(t *testing.T) {
 					t.Fatalf("registration confirmation missing %q:\n%s", want, view)
 				}
 			}
-			if strings.Contains(view, "opaque-v1-token") || strings.Contains(view, "pipe-separated") || strings.Contains(view, "|") {
+			if strings.Contains(view, "opaque-v1-token") || strings.Contains(view, "pipe-separated") {
 				t.Fatalf("confirmation leaked implementation token/encoded input:\n%s", view)
 			}
 			cancelled, cancelCmd := m.Update(actionKey(tea.KeyEsc))

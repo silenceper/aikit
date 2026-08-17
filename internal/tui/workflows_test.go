@@ -108,7 +108,8 @@ func TestSkillContentMouseScrollAndCloseRestoresExactState(t *testing.T) {
 	}
 	m := opened.(Model)
 	before := m.OverlayScroll
-	scrolled, cmd := m.Update(tea.MouseMsg{X: m.Width / 2, Y: m.Height / 2, Button: tea.MouseButtonWheelDown, Action: tea.MouseActionPress})
+	panel := layoutOverlayPanel(ComputeLayout(m.Width, m.Height), m.overlayPanelActions(), true, m.ActionIndex)
+	scrolled, cmd := m.Update(tea.MouseMsg{X: panel.Body.X, Y: panel.Body.Y, Button: tea.MouseButtonWheelDown, Action: tea.MouseActionPress})
 	if cmd != nil {
 		t.Fatal("mouse wheel returned a command")
 	}

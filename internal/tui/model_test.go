@@ -351,7 +351,7 @@ func TestModelViewKeysNavigationFilterHelpAndDetail(t *testing.T) {
 	service := &fakeService{snapshot: testSnapshot()}
 	m := loadedModel(t, service, &fakeMigration{})
 
-	for input, want := range map[string]View{"1": ViewOverview, "2": ViewLibrary, "3": ViewWorkspaces, "4": ViewPresets, "5": ViewMigration, "6": ViewStatus} {
+	for input, want := range map[string]View{"1": ViewOverview, "2": ViewLibrary, "3": ViewWorkspaces, "4": ViewPresets, "5": ViewStatus} {
 		m, _ = apply(m, input)
 		if m.ActiveView != want {
 			t.Fatalf("key %s selected %s, want %s", input, m.ActiveView, want)
@@ -516,7 +516,7 @@ func TestStatusAdoptPreviewsOnlySelectedTarget(t *testing.T) {
 	target := "/work/.codex/skills/loose"
 	migration := &fakeMigration{result: app.ScanResult{Items: []app.ScanItem{{Origin: "p/aikit/codex", Target: target, Skill: config.Skill{ID: "local/loose", Name: "loose"}}}}}
 	m := loadedModel(t, &fakeService{snapshot: testSnapshot()}, migration)
-	m, _ = apply(m, "6")
+	m, _ = apply(m, "5")
 	m, cmd := apply(m, "A")
 	if cmd == nil || migration.scanCalls != 0 {
 		t.Fatal("status adopt preview must be deferred")

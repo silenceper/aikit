@@ -33,8 +33,7 @@ func (m Model) overlayLines() []string {
 		}
 		return lines
 	case m.Mode == ModeErrorDetail:
-		lines := []string{activeStyle.Render(firstNonEmpty(m.FullDetailTitle, "Error details"))}
-		return append(lines, wrapText(m.FullError, max(1, overlayActionBarWidth(m.Width, m.Height)))...)
+		return []string{activeStyle.Render(firstNonEmpty(m.FullDetailTitle, "Error details")), m.FullError}
 	case m.Mode == ModeConfirm:
 		lines := []string{
 			activeStyle.Render("Confirm " + string(m.confirm)),

@@ -126,8 +126,9 @@ func TestSkillsManagerParityRoutesAreVisibleAndStructured(t *testing.T) {
 	t.Run("preset creation migration adopt and recovery are discoverable", func(t *testing.T) {
 		presets := NewModel(nil, &fakeService{}, &fakeMigration{}, ViewPresets, ActionNone)
 		presets.Snapshot = testSnapshot()
-		if !strings.Contains(strings.Join(presets.primaryActions(), " "), "Create") {
-			t.Fatalf("preset create route missing: %v", presets.primaryActions())
+		presets.enterMore()
+		if !strings.Contains(strings.Join(presets.primaryActions(), " "), "Create preset") {
+			t.Fatalf("preset create route missing from More: %v", presets.primaryActions())
 		}
 
 		migration := NewModel(nil, &fakeService{}, &fakeMigration{}, ViewMigration, ActionNone)

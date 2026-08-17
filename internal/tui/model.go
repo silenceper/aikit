@@ -271,6 +271,7 @@ type Model struct {
 	pendingProject      app.ProjectEditRequest
 	pendingProjectPath  string
 	pendingProjectOpen  string
+	workspaceIntent     string
 	pendingRecovery     app.RecoveryRequest
 	forceAcknowledged   bool
 	filterParent        Mode

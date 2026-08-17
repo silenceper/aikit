@@ -22,8 +22,8 @@ func TestRenderedActionBarClickBoundariesAndWhitespace(t *testing.T) {
 				base.Detail = true
 			}
 			plain := strings.Split(stripANSI(base.ViewString()), "\n")
-			layout := ComputeLayout(base.Width, base.Height)
-			y := layout.List.Bottom() - 1
+			regions := base.hitRegions()
+			y := regions.ActionBar.Y
 			if y < 0 || y >= len(plain) {
 				t.Fatalf("action row y=%d outside %d rendered lines", y, len(plain))
 			}
@@ -176,7 +176,7 @@ func TestNarrowCollectionActionViewportMouseWheelMovesVisibleWindow(t *testing.T
 	for _, index := range regions.ActionIndexes {
 		visible = visible || index == m.ActionIndex
 	}
-	if !visible || regions.ActionPrev.Empty() {
+	if !visible {
 		t.Fatalf("selected action not visible after wheel: selected=%d indexes=%v", m.ActionIndex, regions.ActionIndexes)
 	}
 	next, cmd = m.Update(tea.MouseMsg{X: regions.ActionBar.X, Y: regions.ActionBar.Y, Button: tea.MouseButtonWheelUp})

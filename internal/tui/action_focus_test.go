@@ -198,7 +198,7 @@ func TestRenderedActionEndToEndKeyboardMouseParity(t *testing.T) {
 				t.Fatalf("sync request=%+v", service.lastSync)
 			}
 		}},
-		{name: "create", label: "Create", setup: func(m Model) Model { m.switchView(ViewPresets); return m }, assert: func(t *testing.T, m Model, cmd tea.Cmd, _ *fakeService) {
+		{name: "create", label: "Create preset", setup: func(m Model) Model { m.switchView(ViewPresets); m.Snapshot.Config.Presets = nil; return m }, assert: func(t *testing.T, m Model, cmd tea.Cmd, _ *fakeService) {
 			if cmd != nil || m.Mode != ModeInput || m.Input.Kind != inputPresetCreate {
 				t.Fatalf("create mode=%s input=%s cmd=%v", m.Mode, m.Input.Kind, cmd != nil)
 			}

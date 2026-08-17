@@ -87,6 +87,15 @@ func (m Model) renderLowHeightShell(layout Layout) string {
 
 func (m Model) renderAppContext(width int) string {
 	value := viewLabel(m.ActiveView) + m.scopeBreadcrumb()
+	if m.Detail {
+		rows := m.rows()
+		if m.Cursor >= 0 && m.Cursor < len(rows) {
+			value += " / " + rows[m.Cursor].Name
+		}
+	}
+	if ComputeLayout(m.Width, m.Height).Narrow && (m.Detail || m.Scope.Level != "") {
+		value = "‹ " + value
+	}
 	if m.Inventory.Loading {
 		value += " · scanning"
 	} else if m.Busy || m.MutationBusy {
@@ -100,6 +109,12 @@ func (m Model) renderFooterBody(width int) string {
 	shortcut := m.footer()
 	if strings.TrimSpace(status) == "" {
 		return clip(shortcut, width)
+	}
+	if width < 60 {
+		if m.Detail || m.Scope.Level != "" || m.Mode != ModeTable {
+			return clip(shortcut, width)
+		}
+		return clip(status+" │ Ctrl+Q Quit", width)
 	}
 	return clip(status+" │ "+shortcut, width)
 }
@@ -116,6 +131,9 @@ func (m Model) renderNavigationBody(width int) []string {
 			previousY++
 		}
 		label := item.Entry.Label
+		if item.Entry.Kind == navigationView {
+			label = m.navigationLabel(navigationItem{View: item.Entry.View, Label: item.Entry.Label, Active: item.Entry.View == m.ActiveView})
+		}
 		if item.Entry.Section == "Main" {
 			mainIndex++
 			label = fmt.Sprintf("%d %s", mainIndex, label)
@@ -193,10 +211,17 @@ func (m Model) renderFramedOverlay(layout Layout, glyphs FrameGlyphs) (PanelLayo
 	title, body := overlay[0], wrapOverlayBody(overlay[1:], panel.Body.Width)
 	capacity := panel.Body.Height
 	if len(body) > capacity {
-		capacity = max(1, capacity-1)
+		if capacity > 1 {
+			capacity--
+		}
 		start := min(max(0, m.OverlayScroll), max(0, len(body)-capacity))
 		end := min(len(body), start+capacity)
-		body = append(append([]string(nil), body[start:end]...), fmt.Sprintf("View %d-%d/%d · ↑/↓", start+1, end, len(body)))
+		if panel.Body.Height > 1 {
+			body = append(append([]string(nil), body[start:end]...), fmt.Sprintf("View %d-%d/%d · ↑/↓", start+1, end, len(body)))
+		} else {
+			title = fmt.Sprintf("%s · %d/%d", title, start+1, len(body))
+			body = append([]string(nil), body[start:end]...)
+		}
 	}
 	action := ""
 	if !panel.Actions.Empty() {
@@ -221,7 +246,17 @@ func (m Model) navigationLabel(item navigationItem) string {
 }
 
 func (m Model) renderAppBar(width int) string {
-	bar := uiTheme.appTitle.Render("aikit") + uiTheme.muted.Render("  ·  "+viewLabel(m.ActiveView))
+	context := viewLabel(m.ActiveView) + m.scopeBreadcrumb()
+	if m.Detail {
+		rows := m.rows()
+		if m.Cursor >= 0 && m.Cursor < len(rows) {
+			context += " / " + rows[m.Cursor].Name
+		}
+	}
+	if m.Detail || m.Scope.Level != "" {
+		context = "‹ " + context
+	}
+	bar := uiTheme.appTitle.Render("aikit") + uiTheme.muted.Render("  ·  "+context)
 	if m.Inventory.Loading {
 		bar += uiTheme.muted.Render("  ·  scanning")
 	} else if m.Busy || m.MutationBusy {
@@ -359,6 +394,15 @@ func (m Model) hasPinnedDetail() bool {
 
 func (m Model) renderOverview(width, height int) []string {
 	metrics := m.overviewMetricLines(width)
+	rows := m.rows()
+	if height <= 3 {
+		lines := []string{clipPlain(fmt.Sprintf("Skills %d · Issues %d", len(m.Snapshot.Config.Library.Skills), m.attentionCounts().status), width)}
+		if len(rows) == 0 {
+			return append(lines, "Attention · [OK] All clear")
+		}
+		lines = append(lines, "Attention", m.renderRow(rows[min(m.Cursor, len(rows)-1)], m.Focus == FocusList, width))
+		return lines[:min(len(lines), height)]
+	}
 	tiny := height <= 5
 	lines := make([]string, 0, len(metrics)+4)
 	if !tiny {
@@ -368,7 +412,6 @@ func (m Model) renderOverview(width, height int) []string {
 	if !tiny && height >= len(metrics)+4 {
 		lines = append(lines, "")
 	}
-	rows := m.rows()
 	heading := "Needs attention"
 	if tiny {
 		heading = "Attention"
@@ -744,7 +787,10 @@ func compactSkillDetailLines(detail app.SkillDetail, width, budget int) []string
 	}
 	if len(lines) > budget {
 		tail := compactSkillOmissionLines(detail, width)
-		maximumTail := max(0, budget-1)
+		maximumTail := budget
+		if budget > 3 {
+			maximumTail = budget - 1
+		}
 		if len(tail) > maximumTail {
 			tail = tail[len(tail)-maximumTail:]
 		}
@@ -761,7 +807,7 @@ func compactSkillOmissionLines(detail app.SkillDetail, width int) []string {
 	if locations > 0 && files > 0 {
 		marker := fmt.Sprintf("… %d locations · %d files", locations, files)
 		if lipgloss.Width(marker) > width {
-			marker = "… locations · files"
+			marker = fmt.Sprintf("… %d locations %d files", locations, files)
 		}
 		markers = append(markers, line(marker))
 	} else if locations > 0 {
@@ -928,7 +974,7 @@ func (m Model) primaryActions() []string {
 			return append(actions, "Close")
 		case ViewWorkspaces:
 			if m.Scope.Level == "workspace-projects" || m.Scope.Level == "project-skills" {
-				return []string{m.workspacePresetAction(), "Rename project", "Manage agents", "Change project directory", "Remove project", "Close"}
+				return []string{"Create project", m.workspacePresetAction(), "Rename project", "Manage agents", "Change project directory", "Remove project", "Close"}
 			}
 			if m.Scope.Level == "project-targets" {
 				return []string{m.workspacePresetAction(), "Rename project", "Manage agents", "Change project directory", "Remove project", "Close"}
@@ -948,7 +994,7 @@ func (m Model) primaryActions() []string {
 			if m.Scope.Level == "preset-skills" {
 				return []string{"Close"}
 			}
-			return []string{"Duplicate", "Rename", "Apply", "Delete", "Close"}
+			return []string{"Create preset", "Duplicate", "Rename", "Apply", "Delete", "Close"}
 		case ViewStatus:
 			actions := []string{"Refresh"}
 			if m.selectedStatusCanSync() {
@@ -960,7 +1006,7 @@ func (m Model) primaryActions() []string {
 	rows := m.rows()
 	if m.Cursor < 0 || m.Cursor >= len(rows) {
 		if m.ActiveView == ViewPresets && m.Scope.Level == "" {
-			return []string{"Create"}
+			return []string{"Create preset"}
 		}
 		if m.ActiveView == ViewLibrary {
 			return []string{"Add source", "More"}
@@ -991,7 +1037,7 @@ func (m Model) primaryActions() []string {
 		return []string{"Open", "Add source", "More"}
 	case ViewWorkspaces:
 		if m.Scope.Level == "workspace-projects" {
-			return []string{"Open", "Create project", "More"}
+			return []string{"Add skill", m.workspacePresetAction(), "More"}
 		}
 		if m.Scope.Level == "workspace-agents" {
 			return []string{"Open", m.workspacePresetAction(), "More"}
@@ -1019,7 +1065,7 @@ func (m Model) primaryActions() []string {
 		if m.Scope.Level == "preset-skills" {
 			return []string{"Open", "Save", "More"}
 		}
-		return []string{"Open", "Create", "More"}
+		return []string{"Edit members", "Apply", "More"}
 	case ViewStatus:
 		actions := []string{"Open"}
 		if item, ok := m.selectedStatusItem(); ok && isUnmanaged(item) {

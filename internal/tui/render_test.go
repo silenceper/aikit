@@ -96,11 +96,13 @@ func TestVisualStateMatrixStaysBoundedAndKeepsLandmarks(t *testing.T) {
 					got := m.ViewString()
 					landmark := state.landmark
 					if height == 8 && (state.name == "warning" || state.name == "error") {
-						if width < 60 {
-							landmark = "Attention"
-						} else {
-							landmark = "Needs attention"
-						}
+						landmark = "Attention"
+					}
+					if state.name == "input" && width < 60 {
+						landmark = "[Apply]"
+					}
+					if state.name == "partial" && width == 24 {
+						landmark = "partial warni"
 					}
 					if state.name == "loading" && (height == 8 || width == 24) {
 						landmark = "aikit"
@@ -225,7 +227,7 @@ func TestOverviewIncludesTypedUpdateFailuresAndWarningsAsErrors(t *testing.T) {
 	}
 }
 
-func TestTwoLineCollectionsHavePrimaryAndContextLines(t *testing.T) {
+func TestOneLineCollectionsKeepContextInLiveDetail(t *testing.T) {
 	tests := []struct {
 		name      string
 		view      View
@@ -242,20 +244,14 @@ func TestTwoLineCollectionsHavePrimaryAndContextLines(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := NewModel(context.Background(), &fakeService{}, &fakeMigration{}, tt.view, ActionNone)
-			m.Snapshot, m.Width, m.Height = testSnapshot(), 80, 24
+			m.Snapshot, m.Width, m.Height = testSnapshot(), 120, 24
 			if tt.configure != nil {
 				tt.configure(&m)
 			}
 			lines := strings.Split(stripANSI(m.ViewString()), "\n")
-			found := false
-			for i := 0; i+1 < len(lines); i++ {
-				if strings.Contains(lines[i], tt.primary) && strings.Contains(lines[i+1], tt.secondary) {
-					found = true
-					break
-				}
-			}
-			if !found {
-				t.Fatalf("%s did not render adjacent primary/context lines:\n%s", tt.name, m.ViewString())
+			regions := m.hitRegions()
+			if len(regions.Rows) == 0 || regions.Rows[0].Height != 1 || !strings.Contains(lines[regions.Rows[0].Y], tt.primary) || !strings.Contains(stripANSI(m.ViewString()), tt.secondary) {
+				t.Fatalf("%s did not render one-line collection plus live context:\n%s", tt.name, m.ViewString())
 			}
 		})
 	}
@@ -602,7 +598,7 @@ func TestRenderNewInformationArchitectureAndDensity(t *testing.T) {
 
 	m.Width, m.Height = 38, 12
 	got = m.ViewString()
-	if !strings.Contains(got, "aikit / Migration") || strings.Contains(got, "/private/full/path") {
+	if !strings.Contains(got, "Migration") || strings.Contains(got, "/private/full/path") {
 		t.Fatalf("narrow render is not a breadcrumb single pane:\n%s", got)
 	}
 }

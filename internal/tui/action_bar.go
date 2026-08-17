@@ -6,11 +6,11 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-const actionBarSeparator = "  "
+const actionBarSeparator = " "
 
 const (
-	actionBarPrevious = "[<]"
-	actionBarNext     = "[>]"
+	actionBarPrevious = "‹"
+	actionBarNext     = "›"
 )
 
 type actionBarLayout struct {
@@ -66,6 +66,11 @@ func layoutActionBar(actions []string, focused bool, selected, width int) action
 			break
 		}
 		remaining := width - cursor
+		reserveNext := 0
+		if index == end-1 && end < len(actions) {
+			reserveNext = lipgloss.Width(actionBarSeparator) + lipgloss.Width(actionBarNext)
+		}
+		remaining -= reserveNext
 		if remaining <= 0 {
 			break
 		}

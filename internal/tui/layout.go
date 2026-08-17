@@ -160,7 +160,7 @@ func (layout *Layout) applyFramedAliases() {
 		layout.Main.Width = layout.DetailPanel.Outer.Right() - layout.Main.X
 	}
 	if layout.Narrow {
-		layout.Breadcrumb = layout.CollectionPanel.Title
+		layout.Breadcrumb = layout.AppBar.Body
 	}
 	overlay := framedOverlayPanel(*layout, true)
 	layout.Overlay = overlay.Outer

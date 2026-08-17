@@ -21,6 +21,12 @@ func TestModernShellResponsiveBreakpoints(t *testing.T) {
 			if layout.Main.Empty() || layout.Header.Empty() || layout.Footer.Empty() {
 				t.Fatalf("%dx%d lost shell region: %+v", tt.width, height, layout)
 			}
+			if height < 12 {
+				if !layout.LowHeight || layout.CollectionPanel.Outer.Empty() || !layout.NavigationPanel.Outer.Empty() || !layout.DetailPanel.Outer.Empty() {
+					t.Fatalf("%dx%d invalid low-height shell: %+v", tt.width, height, layout)
+				}
+				continue
+			}
 			if !layout.Narrow && (layout.Navigation.Empty() || layout.Navigation.Overlaps(layout.Main)) {
 				t.Fatalf("%dx%d invalid rail/main: %+v", tt.width, height, layout)
 			}
@@ -76,7 +82,11 @@ func TestLayoutResponsiveRectsStayInsideTerminal(t *testing.T) {
 					t.Fatalf("%dx%d %s escaped terminal: %+v", width, height, name, rect)
 				}
 			}
-			if width < 60 {
+			if height < 12 {
+				if !layout.LowHeight || layout.CollectionPanel.Outer.Empty() {
+					t.Fatalf("%dx%d should have one active low-height panel: %+v", width, height, layout)
+				}
+			} else if width < 60 {
 				if !layout.Narrow || !layout.Detail.Empty() || layout.Breadcrumb.Empty() {
 					t.Fatalf("%dx%d should be single-pane with breadcrumb: %+v", width, height, layout)
 				}

@@ -28,7 +28,7 @@ func TestNarrowDetailUsesFullWidthAndEscReturnsToList(t *testing.T) {
 		t.Fatal("Enter did not open detail")
 	}
 	rendered := m.ViewString()
-	if !strings.Contains(rendered, "aikit / Library / alpha") || !strings.Contains(rendered, "State: Update available") || strings.Contains(rendered, "Library skills") || !strings.Contains(rendered, "Esc Back") {
+	if !strings.Contains(rendered, "‹ Library / alpha") || !strings.Contains(rendered, "State: Update available") || strings.Contains(rendered, "Library skills") || !strings.Contains(rendered, "Esc Back") {
 		t.Fatalf("narrow detail did not replace list full-width:\n%s", rendered)
 	}
 	m, cmd := apply(m, "esc")
