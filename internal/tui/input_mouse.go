@@ -235,12 +235,11 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	for visibleIndex, rect := range regions.Rows {
 		if rect.Contains(msg.X, msg.Y) {
 			nextCursor := start + visibleIndex
-			activatePicker := (m.Mode == ModeScopePicker || m.Mode == ModePresetPicker) && m.Focus == FocusList && m.Cursor == nextCursor
 			m.Cursor = nextCursor
 			m.Focus, m.ActionIndex = FocusList, 0
 			m.ensureVisible()
-			if activatePicker {
-				return m.choosePicker()
+			if m.Mode == ModeScopePicker || m.Mode == ModePresetPicker {
+				return m.chooseHighlightedPicker(), nil
 			}
 			if m.ActiveView == ViewLibrary {
 				return m.perform(uiToggle)
@@ -293,9 +292,10 @@ func (m Model) performPrimaryAction(index int) (tea.Model, tea.Cmd) {
 	if m.Mode == ModeInput && actions[index] == "Apply" {
 		return m.submitInput()
 	}
+	if (m.Mode == ModeScopePicker || m.Mode == ModePresetPicker) && actions[index] == "Apply" {
+		return m.applyPicker()
+	}
 	switch actions[index] {
-	case "Select":
-		return m.choosePicker()
 	case "Validate":
 		m.Busy, m.Status = true, "Validating configuration without changes..."
 		return m, validateConfigurationCmd(m.ctx, m.service)

@@ -11,6 +11,7 @@ import (
 
 func chooseRowByName(t *testing.T, m Model, name string, mouse bool) (Model, tea.Cmd) {
 	t.Helper()
+	pickerMode := m.Mode == ModeScopePicker || m.Mode == ModePresetPicker
 	index := -1
 	for i, current := range m.rows() {
 		if current.Name == name {
@@ -25,10 +26,18 @@ func chooseRowByName(t *testing.T, m Model, name string, mouse bool) (Model, tea
 	if mouse {
 		regions := m.hitRegions()
 		next, cmd := m.Update(click(regions.Rows[index].X, regions.Rows[index].Y))
-		return next.(Model), cmd
+		m = next.(Model)
+		if !pickerMode || cmd != nil {
+			return m, cmd
+		}
+		return chooseVisibleAction(t, m, "Apply", true)
 	}
 	next, cmd := m.Update(actionKey(tea.KeyEnter))
-	return next.(Model), cmd
+	m = next.(Model)
+	if !pickerMode || cmd != nil {
+		return m, cmd
+	}
+	return chooseVisibleAction(t, m, "Apply", false)
 }
 
 func chooseVisibleAction(t *testing.T, m Model, label string, mouse bool) (Model, tea.Cmd) {
@@ -46,6 +55,67 @@ func chooseVisibleAction(t *testing.T, m Model, label string, mouse bool) (Model
 	}
 	next, cmd := m.Update(actionKey(tea.KeyEnter))
 	return next.(Model), cmd
+}
+
+func pickerRowIndex(t *testing.T, m Model, name string) int {
+	t.Helper()
+	for index, current := range m.rows() {
+		if current.Name == name {
+			return index
+		}
+	}
+	t.Fatalf("picker row %q missing from %+v", name, m.rows())
+	return -1
+}
+
+func TestPickerChoiceDoesNotApplyUntilExplicitAction(t *testing.T) {
+	service := &fakeService{}
+	m := NewModel(nil, service, &fakeMigration{}, ViewLibrary, ActionNone)
+	m.Snapshot, m.Width, m.Height = testSnapshot(), 110, 30
+	m.Selected["library:acme/alpha"] = true
+	m, _ = keyboardAction(t, m, actionIndex(t, m, "More"))
+	m, _ = chooseVisibleAction(t, m, "Enable selected", false)
+	if m.Mode != ModeScopePicker {
+		t.Fatalf("mode=%s, want scope picker", m.Mode)
+	}
+
+	index := pickerRowIndex(t, m, "Global / codex")
+	regions := m.hitRegions()
+	next, cmd := m.Update(click(regions.Rows[index].X+1, regions.Rows[index].Y))
+	m = next.(Model)
+	if cmd != nil || m.Cursor != index || m.Picker.Selected != index || m.Focus != FocusList {
+		t.Fatalf("mouse choice cursor=%d selected=%d focus=%s cmd=%v", m.Cursor, m.Picker.Selected, m.Focus, cmd != nil)
+	}
+	if service.previewBatchCalls != 0 || service.batchCalls != 0 {
+		t.Fatalf("mouse choice submitted preview=%d mutation=%d", service.previewBatchCalls, service.batchCalls)
+	}
+
+	m.Cursor = pickerRowIndex(t, m, "Project / aikit / Common")
+	next, cmd = m.Update(actionKey(tea.KeySpace))
+	m = next.(Model)
+	if cmd != nil || m.Picker.Selected != m.Cursor || m.Focus != FocusList {
+		t.Fatalf("space choice selected=%d cursor=%d focus=%s cmd=%v", m.Picker.Selected, m.Cursor, m.Focus, cmd != nil)
+	}
+
+	m.Cursor = pickerRowIndex(t, m, "Project / aikit / codex")
+	next, cmd = m.Update(actionKey(tea.KeyEnter))
+	m = next.(Model)
+	if cmd != nil || m.Picker.Selected != m.Cursor || m.Focus != FocusActions {
+		t.Fatalf("enter choice selected=%d cursor=%d focus=%s cmd=%v", m.Picker.Selected, m.Cursor, m.Focus, cmd != nil)
+	}
+	if got := m.primaryActions(); len(got) == 0 || got[0] != "Apply" {
+		t.Fatalf("picker actions=%v, want Apply first", got)
+	}
+
+	next, cmd = m.Update(actionKey(tea.KeyEnter))
+	m = next.(Model)
+	if cmd == nil || service.previewBatchCalls != 0 {
+		t.Fatalf("apply cmd=%v preview calls before execution=%d", cmd != nil, service.previewBatchCalls)
+	}
+	_ = cmd()
+	if service.previewBatchCalls != 1 {
+		t.Fatalf("apply preview calls=%d, want 1", service.previewBatchCalls)
+	}
 }
 
 func TestStructuredScopePickerLibraryBatchKeyboardMouse(t *testing.T) {

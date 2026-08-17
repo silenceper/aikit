@@ -83,7 +83,7 @@ func (m Model) toggleSelected() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.Mode == ModeScopePicker || m.Mode == ModePresetPicker {
-		return m.choosePicker()
+		return m.chooseHighlightedPicker(), nil
 	}
 	if m.ActiveView == ViewMigration || m.Mode == ModeScan || m.Mode == ModeUpdates || m.Mode == ModeAddSelect {
 		key := current.selectionKey()
@@ -160,7 +160,9 @@ func (m Model) activate() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.Mode == ModeScopePicker || m.Mode == ModePresetPicker {
-		return m.choosePicker()
+		m = m.chooseHighlightedPicker()
+		m.Focus, m.ActionIndex = FocusActions, 0
+		return m, nil
 	}
 	if m.Mode == ModeAddSelect {
 		if len(m.selectedIDs()) == 0 {

@@ -750,7 +750,7 @@ func (m Model) primaryActions() []string {
 		return []string{"Enable selected", "Disable selected", "Cancel"}
 	}
 	if m.Mode == ModeScopePicker || m.Mode == ModePresetPicker {
-		return []string{"Select", "Cancel"}
+		return []string{"Apply", "Cancel"}
 	}
 	if m.Mode == ModeProjectAgents {
 		return []string{"Save agents", "Cancel"}

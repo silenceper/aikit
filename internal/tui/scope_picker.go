@@ -29,11 +29,12 @@ type pickerChoice struct {
 }
 
 type pickerState struct {
-	Purpose pickerPurpose
-	Choices []pickerChoice
-	Project string
-	Agent   string
-	Preset  string
+	Purpose  pickerPurpose
+	Choices  []pickerChoice
+	Selected int
+	Project  string
+	Agent    string
+	Preset   string
 }
 
 func (m *Model) enterScopePicker(purpose pickerPurpose, project, preset string, preserveReturn bool) {
@@ -44,7 +45,7 @@ func (m *Model) enterScopePicker(purpose pickerPurpose, project, preset string, 
 	if purpose == pickerGlobalPresetApplyScope {
 		choices = globalScopeChoices()
 	}
-	m.Picker = pickerState{Purpose: purpose, Project: project, Preset: preset, Choices: choices}
+	m.Picker = pickerState{Purpose: purpose, Project: project, Preset: preset, Choices: choices, Selected: -1}
 	m.Mode, m.Focus, m.ActionIndex, m.Cursor, m.Scroll, m.OverlayScroll = ModeScopePicker, FocusList, 0, 0, 0, 0
 	m.Status = "Choose an exact target scope"
 }
@@ -74,7 +75,7 @@ func (m *Model) enterPresetPickerWithReturn(purpose pickerPurpose, project, agen
 	for _, name := range names {
 		choices = append(choices, pickerChoice{Label: name, Preset: name})
 	}
-	m.Picker = pickerState{Purpose: purpose, Project: project, Agent: agentName, Choices: choices}
+	m.Picker = pickerState{Purpose: purpose, Project: project, Agent: agentName, Choices: choices, Selected: -1}
 	m.Mode, m.Focus, m.ActionIndex, m.Cursor, m.Scroll, m.OverlayScroll = ModePresetPicker, FocusList, 0, 0, 0, 0
 	m.Status = "Choose a preset"
 }
@@ -128,11 +129,21 @@ func projectNames(projects []config.Project) []configProject {
 	return result
 }
 
-func (m Model) choosePicker() (tea.Model, tea.Cmd) {
+func (m Model) chooseHighlightedPicker() Model {
 	if m.Cursor < 0 || m.Cursor >= len(m.Picker.Choices) {
+		return m
+	}
+	m.Picker.Selected = m.Cursor
+	m.Status = "Selected " + m.Picker.Choices[m.Cursor].Label + "; choose Apply to review"
+	return m
+}
+
+func (m Model) applyPicker() (tea.Model, tea.Cmd) {
+	if m.Picker.Selected < 0 || m.Picker.Selected >= len(m.Picker.Choices) {
+		m.Status = "Choose a target before applying"
 		return m, nil
 	}
-	choice := m.Picker.Choices[m.Cursor]
+	choice := m.Picker.Choices[m.Picker.Selected]
 	if m.Mode == ModePresetPicker {
 		switch m.Picker.Purpose {
 		case pickerProjectPreset:
