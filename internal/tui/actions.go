@@ -259,6 +259,8 @@ func (m Model) cancel() (tea.Model, tea.Cmd) {
 		m.Input = inputState{}
 		m.pendingBatch = app.BatchRequest{}
 		m.pendingProject = app.ProjectEditRequest{}
+		m.pendingProjectPath = ""
+		m.ProjectRegistration = app.ProjectRegistrationPreview{}
 		m.pendingPreset = app.PresetMutationRequest{}
 		m.Status = "Cancelled; no changes made"
 		return m, nil
@@ -312,6 +314,8 @@ func (m Model) cancel() (tea.Model, tea.Cmd) {
 		m.pendingUpdate = app.UpdateRequest{}
 		m.pendingProject = app.ProjectEditRequest{}
 		m.ProjectPreview = app.ProjectEditPreview{}
+		m.pendingProjectPath = ""
+		m.ProjectRegistration = app.ProjectRegistrationPreview{}
 		m.pendingPreset = app.PresetMutationRequest{}
 		m.Status = "Cancelled; no changes made"
 		return m, nil
@@ -535,7 +539,18 @@ func (m Model) submitInput() (tea.Model, tea.Cmd) {
 		m.confirm = ActionBatch
 		m.Busy, m.Status = true, "Building exact binding preview..."
 		return m, batchBindingPreviewCmd(m.ctx, m.service, m.pendingBatch)
-	case inputProjectCreate, inputProjectEdit:
+	case inputProjectCreate:
+		m.pendingProjectPath = value
+		m.Busy, m.Status = true, "Inspecting project directory without mutation..."
+		return m, projectRegistrationPreviewCmd(m.ctx, m.service, app.ProjectRegistrationRequest{Path: value})
+	case inputProjectName:
+		if m.pendingProjectPath == "" {
+			m.Err = "project directory is required before choosing a name"
+			return m, nil
+		}
+		m.Busy, m.Status = true, "Rebuilding project registration preview..."
+		return m, projectRegistrationPreviewCmd(m.ctx, m.service, app.ProjectRegistrationRequest{Path: m.pendingProjectPath, Name: value})
+	case inputProjectEdit:
 		request, err := m.parseProjectEditInput(value)
 		if err != nil {
 			m.Err = err.Error()
@@ -552,10 +567,7 @@ func (m Model) submitInput() (tea.Model, tea.Cmd) {
 
 func (m Model) parseProjectEditInput(value string) (app.ProjectEditRequest, error) {
 	parts := strings.Split(value, "|")
-	want := 3
-	if m.Input.Kind == inputProjectEdit {
-		want = 4
-	}
+	want := 4
 	if len(parts) != want {
 		return app.ProjectEditRequest{}, fmt.Errorf("expected %d pipe-separated fields", want)
 	}
@@ -563,12 +575,6 @@ func (m Model) parseProjectEditInput(value string) (app.ProjectEditRequest, erro
 		parts[i] = strings.TrimSpace(parts[i])
 	}
 	request := app.ProjectEditRequest{Name: parts[0], Path: parts[1], AddAgents: splitAgents(parts[2])}
-	if m.Input.Kind == inputProjectCreate {
-		if request.Name == "" || request.Path == "" {
-			return app.ProjectEditRequest{}, fmt.Errorf("new project name and path are required")
-		}
-		return request, nil
-	}
 	request.Project = m.pendingID
 	request.RemoveAgents = splitAgents(parts[3])
 	if request.Project == "" {

@@ -399,8 +399,10 @@ func (m Model) performPrimaryAction(index int) (tea.Model, tea.Cmd) {
 		m.Status = "Enter a local path or remote Git source"
 		return m, nil
 	case "Create project":
-		m.enterInput(inputState{Kind: inputProjectCreate, Prompt: "Project (name|path|agents)"})
-		m.Status = "Enter name, path, and comma-separated agents"
+		m.pendingProjectPath = ""
+		m.ProjectRegistration = app.ProjectRegistrationPreview{}
+		m.enterInput(inputState{Kind: inputProjectCreate, Prompt: "Project directory"})
+		m.Status = "Enter an existing project directory; agents will be detected automatically"
 		return m, nil
 	case "Edit project":
 		rows := m.rows()

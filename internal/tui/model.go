@@ -101,6 +101,7 @@ const (
 	inputRefChange       inputKind = "ref-change"
 	inputBatchScope      inputKind = "batch-scope"
 	inputProjectCreate   inputKind = "project-create"
+	inputProjectName     inputKind = "project-name"
 	inputProjectEdit     inputKind = "project-edit"
 )
 
@@ -236,6 +237,7 @@ type Model struct {
 	Compare             app.CompareResult
 	BatchResult         app.BatchResult
 	ProjectPreview      app.ProjectEditPreview
+	ProjectRegistration app.ProjectRegistrationPreview
 	ProjectResult       app.Result
 	RecoveryPreview     app.RecoveryPreview
 	RecoveryResult      app.RecoveryResult
@@ -255,6 +257,8 @@ type Model struct {
 	pendingBatch        app.BatchRequest
 	pendingUpdate       app.UpdateRequest
 	pendingProject      app.ProjectEditRequest
+	pendingProjectPath  string
+	pendingProjectOpen  string
 	pendingRecovery     app.RecoveryRequest
 	forceAcknowledged   bool
 	filterParent        Mode
@@ -332,6 +336,14 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.pendingRecovery = app.RecoveryRequest{OperationIDs: ids}
 			m.Busy, m.Status = true, "Building recovery preview..."
 			return m, recoveryPreviewCmd(m.ctx, m.service, m.pendingRecovery)
+		}
+		if m.pendingProjectOpen != "" {
+			if _, ok := findProject(msg.snapshot.Config.Projects, m.pendingProjectOpen); ok {
+				m.ActiveView = ViewWorkspaces
+				m.Scope = Scope{Project: m.pendingProjectOpen, Level: "project-targets"}
+				m.Cursor, m.Scroll, m.Detail, m.DetailScroll = 0, 0, false, 0
+			}
+			m.pendingProjectOpen = ""
 		}
 		return m.startInventory()
 	case inventoryMsg:
@@ -499,8 +511,44 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.ProjectPreview = msg.preview
+		if msg.preview.PathIdentity != "" {
+			m.pendingProject.ExpectedPathIdentity = msg.preview.PathIdentity
+		}
 		m.enterConfirm(ActionProjectEdit)
 		m.Status = "Review cleanup and next project paths, then confirm"
+		return m, nil
+	case projectRegistrationPreviewMsg:
+		m.Busy = false
+		if msg.err != nil {
+			m.Err, m.Status = msg.err.Error(), "Project registration preview failed"
+			return m, nil
+		}
+		m.ProjectRegistration = msg.preview
+		m.pendingProjectPath = msg.preview.Path
+		if msg.preview.NeedsName {
+			m.enterInput(inputState{Kind: inputProjectName, Prompt: "Project name"})
+			if msg.preview.NameIssue == app.ProjectNameDuplicate {
+				m.Status = "That project name is already in use; choose another name"
+			} else {
+				m.Status = "The derived project name is invalid; choose a project name"
+			}
+			return m, nil
+		}
+		m.ProjectPreview = msg.preview.Preview
+		m.pendingProject = app.ProjectEditRequest{
+			Name:                 msg.preview.Name,
+			Path:                 msg.preview.Path,
+			AddAgents:            append([]string(nil), msg.preview.Agents...),
+			ExpectedPathIdentity: msg.preview.PathIdentity,
+		}
+		m.Preview = app.MutationPreview{
+			Title:                "Create project",
+			Summary:              fmt.Sprintf("Register project %q at %s", msg.preview.Name, msg.preview.Path),
+			Warnings:             append([]string(nil), msg.preview.Warnings...),
+			RequiresConfirmation: true,
+		}
+		m.enterConfirm(ActionProjectEdit)
+		m.Status = "Review the detected agents and exact project paths, then confirm"
 		return m, nil
 	case projectOperationMsg:
 		m.Busy, m.MutationBusy = false, false
@@ -515,6 +563,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.Err = ""
+		if m.pendingProject.Project == "" {
+			m.pendingProjectOpen = m.pendingProject.Name
+		}
 		if msg.result.Exit == app.ExitPartial || len(msg.result.Plan.Issues)+len(msg.result.Link.Failures)+len(msg.result.Link.Issues) > 0 {
 			m.Status = title(msg.name) + " partial; review issues"
 		} else {

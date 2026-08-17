@@ -93,6 +93,14 @@ func (m Model) overlayLines() []string {
 			lines = append(lines, "Path: "+action.Path)
 		}
 		if m.confirm == ActionProjectEdit {
+			if m.ProjectRegistration.Name != "" {
+				lines = append(lines, "Name: "+m.ProjectRegistration.Name, "Directory: "+m.ProjectRegistration.Path)
+				if len(m.ProjectRegistration.Agents) == 0 {
+					lines = append(lines, "Detected agents: none")
+				} else {
+					lines = append(lines, "Detected agents: "+strings.Join(m.ProjectRegistration.Agents, ", "))
+				}
+			}
 			for _, action := range m.ProjectPreview.Cleanup.Actions {
 				lines = append(lines, "Cleanup: "+action.Path)
 			}

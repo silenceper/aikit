@@ -31,6 +31,10 @@ type fakeService struct {
 	projectPreviewCalls        int
 	lastProjectPreview         app.ProjectEditRequest
 	projectPreview             app.ProjectEditPreview
+	projectRegistrationCalls   int
+	lastProjectRegistration    app.ProjectRegistrationRequest
+	projectRegistration        app.ProjectRegistrationPreview
+	projectRegistrationFunc    func(app.ProjectRegistrationRequest) app.ProjectRegistrationPreview
 	projectEditCalls           int
 	lastProjectEdit            app.ProjectEditRequest
 	presetCalls                int
@@ -214,6 +218,15 @@ func (f *fakeService) PreviewProjectEdit(_ context.Context, request app.ProjectE
 	f.projectPreviewCalls++
 	f.lastProjectPreview = request
 	return f.projectPreview, nil
+}
+
+func (f *fakeService) PreviewProjectRegistration(_ context.Context, request app.ProjectRegistrationRequest) (app.ProjectRegistrationPreview, error) {
+	f.projectRegistrationCalls++
+	f.lastProjectRegistration = request
+	if f.projectRegistrationFunc != nil {
+		return f.projectRegistrationFunc(request), nil
+	}
+	return f.projectRegistration, nil
 }
 
 func (f *fakeService) EditProject(_ context.Context, request app.ProjectEditRequest) (app.Result, error) {

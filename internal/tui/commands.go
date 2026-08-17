@@ -95,6 +95,11 @@ type projectPreviewMsg struct {
 	err     error
 }
 
+type projectRegistrationPreviewMsg struct {
+	preview app.ProjectRegistrationPreview
+	err     error
+}
+
 type projectOperationMsg struct {
 	name   string
 	result app.Result
@@ -434,6 +439,16 @@ func projectPreviewCmd(ctx context.Context, service app.Service, request app.Pro
 		}
 		preview, err := service.PreviewProjectEdit(ctx, request)
 		return projectPreviewMsg{preview: preview, err: err}
+	}
+}
+
+func projectRegistrationPreviewCmd(ctx context.Context, service app.Service, request app.ProjectRegistrationRequest) tea.Cmd {
+	return func() tea.Msg {
+		if service == nil {
+			return projectRegistrationPreviewMsg{err: errUnavailable("app service")}
+		}
+		preview, err := service.PreviewProjectRegistration(ctx, request)
+		return projectRegistrationPreviewMsg{preview: preview, err: err}
 	}
 }
 
