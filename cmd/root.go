@@ -268,6 +268,9 @@ func (s errorService) PreviewProjectRemove(context.Context, app.ProjectRemoveReq
 func (s errorService) RemoveProject(context.Context, app.ProjectRemoveRequest) (app.Result, error) {
 	return app.Result{}, s.fail()
 }
+func (s errorService) PreviewBatch(context.Context, app.BatchRequest) (app.BatchPreview, error) {
+	return app.BatchPreview{}, s.fail()
+}
 func (s errorService) Batch(context.Context, app.BatchRequest) (app.BatchResult, error) {
 	return app.BatchResult{}, s.fail()
 }

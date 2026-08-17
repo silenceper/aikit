@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/silenceper/aikit/internal/link"
 	"github.com/silenceper/aikit/pkg/config"
@@ -26,53 +27,127 @@ func (a *App) Batch(ctx context.Context, request BatchRequest) (BatchResult, err
 	}
 }
 
-func (a *App) batchBindings(ctx context.Context, request BatchRequest) (BatchResult, error) {
-	if len(request.Bindings) == 0 {
-		return BatchResult{}, fmt.Errorf("binding batch is empty")
+func (a *App) PreviewBatch(ctx context.Context, request BatchRequest) (BatchPreview, error) {
+	cfg, err := a.deps.Store.Load(ctx)
+	if err != nil {
+		return BatchPreview{}, err
 	}
+	switch request.Operation {
+	case BatchEnable, BatchDisable:
+		preflight, err := a.preflightBatchBindings(cfg, request)
+		if err != nil {
+			return BatchPreview{}, err
+		}
+		preview := BatchPreview{MutationPreview: MutationPreview{
+			Title:                "Batch " + string(request.Operation),
+			Summary:              fmt.Sprintf("%s %d exact binding(s)", request.Operation, len(preflight.items)),
+			AffectedScopes:       affectedScopes(cfg, preflight.selectors),
+			Plan:                 preflight.plan,
+			RequiresConfirmation: true,
+		}, Items: preflight.items}
+		addPlanDiagnostics(&preview.MutationPreview)
+		return preview, nil
+	case BatchRemove:
+		preflight, err := a.preflightBatchRemove(cfg, request, true)
+		if err != nil {
+			return BatchPreview{}, err
+		}
+		preview := BatchPreview{MutationPreview: MutationPreview{
+			Title:                "Remove selected skills",
+			Summary:              fmt.Sprintf("Remove %d selected library skill(s)", len(preflight.items)),
+			AffectedScopes:       preflight.scopes,
+			References:           preflight.references,
+			Plan:                 preflight.plan,
+			RequiresForce:        len(preflight.references) > 0 && !request.Force,
+			RequiresConfirmation: true,
+		}, Items: preflight.items}
+		addPlanDiagnostics(&preview.MutationPreview)
+		return preview, nil
+	case BatchUpdate:
+		preflight, err := a.preflightBatchUpdate(cfg, request)
+		if err != nil {
+			return BatchPreview{}, err
+		}
+		parts := make([]string, 0, len(preflight.skills))
+		for _, skill := range preflight.skills {
+			expected := request.Expected[skill.ID]
+			parts = append(parts, fmt.Sprintf("%s %s -> %s", skill.ID, shortBatchOID(skill.Resolved), shortBatchOID(expected.Remote)))
+		}
+		return BatchPreview{MutationPreview: MutationPreview{
+			Title:                "Update selected skills",
+			Summary:              strings.Join(parts, "; "),
+			RequiresConfirmation: true,
+		}, Items: preflight.items}, nil
+	default:
+		return BatchPreview{}, fmt.Errorf("unknown batch operation %q", request.Operation)
+	}
+}
+
+type batchBindingPreflight struct {
+	next      *config.Config
+	selectors []link.Selector
+	plan      link.Plan
+	items     []BatchItemResult
+}
+
+func (a *App) preflightBatchBindings(cfg *config.Config, request BatchRequest) (batchBindingPreflight, error) {
+	if len(request.Bindings) == 0 {
+		return batchBindingPreflight{}, fmt.Errorf("binding batch is empty")
+	}
+	next := cloneConfig(cfg)
+	var selectors []link.Selector
+	var items []BatchItemResult
+	for _, binding := range request.Bindings {
+		if (binding.SkillID == "") == (binding.Preset == "") {
+			return batchBindingPreflight{}, fmt.Errorf("exactly one skill or preset is required")
+		}
+		resolved := binding
+		if binding.SkillID != "" {
+			skill, err := findSkill(next, binding.SkillID)
+			if err != nil {
+				return batchBindingPreflight{}, err
+			}
+			resolved.SkillID = skill.ID
+		} else if _, err := findPreset(next, binding.Preset); err != nil {
+			return batchBindingPreflight{}, err
+		}
+		itemSelectors, err := bindingSelectors(next, resolved)
+		if err != nil {
+			return batchBindingPreflight{}, err
+		}
+		selectors = append(selectors, itemSelectors...)
+		if err := mutateBinding(next, resolved, request.Operation == BatchEnable); err != nil {
+			return batchBindingPreflight{}, err
+		}
+		items = append(items, BatchItemResult{Item: bindingItem(resolved), Changed: true})
+	}
+	if err := next.Validate(); err != nil {
+		return batchBindingPreflight{}, err
+	}
+	if err := validateEffective(next); err != nil {
+		return batchBindingPreflight{}, err
+	}
+	selectors = uniqueSelectors(selectors)
+	plan := plansForSelectors(a.deps.Paths.LibrarySkills, buildTargets(next, a.deps.UserHome), nil, selectors)
+	if err := rejectPlanIssues(request.Operation, plan); err != nil {
+		return batchBindingPreflight{}, err
+	}
+	return batchBindingPreflight{next: next, selectors: selectors, plan: plan, items: items}, nil
+}
+
+func (a *App) batchBindings(ctx context.Context, request BatchRequest) (BatchResult, error) {
 	var output BatchResult
 	err := a.deps.Store.WithLock(ctx, func(tx *config.Tx) error {
 		if err := a.beforeMutation(ctx, tx.Config); err != nil {
 			return err
 		}
 		oldConfig := cloneConfig(tx.Config)
-		next := cloneConfig(tx.Config)
-		var selectors []link.Selector
-		for _, binding := range request.Bindings {
-			if (binding.SkillID == "") == (binding.Preset == "") {
-				return fmt.Errorf("exactly one skill or preset is required")
-			}
-			resolved := binding
-			if binding.SkillID != "" {
-				skill, err := findSkill(next, binding.SkillID)
-				if err != nil {
-					return err
-				}
-				resolved.SkillID = skill.ID
-			} else if _, err := findPreset(next, binding.Preset); err != nil {
-				return err
-			}
-			itemSelectors, err := bindingSelectors(next, resolved)
-			if err != nil {
-				return err
-			}
-			selectors = append(selectors, itemSelectors...)
-			if err := mutateBinding(next, resolved, request.Operation == BatchEnable); err != nil {
-				return err
-			}
-			output.Items = append(output.Items, BatchItemResult{Item: bindingItem(resolved), Changed: true})
-		}
-		if err := next.Validate(); err != nil {
+		preflight, err := a.preflightBatchBindings(tx.Config, request)
+		if err != nil {
 			return err
 		}
-		if err := validateEffective(next); err != nil {
-			return err
-		}
-		selectors = uniqueSelectors(selectors)
-		plan := plansForSelectors(a.deps.Paths.LibrarySkills, buildTargets(next, a.deps.UserHome), nil, selectors)
-		if err := rejectPlanIssues(request.Operation, plan); err != nil {
-			return err
-		}
+		output.Items = append(output.Items, preflight.items...)
+		plan := preflight.plan
 		forwardOperations, err := recoveryOperationsForPlan(plan, config.TransactionForward, "batch binding forward")
 		if err != nil {
 			return err
@@ -80,8 +155,8 @@ func (a *App) batchBindings(ctx context.Context, request BatchRequest) (BatchRes
 		if err := attachRollbackIntents(plan, forwardOperations, "batch binding rollback"); err != nil {
 			return err
 		}
-		next.PendingOperations = append(next.PendingOperations, forwardOperations...)
-		*tx.Config = *next
+		preflight.next.PendingOperations = append(preflight.next.PendingOperations, forwardOperations...)
+		*tx.Config = *preflight.next
 		if err := tx.Checkpoint(); err != nil {
 			return err
 		}
@@ -101,10 +176,6 @@ func (a *App) batchBindings(ctx context.Context, request BatchRequest) (BatchRes
 }
 
 func (a *App) batchRemove(ctx context.Context, request BatchRequest) (BatchResult, error) {
-	ids := uniqueStrings(request.SkillIDs)
-	if len(ids) == 0 {
-		return BatchResult{}, fmt.Errorf("remove batch is empty")
-	}
 	if a.deps.Library == nil {
 		return BatchResult{}, fmt.Errorf("library mutation service is required")
 	}
@@ -114,54 +185,24 @@ func (a *App) batchRemove(ctx context.Context, request BatchRequest) (BatchResul
 			return err
 		}
 		originalConfig := cloneConfig(tx.Config)
-		next := cloneConfig(tx.Config)
-		skills := make([]config.Skill, 0, len(ids))
-		var cleanup []config.PendingOperation
-		for _, requested := range ids {
-			skill, err := findSkill(next, requested)
-			if err != nil {
-				return err
-			}
-			if refs := skillReferences(next, skill.ID); len(refs) > 0 && !request.Force {
-				return fmt.Errorf("skill %q is still referenced by %v", skill.ID, refs)
-			}
-			selectors := selectorsForSkill(next, skill.ID)
-			operations, err := cleanupForSkill(next, a.deps.UserHome, skill.ID, selectors)
-			if err != nil {
-				return err
-			}
-			cleanup = append(cleanup, operations...)
-			if request.Force {
-				pruneSkillReferences(next, skill.ID)
-			}
-			skills = append(skills, skill)
-			output.Items = append(output.Items, BatchItemResult{Item: skill.ID, Changed: true})
-		}
-		if err := next.Validate(); err != nil {
-			return err
-		}
-		if err := preflightCleanup(a.deps.Paths.LibrarySkills, cleanup); err != nil {
-			return err
-		}
-		rollbackOperations, err := rollbackOperationsForCleanup(a.deps.Paths.LibrarySkills, cleanup, "batch remove rollback")
+		preflight, err := a.preflightBatchRemove(tx.Config, request, false)
 		if err != nil {
 			return err
 		}
-		forwardOperations := operationsWithTransaction(cleanup, config.TransactionForward)
+		output.Items = append(output.Items, preflight.items...)
+		rollbackOperations, err := rollbackOperationsForCleanup(a.deps.Paths.LibrarySkills, preflight.cleanup, "batch remove rollback")
+		if err != nil {
+			return err
+		}
+		forwardOperations := operationsWithTransaction(preflight.cleanup, config.TransactionForward)
 		for i := range forwardOperations {
 			rollbackOperations[i].TransactionID = forwardOperations[i].TransactionID
 			rollbackOperations[i].TransactionPhase = config.TransactionRollback
 			forwardOperations[i].Rollback = &rollbackOperations[i]
 		}
-		finalConfig := cloneConfig(next)
-		for _, skill := range skills {
-			index := skillIndex(finalConfig, skill.ID)
-			if index >= 0 {
-				finalConfig.Library.Skills = append(finalConfig.Library.Skills[:index], finalConfig.Library.Skills[index+1:]...)
-			}
-		}
+		finalConfig := cloneConfig(preflight.next)
 		finalConfig.PendingOperations = append(finalConfig.PendingOperations, forwardOperations...)
-		mutation, err := a.deps.Library.PrepareRemoveBatch(ctx, skills)
+		mutation, err := a.deps.Library.PrepareRemoveBatch(ctx, preflight.skills)
 		if err != nil {
 			return err
 		}
@@ -230,6 +271,68 @@ func (a *App) batchRemove(ctx context.Context, request BatchRequest) (BatchResul
 	return output, err
 }
 
+type batchRemovePreflight struct {
+	next       *config.Config
+	skills     []config.Skill
+	cleanup    []config.PendingOperation
+	items      []BatchItemResult
+	references []string
+	scopes     []config.Scope
+	plan       link.Plan
+}
+
+func (a *App) preflightBatchRemove(cfg *config.Config, request BatchRequest, allowForcePreview bool) (batchRemovePreflight, error) {
+	ids := uniqueStrings(request.SkillIDs)
+	if len(ids) == 0 {
+		return batchRemovePreflight{}, fmt.Errorf("remove batch is empty")
+	}
+	next := cloneConfig(cfg)
+	result := batchRemovePreflight{next: next}
+	for _, requested := range ids {
+		skill, err := findSkill(next, requested)
+		if err != nil {
+			return batchRemovePreflight{}, err
+		}
+		if skill.ID != requested {
+			return batchRemovePreflight{}, fmt.Errorf("batch skill %q must be a full id", requested)
+		}
+		refs := skillReferences(next, skill.ID)
+		if len(refs) > 0 && !request.Force && !allowForcePreview {
+			return batchRemovePreflight{}, fmt.Errorf("skill %q is still referenced by %v", skill.ID, refs)
+		}
+		for _, ref := range refs {
+			result.references = append(result.references, skill.ID+": "+ref)
+		}
+		selectors := selectorsForSkill(next, skill.ID)
+		result.scopes = append(result.scopes, affectedScopes(next, selectors)...)
+		operations, err := cleanupForSkill(next, a.deps.UserHome, skill.ID, selectors)
+		if err != nil {
+			return batchRemovePreflight{}, err
+		}
+		result.cleanup = append(result.cleanup, operations...)
+		if request.Force || allowForcePreview {
+			pruneSkillReferences(next, skill.ID)
+		}
+		result.skills = append(result.skills, skill)
+		result.items = append(result.items, BatchItemResult{Item: skill.ID, Changed: true})
+	}
+	for _, skill := range result.skills {
+		if index := skillIndex(next, skill.ID); index >= 0 {
+			next.Library.Skills = append(next.Library.Skills[:index], next.Library.Skills[index+1:]...)
+		}
+	}
+	if err := next.Validate(); err != nil {
+		return batchRemovePreflight{}, err
+	}
+	if err := preflightCleanup(a.deps.Paths.LibrarySkills, result.cleanup); err != nil {
+		return batchRemovePreflight{}, err
+	}
+	result.scopes = uniqueScopes(result.scopes)
+	sort.Strings(result.references)
+	result.plan = cleanupPlan(a.deps.Paths.LibrarySkills, result.cleanup)
+	return result, nil
+}
+
 func rollbackOperationsForCleanup(libraryRoot string, cleanup []config.PendingOperation, reason string) ([]config.PendingOperation, error) {
 	operations := make([]config.PendingOperation, 0, len(cleanup))
 	for _, cleanupOperation := range cleanup {
@@ -262,10 +365,6 @@ func operationsWithTransaction(operations []config.PendingOperation, phase confi
 }
 
 func (a *App) batchUpdate(ctx context.Context, request BatchRequest) (BatchResult, error) {
-	ids := uniqueStrings(request.SkillIDs)
-	if len(ids) == 0 {
-		return BatchResult{}, fmt.Errorf("update batch is empty")
-	}
 	if a.deps.Library == nil {
 		return BatchResult{}, fmt.Errorf("library mutation service is required")
 	}
@@ -275,25 +374,15 @@ func (a *App) batchUpdate(ctx context.Context, request BatchRequest) (BatchResul
 			return err
 		}
 		oldConfig := cloneConfig(tx.Config)
-		items := make([]UpdatePrepareItem, 0, len(ids))
-		for _, requested := range ids {
-			skill, err := findSkill(tx.Config, requested)
-			if err != nil {
-				return err
-			}
-			expected, ok := request.Expected[skill.ID]
-			if !ok {
-				return fmt.Errorf("skill %q is missing its confirmation token", skill.ID)
-			}
-			if expected.Resolved != "" && skill.Resolved != expected.Resolved {
-				return fmt.Errorf("skill %q changed after confirmation", skill.ID)
-			}
-			if expected.Ref != nil && !sameRef(skill.Ref, expected.Ref) {
-				return fmt.Errorf("skill %q ref changed after confirmation", skill.ID)
-			}
-			items = append(items, UpdatePrepareItem{Skill: skill, Ref: request.Ref})
-			output.Items = append(output.Items, BatchItemResult{Item: skill.ID, Changed: true})
+		preflight, err := a.preflightBatchUpdate(tx.Config, request)
+		if err != nil {
+			return err
 		}
+		items := make([]UpdatePrepareItem, 0, len(preflight.skills))
+		for _, skill := range preflight.skills {
+			items = append(items, UpdatePrepareItem{Skill: skill, Ref: request.Ref})
+		}
+		output.Items = append(output.Items, preflight.items...)
 		mutation, err := a.deps.Library.PrepareUpdate(ctx, items)
 		if err != nil {
 			return err
@@ -339,6 +428,51 @@ func (a *App) batchUpdate(ctx context.Context, request BatchRequest) (BatchResul
 		return tx.Checkpoint()
 	})
 	return output, err
+}
+
+type batchUpdatePreflight struct {
+	skills []config.Skill
+	items  []BatchItemResult
+}
+
+func (a *App) preflightBatchUpdate(cfg *config.Config, request BatchRequest) (batchUpdatePreflight, error) {
+	ids := uniqueStrings(request.SkillIDs)
+	if len(ids) == 0 {
+		return batchUpdatePreflight{}, fmt.Errorf("update batch is empty")
+	}
+	result := batchUpdatePreflight{}
+	for _, requested := range ids {
+		skill, err := findSkill(cfg, requested)
+		if err != nil {
+			return batchUpdatePreflight{}, err
+		}
+		if skill.ID != requested {
+			return batchUpdatePreflight{}, fmt.Errorf("batch skill %q must be a full id", requested)
+		}
+		expected, ok := request.Expected[skill.ID]
+		if !ok {
+			return batchUpdatePreflight{}, fmt.Errorf("skill %q is missing its confirmation token", skill.ID)
+		}
+		if expected.Resolved == "" || expected.Remote == "" {
+			return batchUpdatePreflight{}, fmt.Errorf("skill %q confirmation token requires current resolved and remote identities", skill.ID)
+		}
+		if skill.Resolved != expected.Resolved {
+			return batchUpdatePreflight{}, fmt.Errorf("skill %q changed after confirmation", skill.ID)
+		}
+		if !sameRef(skill.Ref, expected.Ref) {
+			return batchUpdatePreflight{}, fmt.Errorf("skill %q ref changed after confirmation", skill.ID)
+		}
+		result.skills = append(result.skills, skill)
+		result.items = append(result.items, BatchItemResult{Item: skill.ID, Changed: true})
+	}
+	return result, nil
+}
+
+func shortBatchOID(value string) string {
+	if len(value) > 8 {
+		return value[:8]
+	}
+	return value
 }
 
 func (a *App) MutatePreset(ctx context.Context, request PresetMutationRequest) (Result, error) {

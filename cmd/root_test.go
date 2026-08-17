@@ -125,6 +125,9 @@ func (f *fakeService) PreviewProjectRemove(context.Context, app.ProjectRemoveReq
 func (f *fakeService) RemoveProject(context.Context, app.ProjectRemoveRequest) (app.Result, error) {
 	return app.Result{}, nil
 }
+func (f *fakeService) PreviewBatch(context.Context, app.BatchRequest) (app.BatchPreview, error) {
+	return app.BatchPreview{}, nil
+}
 func (f *fakeService) Batch(context.Context, app.BatchRequest) (app.BatchResult, error) {
 	return app.BatchResult{}, nil
 }

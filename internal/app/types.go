@@ -34,6 +34,7 @@ type Service interface {
 	PreviewProjectEdit(context.Context, ProjectEditRequest) (ProjectEditPreview, error)
 	PreviewProjectRemove(context.Context, ProjectRemoveRequest) (MutationPreview, error)
 	RemoveProject(context.Context, ProjectRemoveRequest) (Result, error)
+	PreviewBatch(context.Context, BatchRequest) (BatchPreview, error)
 	Batch(context.Context, BatchRequest) (BatchResult, error)
 	MutatePreset(context.Context, PresetMutationRequest) (Result, error)
 	Compare(context.Context, CompareRequest) (CompareResult, error)
@@ -290,6 +291,12 @@ type BatchItemResult struct {
 
 type BatchResult struct {
 	Result
+	Items  []BatchItemResult
+	Issues []OperationIssue
+}
+
+type BatchPreview struct {
+	MutationPreview
 	Items  []BatchItemResult
 	Issues []OperationIssue
 }
