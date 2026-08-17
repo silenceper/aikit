@@ -86,6 +86,29 @@ func TestExpectedConflictAndLibraryMissingCoexistWithoutUnmanaged(t *testing.T) 
 	}
 }
 
+func TestStatusIgnoresHiddenAgentMetadataButReportsVisibleUnmanagedSkills(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	library := filepath.Join(root, "library")
+	dir := filepath.Join(home, ".codex", "skills")
+	if err := os.MkdirAll(filepath.Join(dir, ".system", "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "visible-skill"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	r := status.Inspect(config.New(), home, library)
+	for _, item := range r.Items {
+		if item.Name == ".system" || strings.Contains(item.Path, string(filepath.Separator)+".system") {
+			t.Fatalf("hidden agent metadata reported as a skill: %+v", item)
+		}
+	}
+	if !contains(r, status.Unmanaged) {
+		t.Fatalf("visible unmanaged skill was hidden: %+v", r.Items)
+	}
+}
+
 func TestReadErrorsAreVisibleAndUnhealthy(t *testing.T) {
 	root := t.TempDir()
 	home := filepath.Join(root, "home")

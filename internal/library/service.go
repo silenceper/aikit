@@ -110,6 +110,15 @@ type GitAddOptions struct {
 	Force      bool
 }
 
+// GitPreview is the immutable result of a network-enabled, temporary Git
+// discovery. Candidate roots are intentionally omitted because the checkout is
+// removed before PreviewGit returns.
+type GitPreview struct {
+	Candidates []Candidate
+	Ref        *config.Ref
+	Resolved   string
+}
+
 type UpdateSpec struct {
 	Old config.Skill
 	Ref *config.Ref
@@ -214,7 +223,94 @@ func (s Service) AddGit(ctx context.Context, rawSource string, options GitAddOpt
 	return mutation.Skills, nil
 }
 
+// PreviewGit clones into an operating-system temporary directory, discovers
+// candidates, and removes the checkout before returning. It never touches the
+// persistent cache or central library.
+func (s Service) PreviewGit(ctx context.Context, rawSource, sourcePath string, requested *config.Ref) (GitPreview, error) {
+	if s.Runner == nil {
+		return GitPreview{}, fmt.Errorf("git runner is required")
+	}
+	resolvedSource, err := ResolveAddSource(rawSource)
+	if err != nil {
+		return GitPreview{}, err
+	}
+	if resolvedSource.Kind != AddSourceRemote {
+		return GitPreview{}, fmt.Errorf("git preview requires a remote source")
+	}
+	if parsed, parseErr := url.Parse(strings.TrimSpace(resolvedSource.Source)); parseErr == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.User != nil {
+		return GitPreview{}, fmt.Errorf("HTTP git source must not contain embedded credentials")
+	}
+	if _, err := NormalizeSource(resolvedSource.Source); err != nil {
+		return GitPreview{}, errors.New(sanitizeGitDiagnostic(err.Error()))
+	}
+	temporary, err := os.MkdirTemp("", "aikit-git-preview-")
+	if err != nil {
+		return GitPreview{}, err
+	}
+	defer os.RemoveAll(temporary)
+	if err := os.Chmod(temporary, 0o700); err != nil {
+		return GitPreview{}, err
+	}
+	checkout := filepath.Join(temporary, "checkout")
+	if _, err := s.Runner.Run(ctx, temporary, "clone", "--no-checkout", "--", resolvedSource.Source, checkout); err != nil {
+		return GitPreview{}, err
+	}
+	ref := requested
+	if ref == nil {
+		output, err := s.Runner.Run(ctx, checkout, "symbolic-ref", "--short", "HEAD")
+		if err != nil {
+			return GitPreview{}, fmt.Errorf("resolve default branch: %w", err)
+		}
+		branch := strings.TrimPrefix(strings.TrimSpace(output), "origin/")
+		ref = &config.Ref{Kind: "branch", Value: branch}
+	}
+	if err := validateRef(ref); err != nil {
+		return GitPreview{}, err
+	}
+	target := ref.Value
+	switch ref.Kind {
+	case "branch":
+		target = "refs/remotes/origin/" + ref.Value
+	case "tag":
+		target = "refs/tags/" + ref.Value
+	}
+	if _, err := s.Runner.Run(ctx, checkout, "checkout", "--detach", target); err != nil {
+		return GitPreview{}, err
+	}
+	output, err := s.Runner.Run(ctx, checkout, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil {
+		return GitPreview{}, err
+	}
+	resolved := strings.ToLower(strings.TrimSpace(output))
+	if !fullObjectID.MatchString(resolved) {
+		return GitPreview{}, fmt.Errorf("git returned a non-full object id")
+	}
+	candidates, err := discoverSelection(checkout, sourcePath, "", true)
+	if err != nil {
+		return GitPreview{}, err
+	}
+	if len(candidates) == 0 {
+		return GitPreview{}, fmt.Errorf("repository contains no SKILL.md")
+	}
+	for i := range candidates {
+		candidates[i].Root = ""
+	}
+	refCopy := *ref
+	return GitPreview{Candidates: candidates, Ref: &refCopy, Resolved: resolved}, nil
+}
+
 func (s Service) PrepareGit(ctx context.Context, rawSource string, options GitAddOptions) (*Mutation, error) {
+	resolvedSource, err := ResolveAddSource(rawSource)
+	if err != nil {
+		return nil, errors.New(sanitizeGitDiagnostic(err.Error()))
+	}
+	if resolvedSource.Kind != AddSourceRemote {
+		return nil, fmt.Errorf("git add requires a remote source")
+	}
+	rawSource = resolvedSource.Source
+	if len(options.Skills) == 0 && options.Skill == "" {
+		options.Skills = append([]string(nil), resolvedSource.SuggestedSelections...)
+	}
 	if parsed, parseErr := url.Parse(strings.TrimSpace(rawSource)); parseErr == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.User != nil {
 		return nil, fmt.Errorf("HTTP git source must not contain embedded credentials")
 	}

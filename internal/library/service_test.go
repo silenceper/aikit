@@ -49,6 +49,104 @@ func TestDiscoverGitIncludesRootAndNestedSkills(t *testing.T) {
 	}
 }
 
+func TestPreviewGitDiscoversInTemporaryCheckoutWithoutPersistentWrites(t *testing.T) {
+	libraryRoot := filepath.Join(t.TempDir(), "library")
+	cacheRoot := filepath.Join(t.TempDir(), "cache")
+	runner := &fakeRunner{resolved: strings.Repeat("a", 40)}
+	runnerCustomWrite = func(dir string) {
+		writeTestFileForRunner(filepath.Join(dir, "skills", "one", "SKILL.md"), "---\nname: one\n---\none")
+		writeTestFileForRunner(filepath.Join(dir, "skills", "two", "SKILL.md"), "---\nname: two\n---\ntwo")
+	}
+	defer func() { runnerCustomWrite = nil }()
+
+	preview, err := (Service{LibraryRoot: libraryRoot, CacheRoot: cacheRoot, Runner: runner}).PreviewGit(
+		context.Background(), "https://github.com/acme/skills.git", "", nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(preview.Candidates) != 2 || preview.Candidates[0].Name != "one" || preview.Candidates[1].Name != "two" {
+		t.Fatalf("unexpected candidates: %#v", preview.Candidates)
+	}
+	if preview.Ref == nil || preview.Ref.Kind != "branch" || preview.Ref.Value != "main" || preview.Resolved != strings.Repeat("a", 40) {
+		t.Fatalf("unexpected ref/resolved: %#v", preview)
+	}
+	for _, candidate := range preview.Candidates {
+		if candidate.Root != "" {
+			t.Fatalf("temporary checkout leaked through candidate root: %#v", candidate)
+		}
+	}
+	for _, path := range []string{libraryRoot, cacheRoot} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("preview created persistent path %q: %v", path, err)
+		}
+	}
+	cloneDestination := runner.invocations[0][len(runner.invocations[0])-1]
+	if _, err := os.Stat(cloneDestination); !os.IsNotExist(err) {
+		t.Fatalf("temporary checkout was not removed: %q, %v", cloneDestination, err)
+	}
+}
+
+type cancelledPreviewRunner struct{ destination string }
+
+func (runner *cancelledPreviewRunner) Run(ctx context.Context, _ string, args ...string) (string, error) {
+	if len(args) > 0 && args[0] == "clone" {
+		runner.destination = args[len(args)-1]
+		if err := os.MkdirAll(runner.destination, 0o755); err != nil {
+			return "", err
+		}
+	}
+	return "", ctx.Err()
+}
+
+func TestPreviewGitCancellationRemovesTemporaryCheckout(t *testing.T) {
+	runner := &cancelledPreviewRunner{}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := (Service{Runner: runner}).PreviewGit(ctx, "https://github.com/acme/skills.git", "", nil)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("PreviewGit cancellation = %v", err)
+	}
+	if runner.destination == "" {
+		t.Fatal("runner was not reached")
+	}
+	if _, err := os.Stat(runner.destination); !os.IsNotExist(err) {
+		t.Fatalf("cancelled preview left temporary checkout %q: %v", runner.destination, err)
+	}
+}
+
+func TestPrepareGitSkillsSHSelectsPageSkillAndExplicitSelectionOverrides(t *testing.T) {
+	runnerCustomWrite = func(dir string) {
+		writeTestFileForRunner(filepath.Join(dir, "skills", "find-skills", "SKILL.md"), "---\nname: find-skills\n---\nfind")
+		writeTestFileForRunner(filepath.Join(dir, "skills", "other", "SKILL.md"), "---\nname: other\n---\nother")
+	}
+	defer func() { runnerCustomWrite = nil }()
+	for _, test := range []struct {
+		name       string
+		selections []string
+		want       string
+	}{
+		{name: "page suggestion", want: "find-skills"},
+		{name: "explicit override", selections: []string{"other"}, want: "other"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			runner := &fakeRunner{resolved: strings.Repeat("a", 40)}
+			service := Service{LibraryRoot: t.TempDir(), CacheRoot: t.TempDir(), Runner: runner}
+			mutation, err := service.PrepareGit(context.Background(), "https://skills.sh/vercel-labs/agent-skills/find-skills", GitAddOptions{Skills: test.selections})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer mutation.Abort()
+			if len(mutation.Skills) != 1 || mutation.Skills[0].Name != test.want {
+				t.Fatalf("prepared skills = %+v", mutation.Skills)
+			}
+			if !runner.sawArgument("https://github.com/vercel-labs/agent-skills.git") {
+				t.Fatalf("clone did not use resolved GitHub source: %+v", runner.invocations)
+			}
+		})
+	}
+}
+
 func TestDiscoverRejectsInvalidExplicitName(t *testing.T) {
 	root := t.TempDir()
 	writeTestFile(t, filepath.Join(root, "SKILL.md"), "---\nname: ../escape\n---\n", 0o644)

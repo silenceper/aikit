@@ -64,9 +64,16 @@ Add one or more skills from a Git repository:
 
 ```bash
 aikit add vercel-labs/agent-skills --skill code-review
+aikit add https://skills.sh/vercel-labs/agent-skills/find-skills
 aikit add https://gitlab.example.com/team/skills.git \
   --skill review --skill release
 ```
+
+An exact `skills.sh/<owner>/<repo>/<skill>` page selects that page's skill by
+default; an explicit repeatable `--skill` always overrides the suggestion.
+`owner/repo` shorthand is cloned from GitHub. Aikit resolves `skills.sh` URLs
+locally and clones the underlying GitHub repository directly; it does not run
+`npx` or depend on a marketplace API.
 
 Register a project, then enable a skill for one project agent:
 
@@ -104,6 +111,10 @@ to switch sections, `j`/`k` or the arrow keys to move, `Tab` to move between the
 list, details, and actions, `Enter` to activate, `/` to filter, `?` for help,
 and the mouse wheel or clickable rows and buttons for the same operations.
 Mutating actions show a preview and explicit confirmation before writing.
+For a remote **Library > Add source**, the first confirmation only permits a
+temporary Git checkout. The resulting skills are shown as a multi-select list;
+the second confirmation adds the selected candidates. Cancelling either step
+does not change config or the Library.
 
 Missing required arguments never open a TUI in CI or another non-TTY
 environment.

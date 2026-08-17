@@ -7,15 +7,23 @@ import (
 
 func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
-	if m.MutationBusy {
-		if key == "ctrl+c" || key == "q" {
-			m.Status = "Operation in progress; wait for completion"
-		}
-		return m, nil
-	}
 	if key == "ctrl+c" {
 		m.cancelInventory()
 		return m, tea.Quit
+	}
+	if m.MutationBusy {
+		if key == "ctrl+q" || key == "q" {
+			m.Status = "Operation in progress; wait for completion or use Ctrl+C for emergency exit"
+		}
+		return m, nil
+	}
+	if key == "ctrl+q" {
+		m.cancelInventory()
+		return m, tea.Quit
+	}
+	if key == "q" && m.Mode != ModeFilter && m.Mode != ModeInput {
+		m.Status = "Press Ctrl+Q to quit"
+		return m, nil
 	}
 	if m.Busy {
 		return m, nil
@@ -203,10 +211,9 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "enter":
 			return m.performPrimaryAction(m.ActionIndex)
 		case "esc":
-			if m.detailFocusVisible() {
-				m.Focus = FocusDetail
-			} else {
-				m.Focus = FocusList
+			m.Focus = FocusList
+			if m.Width < 60 {
+				m.Detail = false
 			}
 			return m, nil
 		}
@@ -267,7 +274,7 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.openUpdates()
 	case "a":
 		if m.ActiveView == ViewLibrary {
-			m.enterInput(inputState{Kind: inputAddSource, Prompt: "Source path or Git URL"})
+			m.enterInput(inputState{Kind: inputAddSource, Prompt: "Local path, owner/repo, Git URL, or skills.sh URL"})
 			m.Status = "Enter a local path or remote Git source"
 		}
 	case "n":
@@ -306,9 +313,6 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "esc":
 		return m.perform(uiCancel)
-	case "q":
-		m.cancelInventory()
-		return m, tea.Quit
 	}
 	return m, nil
 }
@@ -418,7 +422,13 @@ func (m Model) detailPageSize() int {
 }
 
 func (m *Model) moveDetailScroll(delta int) {
-	maximum := max(0, len(m.detailLines())-m.detailPageSize())
+	layout := ComputeLayout(m.Width, m.Height)
+	width := layout.List.Width
+	if !layout.Detail.Empty() {
+		width = layout.Detail.Width
+	}
+	pageSize := m.detailPageSize()
+	maximum := max(0, len(m.detailLinesForArea(width, pageSize))-pageSize)
 	m.DetailScroll = min(max(0, m.DetailScroll+delta), maximum)
 }
 

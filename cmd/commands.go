@@ -23,10 +23,14 @@ func newAddCommand(deps Dependencies) *cobra.Command {
 		if err != nil {
 			return err
 		}
+		source := args[0]
 		if len(skills) == 0 {
-			preview, previewErr := deps.Service.PreviewAdd(cmd.Context(), app.AddPreviewRequest{Source: args[0], SourcePath: sourcePath, Ref: ref})
+			preview, previewErr := deps.Service.PreviewAdd(cmd.Context(), app.AddPreviewRequest{Source: source, SourcePath: sourcePath, Ref: ref})
 			if previewErr != nil {
 				return previewErr
+			}
+			if preview.ResolvedSource != "" {
+				source = preview.ResolvedSource
 			}
 			if len(preview.Candidates) > 1 {
 				return fmt.Errorf("source contains multiple skills; use --skill to preserve this source selection")
@@ -37,9 +41,11 @@ func newAddCommand(deps Dependencies) *cobra.Command {
 					selection = preview.Candidates[0].Name
 				}
 				skills = []string{selection}
+			} else if len(preview.SuggestedSelections) > 0 {
+				skills = append([]string(nil), preview.SuggestedSelections...)
 			}
 		}
-		result, err := deps.Service.Add(cmd.Context(), app.AddRequest{Source: args[0], Skills: skills, SourcePath: sourcePath, Ref: ref, Force: force, Agent: agentName, Project: projectName})
+		result, err := deps.Service.Add(cmd.Context(), app.AddRequest{Source: source, Skills: skills, SourcePath: sourcePath, Ref: ref, Force: force, Agent: agentName, Project: projectName})
 		if err != nil {
 			return err
 		}

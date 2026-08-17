@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/silenceper/aikit/internal/app"
@@ -234,6 +235,12 @@ func (s *Service) discoverInventoryRoot(ctx context.Context, root scanRoot) ([]d
 	for _, entry := range entries {
 		if err := ctx.Err(); err != nil {
 			return nil, nil, nil, err
+		}
+		// Hidden entries under an agent skill root are agent metadata rather
+		// than standalone import candidates. In particular, recursively
+		// discovering Codex's .system bundle is both slow and misleading.
+		if strings.HasPrefix(entry.Name(), ".") {
+			continue
 		}
 		target := filepath.Join(root.path, entry.Name())
 		if err := revalidatePathIdentity(root.path, rootInfo, "inventory root"); err != nil {

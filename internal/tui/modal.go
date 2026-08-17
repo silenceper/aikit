@@ -72,10 +72,21 @@ func (m *Model) enterConfiguration() { m.enterModal(ModeConfiguration) }
 func (m *Model) enterMore() { m.enterModal(ModeMore) }
 
 func (m *Model) enterErrorDetail(value string) {
+	m.enterTextDetail("Error details", value)
+}
+
+func (m *Model) enterTextDetail(title, value string) {
 	parent := m.Mode
+	m.errorDetailReturn = confirmReturnState{
+		Valid: true, ActiveView: m.ActiveView, Mode: m.Mode, Focus: m.Focus,
+		Status:      m.Status,
+		ActionIndex: m.ActionIndex, Cursor: m.Cursor, Scroll: m.Scroll,
+		DetailScroll: m.DetailScroll, OverlayScroll: m.OverlayScroll,
+	}
 	m.enterModal(ModeErrorDetail)
 	m.errorDetailParent = parent
 	m.FullError = value
+	m.FullDetailTitle = firstNonEmpty(title, "Details")
 }
 
 // currentActions is the shared keyboard/mouse dispatcher registry. Modal

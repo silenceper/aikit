@@ -82,7 +82,7 @@ func (m Model) rows() []row {
 		if m.Scope.Level == "preset-skills" {
 			if preset, ok := findPreset(m.Snapshot.Config.Presets, m.Scope.Preset); ok {
 				for _, skill := range m.Snapshot.Config.Library.Skills {
-					enabled := contains(preset.Skills, skill.ID)
+					enabled := m.Selected[skill.ID]
 					rows = append(rows, row{Key: "preset:" + preset.Name + ":" + skill.ID, ID: skill.ID, Name: skill.Name, State: toggleState(enabled), Enabled: enabled, Severity: enabledSeverity(enabled)})
 				}
 			}
@@ -132,10 +132,14 @@ func (m Model) rows() []row {
 
 func (m Model) attentionRows() []row {
 	rows := make([]row, 0, len(m.Inventory.Items)+len(m.Snapshot.Status.Items)+len(m.Inventory.Issues))
+	inventoryTargets := m.inventoryTargetSet()
 	for _, operation := range m.Snapshot.Config.PendingOperations {
 		rows = append(rows, row{Key: "attention:recovery:" + operation.ID, ID: operation.ID, Name: "Recovery required", State: "Error", Detail: firstNonEmpty(operation.SkillID, operation.ID), Severity: rowSeverityRecovery, DestinationAction: ActionRecovery})
 	}
 	for _, item := range m.Snapshot.Status.Items {
+		if item.Path != "" && inventoryTargets[filepath.Clean(item.Path)] {
+			continue
+		}
 		severity := statusSeverity(item.Kind)
 		key := statusItemKey(item)
 		rows = append(rows, row{Key: "attention:" + key, ID: item.SkillID, Name: firstNonEmpty(item.Name, item.SkillID, humanState(string(item.Kind))), State: humanState(string(item.Kind)), Detail: firstNonEmpty(item.Message, "Review local status"), Severity: severity, DestinationView: ViewStatus, DestinationKey: key})
@@ -195,7 +199,7 @@ func (m Model) attentionRows() []row {
 		if !relevant {
 			continue
 		}
-		name := firstNonEmpty(item.Skill.Name, item.Discovered.Name, item.MatchedLibraryID, item.Key)
+		name := firstNonEmpty(item.Skill.Name, item.Discovered.Name, item.MatchedLibraryID, filepath.Base(item.Target), item.Key)
 		rows = append(rows, row{Key: "attention:inventory:" + item.Key, ID: item.Key, Name: name, State: humanState(string(state)), Detail: firstNonEmpty(humanAction(item.Action), "Review in Migration"), Severity: severity, DestinationView: ViewMigration, DestinationKey: item.Key})
 	}
 	sort.SliceStable(rows, func(i, j int) bool {
@@ -395,6 +399,16 @@ func (m Model) attentionCounts() attentionSummary {
 		}
 	}
 	return summary
+}
+
+func (m Model) inventoryTargetSet() map[string]bool {
+	targets := make(map[string]bool, len(m.Inventory.Items))
+	for _, item := range m.Inventory.Items {
+		if item.Target != "" {
+			targets[filepath.Clean(item.Target)] = true
+		}
+	}
+	return targets
 }
 
 func humanState(value string) string {

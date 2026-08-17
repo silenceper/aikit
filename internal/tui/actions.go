@@ -163,10 +163,11 @@ func (m Model) activate() (tea.Model, tea.Cmd) {
 		return m.choosePicker()
 	}
 	if m.Mode == ModeAddSelect {
-		if !m.Selected[current.selectionKey()] {
+		if len(m.selectedIDs()) == 0 {
 			m.Selected[current.selectionKey()] = true
 		}
 		m.pendingAdd.Skills = m.selectedIDs()
+		m.pendingAdd.ExpectedCandidates = m.selectedAddCandidates()
 		m.enterConfirm(ActionAdd)
 		m.Preview = app.MutationPreview{Title: "Add selected skills", Summary: fmt.Sprintf("Add %d selected skill(s) from %s", len(m.pendingAdd.Skills), m.pendingAdd.Source), RequiresConfirmation: true}
 		m.Status = "Review selected skills, then confirm"
@@ -351,11 +352,20 @@ func (m Model) cancel() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.Mode == ModeErrorDetail {
+		if state := m.errorDetailReturn; state.Valid {
+			m.ActiveView, m.Mode, m.Focus = state.ActiveView, state.Mode, state.Focus
+			m.Status = state.Status
+			m.ActionIndex, m.Cursor, m.Scroll = state.ActionIndex, state.Cursor, state.Scroll
+			m.DetailScroll, m.OverlayScroll = state.DetailScroll, state.OverlayScroll
+			m.FullError, m.FullDetailTitle, m.errorDetailParent = "", "", ""
+			m.errorDetailReturn = confirmReturnState{}
+			return m, nil
+		}
 		parent := m.errorDetailParent
 		if parent == "" || parent == ModeErrorDetail {
 			parent = ModeTable
 		}
-		m.Mode, m.FullError, m.errorDetailParent = parent, "", ""
+		m.Mode, m.FullError, m.FullDetailTitle, m.errorDetailParent = parent, "", "", ""
 		return m, nil
 	}
 	if m.Mode == ModeFilter {
@@ -403,8 +413,7 @@ func (m Model) cancel() (tea.Model, tea.Cmd) {
 		m.back()
 		return m, nil
 	}
-	m.cancelInventory()
-	return m, tea.Quit
+	return m, nil
 }
 
 func (m Model) confirmAction() (tea.Model, tea.Cmd) {
@@ -430,6 +439,13 @@ func (m Model) confirmAction() (tea.Model, tea.Cmd) {
 	case ActionSync:
 		m.Status = "Applying sync plan..."
 		return m, syncCmd(m.ctx, m.service, m.pendingSync)
+	case ActionDiscoverAdd:
+		m.MutationBusy = false
+		m.Status = "Discovering remote skills in a temporary checkout..."
+		return m, addPreviewCmd(m.ctx, m.service, app.AddPreviewRequest{
+			Source: m.pendingAdd.Source, SourcePath: m.pendingAdd.SourcePath,
+			Ref: m.pendingAdd.Ref, AllowNetwork: true,
+		})
 	case ActionAdd:
 		m.Status = "Adding selected skills..."
 		return m, addCmd(m.ctx, m.service, m.pendingAdd)
@@ -502,6 +518,19 @@ func (m Model) confirmAction() (tea.Model, tea.Cmd) {
 		m.Busy, m.MutationBusy = false, false
 	}
 	return m, nil
+}
+
+func (m Model) selectedAddCandidates() []app.ExpectedAddCandidate {
+	selected := make([]app.ExpectedAddCandidate, 0, len(m.Selected))
+	for _, candidate := range m.AddPreview.Candidates {
+		if !m.Selected[candidate.RelativePath] {
+			continue
+		}
+		selected = append(selected, app.ExpectedAddCandidate{
+			Name: candidate.Name, RelativePath: candidate.RelativePath, Hash: candidate.Hash,
+		})
+	}
+	return selected
 }
 
 func (m Model) confirmCurrent(action Action) (tea.Model, tea.Cmd) {

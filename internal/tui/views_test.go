@@ -21,7 +21,7 @@ func TestRenderFullAndNarrowLayoutsWithStableFooterAndErrors(t *testing.T) {
 	next, _ = m.Update(tea.WindowSizeMsg{Width: 38, Height: 12})
 	m = next.(Model)
 	narrow := m.ViewString()
-	if !strings.Contains(narrow, "aikit / Library") || !strings.Contains(narrow, "fetch failed") || !strings.Contains(narrow, "Enter Open") {
+	if !strings.Contains(narrow, "aikit / Library") || !strings.Contains(narrow, "fetch failed") || !strings.Contains(narrow, "Ctrl+Q Quit") {
 		t.Fatalf("narrow render lost navigation/footer/error:\n%s", narrow)
 	}
 }

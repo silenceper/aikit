@@ -62,19 +62,28 @@ type Snapshot struct {
 }
 
 type AddRequest struct {
-	Source     string
-	Skills     []string
-	SourcePath string
-	Ref        *config.Ref
-	Force      bool
-	Agent      string
-	Project    string
+	Source             string
+	Skills             []string
+	SourcePath         string
+	Ref                *config.Ref
+	ExpectedResolved   string
+	ExpectedCandidates []ExpectedAddCandidate
+	Force              bool
+	Agent              string
+	Project            string
 }
 
 type AddPreviewRequest struct {
-	Source     string
-	SourcePath string
-	Ref        *config.Ref
+	Source       string
+	SourcePath   string
+	Ref          *config.Ref
+	AllowNetwork bool
+}
+
+type ExpectedAddCandidate struct {
+	Name         string
+	RelativePath string
+	Hash         string
 }
 
 type Candidate struct {
@@ -85,9 +94,13 @@ type Candidate struct {
 }
 
 type AddPreview struct {
-	Candidates      []Candidate
-	Warnings        []string
-	NetworkRequired bool
+	Candidates          []Candidate
+	Warnings            []string
+	NetworkRequired     bool
+	ResolvedSource      string
+	SuggestedSelections []string
+	Ref                 *config.Ref
+	Resolved            string
 }
 
 type BindingRequest struct {

@@ -6,10 +6,80 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/silenceper/aikit/internal/library"
 )
+
+type previewRunner struct {
+	calls [][]string
+}
+
+func (runner *previewRunner) Run(_ context.Context, dir string, args ...string) (string, error) {
+	runner.calls = append(runner.calls, append([]string{dir}, args...))
+	switch args[0] {
+	case "clone":
+		return "", os.MkdirAll(args[len(args)-1], 0o755)
+	case "symbolic-ref":
+		return "main\n", nil
+	case "checkout":
+		for _, item := range []string{"find-skills", "other"} {
+			path := filepath.Join(dir, "skills", item)
+			if err := os.MkdirAll(path, 0o755); err != nil {
+				return "", err
+			}
+			if err := os.WriteFile(filepath.Join(path, "SKILL.md"), []byte("---\nname: "+item+"\n---\n"), 0o644); err != nil {
+				return "", err
+			}
+		}
+		return "", nil
+	case "rev-parse":
+		return strings.Repeat("a", 40) + "\n", nil
+	default:
+		return "", nil
+	}
+}
+
+func TestPreviewAddSkillsSHDefersNetworkThenReturnsCandidates(t *testing.T) {
+	runner := &previewRunner{}
+	libraryRoot, cacheRoot := filepath.Join(t.TempDir(), "library"), filepath.Join(t.TempDir(), "cache")
+	adapter := libraryAdapter{service: library.Service{LibraryRoot: libraryRoot, CacheRoot: cacheRoot, Runner: runner}}
+	source := "https://skills.sh/vercel-labs/agent-skills/find-skills"
+
+	offline, err := adapter.Preview(context.Background(), AddPreviewRequest{Source: source})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !offline.NetworkRequired || offline.ResolvedSource != "https://github.com/vercel-labs/agent-skills.git" || len(offline.SuggestedSelections) != 1 || offline.SuggestedSelections[0] != "find-skills" || len(runner.calls) != 0 {
+		t.Fatalf("offline preview = %+v, runner calls=%d", offline, len(runner.calls))
+	}
+
+	online, err := adapter.Preview(context.Background(), AddPreviewRequest{Source: source, AllowNetwork: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if online.NetworkRequired || len(online.Candidates) != 2 || online.Ref == nil || online.Resolved != strings.Repeat("a", 40) {
+		t.Fatalf("online preview = %+v", online)
+	}
+	if online.ResolvedSource != offline.ResolvedSource || len(online.SuggestedSelections) != 1 || online.SuggestedSelections[0] != "find-skills" {
+		t.Fatalf("online source/suggestion changed: %+v", online)
+	}
+	for _, path := range []string{libraryRoot, cacheRoot} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("network preview wrote persistent path %q: %v", path, err)
+		}
+	}
+	stale, err := adapter.Preview(context.Background(), AddPreviewRequest{
+		Source: "https://skills.sh/vercel-labs/agent-skills/missing", AllowNetwork: true,
+	})
+	if err != nil {
+		t.Fatalf("stale skills.sh suggestion should degrade to candidate selection: %v", err)
+	}
+	if len(stale.Candidates) != 2 || len(stale.SuggestedSelections) != 0 || len(stale.Warnings) != 1 || !strings.Contains(stale.Warnings[0], "missing") {
+		t.Fatalf("stale skills.sh preview = %+v", stale)
+	}
+}
 
 type classificationRunner struct{ calls int }
 

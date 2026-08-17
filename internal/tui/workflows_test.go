@@ -1,9 +1,12 @@
 package tui
 
 import (
+	"context"
+	"reflect"
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/silenceper/aikit/internal/app"
 	"github.com/silenceper/aikit/internal/link"
 	"github.com/silenceper/aikit/internal/status"
@@ -28,10 +31,99 @@ func TestLibraryDetailLoadsTypedContentAsynchronously(t *testing.T) {
 	if service.detailCalls != 1 {
 		t.Fatalf("SkillDetail calls=%d, want 1", service.detailCalls)
 	}
-	for _, wanted := range []string{"https://example.test/acme.git", "codex", "SKILL.md", "Library detail body", "scripts/run.sh"} {
+	for _, wanted := range []string{"https://example.test/acme.git", "codex", "SKILL.md", "Library detail body", "+1 files"} {
 		if !strings.Contains(m.ViewString(), wanted) {
 			t.Fatalf("loaded detail missing %q:\n%s", wanted, m.ViewString())
 		}
+	}
+}
+
+func TestSkillContentOpensBoundedOverlayAndRestoresLibraryDetail(t *testing.T) {
+	m := NewModel(context.Background(), &fakeService{}, &fakeMigration{}, ViewLibrary, ActionNone)
+	m.Snapshot, m.Width, m.Height = testSnapshot(), 80, 12
+	m.Detail, m.Focus, m.SkillDetail = true, FocusActions, largeSkillDetail()
+	m.Cursor, m.Scroll, m.DetailScroll = 0, 0, 2
+	m.Status = "original library status"
+
+	actions := m.primaryActions()
+	if len(actions) == 0 || actions[0] != "View SKILL.md" {
+		t.Fatalf("loaded detail actions=%v", actions)
+	}
+	next, cmd := m.performPrimaryAction(0)
+	if cmd != nil {
+		t.Fatal("viewing already-loaded content returned a command")
+	}
+	m = next.(Model)
+	if m.Mode != ModeErrorDetail || !strings.Contains(stripANSI(m.ViewString()), "SKILL.md · alpha") {
+		t.Fatalf("skill content overlay not opened: mode=%s\n%s", m.Mode, m.ViewString())
+	}
+	sawLastLine, sawTruncation := false, false
+	for index := 0; index < 1000; index++ {
+		view := stripANSI(m.ViewString())
+		sawLastLine = sawLastLine || strings.Contains(view, "source-line-219")
+		sawTruncation = sawTruncation || strings.Contains(view, "preview truncated at 64 KiB")
+		m.moveOverlayScroll(1)
+	}
+	end := stripANSI(m.ViewString())
+	if !sawLastLine || !sawTruncation {
+		t.Fatalf("final loaded content/truncation marker unreachable at scroll=%d:\n%s", m.OverlayScroll, end)
+	}
+	next, cmd = m.performPrimaryAction(0)
+	if cmd != nil {
+		t.Fatal("closing content overlay returned a command")
+	}
+	m = next.(Model)
+	if m.Mode != ModeTable || !m.Detail || m.Cursor != 0 || m.DetailScroll != 2 || m.Status != "original library status" {
+		t.Fatalf("content close lost detail context: mode=%s detail=%v cursor=%d scroll=%d status=%q", m.Mode, m.Detail, m.Cursor, m.DetailScroll, m.Status)
+	}
+}
+
+func TestSkillContentMouseUsesSameActionAsKeyboard(t *testing.T) {
+	base := NewModel(context.Background(), &fakeService{}, &fakeMigration{}, ViewLibrary, ActionNone)
+	base.Snapshot, base.Width, base.Height = testSnapshot(), 100, 20
+	base.Detail, base.Focus, base.SkillDetail = true, FocusActions, largeSkillDetail()
+	regions := base.hitRegions()
+	if len(regions.Actions) == 0 {
+		t.Fatal("loaded detail has no mouse action")
+	}
+	mouseNext, mouseCmd := base.Update(click(regions.Actions[0].X, regions.Actions[0].Y))
+	keyNext, keyCmd := base.Update(actionKey(tea.KeyEnter))
+	mouse, keyboard := mouseNext.(Model), keyNext.(Model)
+	if mouseCmd != nil || keyCmd != nil || mouse.Mode != ModeErrorDetail || keyboard.Mode != ModeErrorDetail || mouse.FullError != keyboard.FullError {
+		t.Fatalf("skill content parity mouse=%s keyboard=%s mouseCmd=%v keyCmd=%v", mouse.Mode, keyboard.Mode, mouseCmd != nil, keyCmd != nil)
+	}
+}
+
+func TestSkillContentMouseScrollAndCloseRestoresExactState(t *testing.T) {
+	base := NewModel(context.Background(), &fakeService{}, &fakeMigration{}, ViewLibrary, ActionNone)
+	base.Snapshot, base.Width, base.Height = testSnapshot(), 80, 12
+	base.Detail, base.Focus, base.SkillDetail = true, FocusActions, largeSkillDetail()
+	base.ActionIndex, base.Cursor, base.Scroll, base.DetailScroll = 0, 0, 0, 2
+	base.Status = "ready"
+
+	regions := base.hitRegions()
+	opened, cmd := base.Update(click(regions.Actions[0].X, regions.Actions[0].Y))
+	if cmd != nil {
+		t.Fatal("mouse open returned a command")
+	}
+	m := opened.(Model)
+	before := m.OverlayScroll
+	scrolled, cmd := m.Update(tea.MouseMsg{X: m.Width / 2, Y: m.Height / 2, Button: tea.MouseButtonWheelDown, Action: tea.MouseActionPress})
+	if cmd != nil {
+		t.Fatal("mouse wheel returned a command")
+	}
+	m = scrolled.(Model)
+	if m.OverlayScroll <= before {
+		t.Fatalf("mouse wheel did not scroll content: before=%d after=%d", before, m.OverlayScroll)
+	}
+	closeRegion := m.hitRegions().Actions[0]
+	closed, cmd := m.Update(click(closeRegion.X, closeRegion.Y))
+	if cmd != nil {
+		t.Fatal("mouse close returned a command")
+	}
+	m = closed.(Model)
+	if m.Mode != ModeTable || m.Focus != FocusActions || m.ActionIndex != 0 || m.DetailScroll != 2 || m.Status != "ready" {
+		t.Fatalf("mouse close did not restore state: mode=%s focus=%s action=%d detailScroll=%d status=%q", m.Mode, m.Focus, m.ActionIndex, m.DetailScroll, m.Status)
 	}
 }
 
@@ -180,10 +272,26 @@ func TestLibraryAddLocalPreviewSelectConfirmAndRemoteNetworkGate(t *testing.T) {
 		t.Fatalf("local add request=%+v", local.lastAdd)
 	}
 
-	remote := &fakeService{snapshot: testSnapshot(), addPreview: app.AddPreview{NetworkRequired: true}}
+	remote := &fakeService{snapshot: testSnapshot()}
+	remote.addPreviewFunc = func(request app.AddPreviewRequest) app.AddPreview {
+		if !request.AllowNetwork {
+			return app.AddPreview{
+				NetworkRequired: true, ResolvedSource: "https://github.com/vercel-labs/agent-skills.git",
+				SuggestedSelections: []string{"find-skills"}, Warnings: []string{"network required"},
+			}
+		}
+		return app.AddPreview{
+			ResolvedSource:      "https://github.com/vercel-labs/agent-skills.git",
+			SuggestedSelections: []string{"find-skills"}, Ref: &config.Ref{Kind: "branch", Value: "main"},
+			Resolved: strings.Repeat("a", 40), Candidates: []app.Candidate{
+				{Name: "other", RelativePath: "skills/other", Hash: "other-hash"},
+				{Name: "find-skills", RelativePath: "skills/find-skills", Hash: "find-hash"},
+			},
+		}
+	}
 	m = loadedModel(t, remote, &fakeMigration{})
 	m, _ = apply(m, "a")
-	for _, char := range "https://example.test/remote.git" {
+	for _, char := range "https://skills.sh/vercel-labs/agent-skills/find-skills" {
 		m, _ = apply(m, string(char))
 	}
 	m, preview = apply(m, "enter")
@@ -192,10 +300,63 @@ func TestLibraryAddLocalPreviewSelectConfirmAndRemoteNetworkGate(t *testing.T) {
 	if m.Mode != ModeConfirm || remote.addCalls != 0 || !strings.Contains(m.ViewString(), "network") {
 		t.Fatalf("remote source skipped network gate: mode=%s calls=%d\n%s", m.Mode, remote.addCalls, m.ViewString())
 	}
+	cancelled, cancelCmd := apply(m, "esc")
+	if cancelCmd != nil || remote.addCalls != 0 || cancelled.Mode == ModeConfirm {
+		t.Fatalf("network gate cancel mutated: cmd=%v calls=%d mode=%s", cancelCmd != nil, remote.addCalls, cancelled.Mode)
+	}
+	regions := m.hitRegions()
+	if regions.Confirm.Empty() {
+		t.Fatal("network confirmation has no mouse hit region")
+	}
+	next, discover := m.Update(click(regions.Confirm.X, regions.Confirm.Y))
+	m = next.(Model)
+	if discover == nil || remote.addCalls != 0 {
+		t.Fatalf("network confirmation did not defer mutation: cmd=%v calls=%d", discover != nil, remote.addCalls)
+	}
+	next, _ = m.Update(discover())
+	m = next.(Model)
+	if !remote.lastPreviewAdd.AllowNetwork || m.Mode != ModeAddSelect || !m.Selected["skills/find-skills"] || m.Selected["skills/other"] {
+		t.Fatalf("remote discovery request=%+v mode=%s selected=%v", remote.lastPreviewAdd, m.Mode, m.Selected)
+	}
+	m, _ = apply(m, "enter")
+	if m.Mode != ModeConfirm {
+		t.Fatalf("remote selection did not reach final confirmation: %s", m.Mode)
+	}
 	m, add = apply(m, "enter")
 	_ = add()
-	if remote.addCalls != 1 || remote.lastAdd.Source != "https://example.test/remote.git" {
+	if remote.addCalls != 1 || remote.lastAdd.Source != "https://github.com/vercel-labs/agent-skills.git" || len(remote.lastAdd.Skills) != 1 || remote.lastAdd.Skills[0] != "skills/find-skills" {
 		t.Fatalf("remote add request=%+v calls=%d", remote.lastAdd, remote.addCalls)
+	}
+	if remote.lastAdd.ExpectedResolved != strings.Repeat("a", 40) || len(remote.lastAdd.ExpectedCandidates) != 1 || remote.lastAdd.ExpectedCandidates[0].Hash != "find-hash" {
+		t.Fatalf("remote confirmation token=%+v", remote.lastAdd)
+	}
+}
+
+func TestRemoteAddShowsStaleSkillsShSuggestionWarningWithCurrentCandidates(t *testing.T) {
+	service := &fakeService{snapshot: testSnapshot()}
+	service.addPreviewFunc = func(request app.AddPreviewRequest) app.AddPreview {
+		if !request.AllowNetwork {
+			return app.AddPreview{NetworkRequired: true, ResolvedSource: "https://github.com/vercel-labs/agent-skills.git"}
+		}
+		return app.AddPreview{
+			ResolvedSource: "https://github.com/vercel-labs/agent-skills.git",
+			Candidates:     []app.Candidate{{Name: "current-skill", RelativePath: "skills/current-skill"}},
+			Warnings:       []string{"skills.sh suggested skill find-skills is no longer present in the repository; choose from the current candidates"},
+		}
+	}
+	m := loadedModel(t, service, &fakeMigration{})
+	m, _ = apply(m, "a")
+	for _, char := range "https://skills.sh/vercel-labs/agent-skills/find-skills" {
+		m, _ = apply(m, string(char))
+	}
+	m, preview := apply(m, "enter")
+	next, _ := m.Update(preview())
+	m = next.(Model)
+	m, discover := apply(m, "enter")
+	next, _ = m.Update(discover())
+	m = next.(Model)
+	if m.Mode != ModeAddSelect || !strings.Contains(m.Status, "find-skills") || !strings.Contains(m.Status, "no longer present") {
+		t.Fatalf("stale skills.sh warning hidden: mode=%s status=%q", m.Mode, m.Status)
 	}
 }
 
@@ -245,6 +406,62 @@ func TestPresetCreateAndMemberEditUseConfirmedTypedMutation(t *testing.T) {
 	_ = save()
 	if service.mutatePresetCalls != 1 || service.lastPresetMutation.Operation != app.PresetEditMembers || len(service.lastPresetMutation.Skills) != 2 {
 		t.Fatalf("member mutation=%+v", service.lastPresetMutation)
+	}
+}
+
+func TestPresetMembersCanBeChangedWithMouseAndSaved(t *testing.T) {
+	service := &fakeService{
+		snapshot:              testSnapshot(),
+		presetMutationPreview: app.MutationPreview{Title: "Edit preset members", Summary: "Update review"},
+	}
+	m := loadedModel(t, service, &fakeMigration{})
+	m.Width, m.Height = 100, 24
+	m.switchView(ViewPresets)
+	m, _ = apply(m, "enter")
+
+	regions := m.hitRegions()
+	if len(regions.Rows) != 2 || len(regions.Checkboxes) != 2 {
+		t.Fatalf("preset member hit regions rows=%d checkboxes=%d, want 2 each", len(regions.Rows), len(regions.Checkboxes))
+	}
+
+	// Clicking the member row itself is equivalent to Space in this checklist.
+	betaRow := regions.Rows[1]
+	next, _ := m.Update(tea.MouseMsg{X: betaRow.X + betaRow.Width - 1, Y: betaRow.Y, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	m = next.(Model)
+	if !m.Selected["acme/beta"] {
+		t.Fatal("clicking beta member did not select it")
+	}
+
+	// The checkbox remains an explicit hit target and can remove an existing member.
+	regions = m.hitRegions()
+	alphaCheckbox := regions.Checkboxes[0]
+	next, _ = m.Update(tea.MouseMsg{X: alphaCheckbox.X, Y: alphaCheckbox.Y, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	m = next.(Model)
+	if m.Selected["acme/alpha"] {
+		t.Fatal("clicking alpha checkbox did not remove it")
+	}
+
+	m, preview := mouseActionByLabel(t, m, "Save")
+	if preview == nil {
+		t.Fatal("Save did not defer the preset preview")
+	}
+	_ = preview()
+	want := []string{"acme/beta"}
+	if !reflect.DeepEqual(service.lastPresetMutationPreview.Skills, want) {
+		t.Fatalf("preview skills=%v, want %v", service.lastPresetMutationPreview.Skills, want)
+	}
+}
+
+func TestPresetMemberSelectionSurvivesSuccessfulSaveUntilSnapshot(t *testing.T) {
+	m := Model{
+		ActiveView: ViewPresets,
+		Scope:      Scope{Preset: "review", Level: "preset-skills"},
+		Selected:   map[string]bool{"acme/beta": true},
+	}
+	next, _ := m.Update(operationMsg{name: "preset"})
+	got := next.(Model)
+	if !got.Selected["acme/beta"] {
+		t.Fatal("successful preset save cleared the edited members before the refreshed snapshot arrived")
 	}
 }
 

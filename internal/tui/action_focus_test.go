@@ -78,12 +78,8 @@ func TestActionFocusTabLeftRightEnterAndEsc(t *testing.T) {
 	}
 	next, _ = m.Update(actionKey(tea.KeyEsc))
 	m = next.(Model)
-	wantFocus := FocusList
-	if !ComputeLayout(m.Width, m.Height).Detail.Empty() {
-		wantFocus = FocusDetail
-	}
-	if m.Focus != wantFocus {
-		t.Fatalf("Esc focus=%s, want %s", m.Focus, wantFocus)
+	if m.Focus != FocusList {
+		t.Fatalf("Esc focus=%s, want list", m.Focus)
 	}
 }
 

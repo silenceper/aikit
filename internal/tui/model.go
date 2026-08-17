@@ -38,6 +38,7 @@ const (
 	ActionScan              Action = "adopt"
 	ActionBinding           Action = "binding"
 	ActionAdd               Action = "add source"
+	ActionDiscoverAdd       Action = "discover remote source"
 	ActionPreset            Action = "preset"
 	ActionForcePresetDelete Action = "force delete preset"
 	ActionBatch             Action = "batch"
@@ -189,6 +190,7 @@ type confirmReturnState struct {
 	ActiveView    View
 	Mode          Mode
 	Focus         Focus
+	Status        string
 	ActionIndex   int
 	Cursor        int
 	Scroll        int
@@ -215,6 +217,7 @@ type Model struct {
 	DetailScroll        int
 	OverlayScroll       int
 	errorDetailParent   Mode
+	errorDetailReturn   confirmReturnState
 	Filter              string
 	FilterDraft         string
 	LibraryStateFilter  LibraryStateFilter
@@ -247,6 +250,7 @@ type Model struct {
 	RecoveryPreview     app.RecoveryPreview
 	RecoveryResult      app.RecoveryResult
 	FullError           string
+	FullDetailTitle     string
 	UpdateWarnings      []string
 	UpdateFailures      []updatecheck.Result
 	Input               inputState
@@ -433,7 +437,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.Status = "Review the exact sync plan, then confirm"
 		return m, nil
 	case addPreviewMsg:
-		m.Busy = false
+		m.Busy, m.MutationBusy = false, false
 		if msg.err != nil {
 			m.Err, m.Status = msg.err.Error(), "Add source preview failed"
 			return m, nil
@@ -442,16 +446,33 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.Selected = make(map[string]bool)
 		m.Cursor, m.Scroll = 0, 0
 		if msg.preview.NetworkRequired {
-			m.enterConfirm(ActionAdd)
+			m.enterConfirm(ActionDiscoverAdd)
 			m.Preview = app.MutationPreview{
-				Title: "Add remote source", Summary: "Remote discovery needs network access before adding this source.",
+				Title: "Discover remote source", Summary: "Clone this repository into a temporary directory and list its skills. This does not change the Library.",
 				Warnings: append([]string(nil), msg.preview.Warnings...), RequiresConfirmation: true,
 			}
 			m.Status = "Confirm network-enabled add"
 			return m, nil
 		}
+		if msg.preview.ResolvedSource != "" {
+			m.pendingAdd.Source = msg.preview.ResolvedSource
+		}
+		m.pendingAdd.Ref = msg.preview.Ref
+		m.pendingAdd.ExpectedResolved = msg.preview.Resolved
+		for _, suggestion := range msg.preview.SuggestedSelections {
+			for _, candidate := range msg.preview.Candidates {
+				if candidate.Name == suggestion || candidate.RelativePath == suggestion {
+					m.Selected[candidate.RelativePath] = true
+				}
+			}
+		}
+		m.confirm = ActionNone
+		m.confirmReturn = confirmReturnState{}
 		m.Mode = ModeAddSelect
 		m.Status = fmt.Sprintf("Select from %d discovered skill(s)", len(msg.preview.Candidates))
+		if len(msg.preview.Warnings) > 0 {
+			m.Status += " · Warning: " + msg.preview.Warnings[0]
+		}
 		return m, nil
 	case compareMsg:
 		m.Busy = false
@@ -623,7 +644,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.AddPreview = app.AddPreview{}
 		m.Input = inputState{}
 		m.forceAcknowledged = false
-		m.Selected = make(map[string]bool)
+		if msg.name != "preset" || m.ActiveView != ViewPresets || m.Scope.Level != "preset-skills" {
+			m.Selected = make(map[string]bool)
+		}
 		return m, snapshotCmd(m.ctx, m.service)
 	case batchOperationMsg:
 		m.Busy, m.MutationBusy = false, false

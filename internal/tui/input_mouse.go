@@ -242,6 +242,12 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			if activatePicker {
 				return m.choosePicker()
 			}
+			if m.ActiveView == ViewLibrary {
+				return m.perform(uiToggle)
+			}
+			if m.ActiveView == ViewPresets && m.Scope.Level == "preset-skills" {
+				return m.perform(uiToggle)
+			}
 			return m, nil
 		}
 	}
@@ -299,6 +305,18 @@ func (m Model) performPrimaryAction(index int) (tea.Model, tea.Cmd) {
 	case "Show paths":
 		m.enterErrorDetail("Config: " + m.Config.Config + "\nLibrary: " + m.Config.Library + "\nCache: " + m.Config.Cache)
 		m.Status = "Configuration paths shown; no clipboard operation was performed"
+		return m, nil
+	case "View SKILL.md":
+		if m.SkillDetail.SkillMD == "" {
+			m.Err = "SKILL.md content is not loaded"
+			return m, nil
+		}
+		content := m.SkillDetail.SkillMD
+		if m.SkillDetail.SkillMDTruncated {
+			content += "\n\n(preview truncated at 64 KiB)"
+		}
+		m.enterTextDetail("SKILL.md · "+m.SkillDetail.Skill.Name, content)
+		m.Status = "Viewing the loaded SKILL.md preview"
 		return m, nil
 	case "State filter":
 		switch m.LibraryStateFilter {
@@ -394,7 +412,7 @@ func (m Model) performPrimaryAction(index int) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "Add source":
-		m.enterInput(inputState{Kind: inputAddSource, Prompt: "Source path or Git URL"})
+		m.enterInput(inputState{Kind: inputAddSource, Prompt: "Local path, owner/repo, Git URL, or skills.sh URL"})
 		m.Status = "Enter a local path or remote Git source"
 		return m, nil
 	case "Create project":

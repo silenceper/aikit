@@ -42,6 +42,7 @@ type fakeService struct {
 	previewAddCalls            int
 	lastPreviewAdd             app.AddPreviewRequest
 	addPreview                 app.AddPreview
+	addPreviewFunc             func(app.AddPreviewRequest) app.AddPreview
 	addCalls                   int
 	lastAdd                    app.AddRequest
 	detailCalls                int
@@ -120,6 +121,9 @@ func (f *fakeService) PreviewBatch(_ context.Context, request app.BatchRequest) 
 func (f *fakeService) PreviewAdd(_ context.Context, request app.AddPreviewRequest) (app.AddPreview, error) {
 	f.previewAddCalls++
 	f.lastPreviewAdd = request
+	if f.addPreviewFunc != nil {
+		return f.addPreviewFunc(request), nil
+	}
 	return f.addPreview, nil
 }
 
@@ -329,6 +333,10 @@ func key(value string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyEsc}
 	case "space":
 		return tea.KeyMsg{Type: tea.KeySpace}
+	case "ctrl+c":
+		return tea.KeyMsg{Type: tea.KeyCtrlC}
+	case "ctrl+q":
+		return tea.KeyMsg{Type: tea.KeyCtrlQ}
 	default:
 		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(value)}
 	}

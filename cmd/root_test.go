@@ -212,6 +212,39 @@ func TestAddSingleRootCandidateSelectsByName(t *testing.T) {
 	}
 }
 
+func TestAddSkillsSHUsesSuggestedSkillAndExplicitSelectionOverrides(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		extra   []string
+		want    string
+		preview app.AddPreview
+	}{
+		{
+			name: "page suggestion", want: "find-skills",
+			preview: app.AddPreview{NetworkRequired: true, ResolvedSource: "https://github.com/vercel-labs/agent-skills.git", SuggestedSelections: []string{"find-skills"}},
+		},
+		{name: "explicit override", extra: []string{"--skill", "other"}, want: "other"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			service := &fakeService{preview: test.preview}
+			root := NewRoot(Dependencies{Service: service, IsTTY: func() bool { return false }})
+			root.SetOut(&bytes.Buffer{})
+			root.SetErr(&bytes.Buffer{})
+			args := append([]string{"add", "https://skills.sh/vercel-labs/agent-skills/find-skills"}, test.extra...)
+			root.SetArgs(args)
+			if err := root.Execute(); err != nil {
+				t.Fatal(err)
+			}
+			if len(service.lastAdd.Skills) != 1 || service.lastAdd.Skills[0] != test.want {
+				t.Fatalf("add request = %+v", service.lastAdd)
+			}
+			if len(test.extra) == 0 && service.lastAdd.Source != "https://github.com/vercel-labs/agent-skills.git" {
+				t.Fatalf("skills.sh source was not resolved: %+v", service.lastAdd)
+			}
+		})
+	}
+}
+
 func TestScanAndMigrateTextOutputIncludesActionableIssues(t *testing.T) {
 	for _, test := range []struct {
 		name string

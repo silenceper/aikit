@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/silenceper/aikit/internal/agent"
 	"github.com/silenceper/aikit/internal/link"
@@ -197,6 +198,11 @@ func inspectTarget(r *Report, s config.Scope, dir string, desired map[string]con
 	}
 	for _, entry := range entries {
 		if _, expected := desired[entry.Name()]; expected {
+			continue
+		}
+		// Agent-owned hidden directories (for example Codex's .system bundle)
+		// are implementation metadata, not user-installable skill entries.
+		if strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
 		path := filepath.Join(dir, entry.Name())

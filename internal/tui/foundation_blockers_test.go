@@ -89,16 +89,19 @@ func TestCheckboxRegionsExistOnlyWhenSelectionIsRendered(t *testing.T) {
 	}
 }
 
-func TestMutationBusyRejectsQuitAndStillHandlesResult(t *testing.T) {
+func TestMutationBusyRejectsNormalQuitAllowsEmergencyAndStillHandlesResult(t *testing.T) {
 	m := NewModel(context.Background(), &fakeService{}, &fakeMigration{}, ViewLibrary, ActionNone)
 	m.Snapshot = testSnapshot()
 	m.MutationBusy = true
 	m.Busy = true
-	for _, input := range []string{"ctrl+c", "q"} {
+	for _, input := range []string{"ctrl+q", "q"} {
 		next, cmd := apply(m, input)
 		if isQuit(cmd) || !next.MutationBusy || !strings.Contains(strings.ToLower(next.Status), "operation in progress") {
 			t.Fatalf("mutation busy accepted %q: quit=%v mutationBusy=%v status=%q", input, isQuit(cmd), next.MutationBusy, next.Status)
 		}
+	}
+	if _, cmd := apply(m, "ctrl+c"); !isQuit(cmd) {
+		t.Fatal("mutation busy rejected emergency ctrl+c")
 	}
 
 	next, refresh := m.Update(operationMsg{name: "update"})

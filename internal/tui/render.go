@@ -132,8 +132,8 @@ func (m Model) renderMain(layout Layout) []string {
 	if layout.Detail.Empty() {
 		if m.Detail {
 			lines := []string{activeStyle.Render(m.detailTitle())}
-			detail := m.detailLines()
 			limit := max(0, layout.List.Height-2)
+			detail := m.detailLinesForArea(layout.List.Width, limit)
 			start := min(max(0, m.DetailScroll), max(0, len(detail)-limit))
 			end := min(len(detail), start+limit)
 			lines = append(lines, detail[start:end]...)
@@ -148,8 +148,8 @@ func (m Model) renderMain(layout Layout) []string {
 		geometry := m.visibleRowsLayout(layout)
 		lines := []string{mutedStyle.Render(rangeTitle(m.collectionTitle(), geometry.Start, geometry.End, len(rows)))}
 		if m.hasPinnedDetail() {
-			detail := m.detailLines()
 			limit := max(0, layout.List.Height-2)
+			detail := m.detailLinesForArea(layout.List.Width, limit)
 			if len(detail) > limit {
 				detail = detail[:limit]
 			}
@@ -180,7 +180,7 @@ func (m Model) renderMain(layout Layout) []string {
 	start, end := VisibleRange(len(rows), m.Cursor, m.Scroll, capacity)
 	listWidth, detailWidth := layout.List.Width, layout.Detail.Width
 	lines := []string{joinColumns(mutedStyle.Render(rangeTitle(m.collectionTitle(), start, end, len(rows))), activeStyle.Render(m.detailTitle()), listWidth, detailWidth)}
-	detail := m.detailLines()
+	detail := m.detailLinesForArea(detailWidth, max(0, capacity-1))
 	for i := 0; i < capacity; i++ {
 		left := ""
 		if start+i < end {
@@ -195,8 +195,8 @@ func (m Model) renderMain(layout Layout) []string {
 		right := ""
 		if i == capacity-1 && len(m.primaryActions()) > 0 {
 			right = m.renderActionBar(detailWidth)
-		} else if i < len(detail) {
-			right = detail[i]
+		} else if detailIndex := m.DetailScroll + i; detailIndex < len(detail) {
+			right = detail[detailIndex]
 		}
 		lines = append(lines, joinColumns(left, right, listWidth, detailWidth))
 	}
@@ -280,7 +280,7 @@ func (m Model) renderRowLines(current row, active bool, width int) []string {
 	mark := "  "
 	if m.selectionRendered() {
 		mark = "  [ ] "
-		if m.Selected[current.selectionKey()] {
+		if m.rowSelected(current) {
 			mark = "  [x] "
 		}
 	}
@@ -305,6 +305,7 @@ func (m Model) renderRowLines(current row, active bool, width int) []string {
 		line = clip(line, width)
 	}
 	context := m.rowContext(current)
+	context = strings.Join(strings.Fields(context), " ")
 	indent := "    "
 	if m.selectionRendered() {
 		indent = "      "
@@ -355,8 +356,7 @@ func (m Model) rowContext(current row) string {
 
 func (m Model) detailLines() []string {
 	if m.ActiveView == ViewOverview {
-		summary := m.attentionCounts()
-		lines := []string{fmt.Sprintf("Workspace needs attention: %d", summary.migration+summary.status+summary.updates), "Startup scans local paths only."}
+		lines := []string{fmt.Sprintf("Workspace needs attention: %d", len(m.attentionRows())), "Startup scans local paths only."}
 		for _, issue := range m.Inventory.Issues {
 			lines = append(lines, "Issue: "+issue.Message)
 			if len(lines) >= 4 {
@@ -513,6 +513,131 @@ func (m Model) detailLines() []string {
 		}
 	}
 	return lines
+}
+
+func (m Model) detailLinesForWidth(width int) []string {
+	width = max(1, width)
+	lines := m.detailLines()
+	wrapped := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if !strings.ContainsAny(line, "\r\n") && lipgloss.Width(line) <= width {
+			wrapped = append(wrapped, line)
+			continue
+		}
+		wrapped = append(wrapped, wrapText(stripANSI(line), width)...)
+	}
+	return wrapped
+}
+
+func (m Model) detailLinesForArea(width, budget int) []string {
+	rows := m.rows()
+	if m.ActiveView == ViewLibrary && m.Detail && m.Cursor >= 0 && m.Cursor < len(rows) && m.SkillDetail.Skill.ID == rows[m.Cursor].ID {
+		contentBudget := budget
+		if m.Err != "" && budget >= 2 {
+			contentBudget -= 2
+		}
+		lines := compactSkillDetailLines(m.SkillDetail, width, contentBudget)
+		if m.Err != "" && budget >= 2 {
+			lines = append(lines, clip(activeStyle.Render("Diagnostics"), width), clip(m.Err, width))
+		}
+		return lines
+	}
+	return m.detailLinesForWidth(width)
+}
+
+func compactSkillDetailLines(detail app.SkillDetail, width, budget int) []string {
+	if budget <= 0 {
+		return nil
+	}
+	width = max(1, width)
+	line := func(value string) string { return clip(value, width) }
+	summaryLines := []string{
+		line(activeStyle.Render("Summary")),
+		line(detail.Skill.Name),
+		line("Source: " + firstNonEmpty(detail.Skill.Source, "local")),
+	}
+	if detail.Skill.Ref != nil {
+		summaryLines = append(summaryLines, line("Ref: "+detail.Skill.Ref.Kind+":"+detail.Skill.Ref.Value))
+	}
+	lines := append([]string(nil), summaryLines...)
+	if len(detail.EnabledLocations) > 0 {
+		lines = append(lines, line(activeStyle.Render("Usage")))
+		location := "Global / " + firstNonEmpty(detail.EnabledLocations[0].Agent, "common")
+		if detail.EnabledLocations[0].Project != "" {
+			location = "Project / " + detail.EnabledLocations[0].Project + " / " + firstNonEmpty(detail.EnabledLocations[0].Agent, "common")
+		}
+		lines = append(lines, line("Enabled: "+location))
+		if omitted := len(detail.EnabledLocations) - 1; omitted > 0 {
+			lines = append(lines, line(fmt.Sprintf("… +%d locations", omitted)))
+		}
+	}
+	if len(detail.Files) > 0 {
+		lines = append(lines, line(activeStyle.Render("Files")), line("File: "+detail.Files[0].Path))
+		if omitted := len(detail.Files) - 1; omitted > 0 {
+			lines = append(lines, line(fmt.Sprintf("… +%d files", omitted)))
+		}
+	}
+	sourceLines := strings.Split(detail.SkillMD, "\n")
+	if detail.SkillMD != "" || detail.SkillMDTruncated {
+		lines = append(lines, line(activeStyle.Render("Content preview")))
+		previewLimit := min(4, len(sourceLines))
+		for index := 0; index < previewLimit; index++ {
+			lines = append(lines, line(sourceLines[index]))
+		}
+		omitted := max(0, len(sourceLines)-previewLimit)
+		marker := ""
+		if omitted > 0 {
+			marker = fmt.Sprintf("… +%d lines", omitted)
+		}
+		if detail.SkillMDTruncated {
+			if marker != "" {
+				marker += " · "
+			}
+			marker += "64K cap"
+		}
+		if marker != "" {
+			lines = append(lines, line(marker))
+		}
+	}
+	if len(lines) > budget {
+		tail := compactSkillOmissionLines(detail, width)
+		maximumTail := max(0, budget-1)
+		if len(tail) > maximumTail {
+			tail = tail[len(tail)-maximumTail:]
+		}
+		prefixBudget := budget - len(tail)
+		lines = append(append([]string(nil), summaryLines[:min(prefixBudget, len(summaryLines))]...), tail...)
+	}
+	return lines
+}
+
+func compactSkillOmissionLines(detail app.SkillDetail, width int) []string {
+	line := func(value string) string { return clip(value, max(1, width)) }
+	markers := make([]string, 0, 4)
+	locations, files := len(detail.EnabledLocations), len(detail.Files)
+	if locations > 0 && files > 0 {
+		marker := fmt.Sprintf("… %d locations · %d files", locations, files)
+		if lipgloss.Width(marker) > width {
+			marker = "… locations · files"
+		}
+		markers = append(markers, line(marker))
+	} else if locations > 0 {
+		markers = append(markers, line(fmt.Sprintf("… %d locations", locations)))
+	} else if files > 0 {
+		markers = append(markers, line(fmt.Sprintf("… %d files", files)))
+	}
+	if detail.SkillMD != "" || detail.SkillMDTruncated {
+		count := 0
+		if detail.SkillMD != "" {
+			count = len(strings.Split(detail.SkillMD, "\n"))
+		}
+		marker := fmt.Sprintf("… %d lines", count)
+		if detail.SkillMDTruncated {
+			marker += " · 64K cap"
+		}
+		markers = append(markers, line(marker))
+	}
+	return append(markers, line("… View SKILL.md"))
 }
 
 func projectResultVisible(result app.Result) bool {
@@ -717,6 +842,9 @@ func (m Model) primaryActions() []string {
 		}
 		return append(actions, "Ignore")
 	case ViewLibrary:
+		if m.Detail && m.SkillDetail.Skill.ID == current.ID && m.SkillDetail.SkillMD != "" {
+			return []string{"View SKILL.md", "Add source", "More"}
+		}
 		return []string{"Open", "Add source", "More"}
 	case ViewWorkspaces:
 		if m.Scope.Level == "workspace-projects" {
@@ -779,6 +907,9 @@ func (m Model) renderStatus(width int) string {
 		return clip(errorStyle.Render("Issue: "+m.Inventory.Issues[0].Message), width)
 	}
 	if m.Inventory.Loading {
+		if m.Inventory.Total == 0 {
+			return clip(mutedStyle.Render("Scanning local inventory..."), width)
+		}
 		return clip(mutedStyle.Render(fmt.Sprintf("Scanning local inventory %d/%d", m.Inventory.Completed, m.Inventory.Total)), width)
 	}
 	return clip(mutedStyle.Render(m.Status), width)
@@ -818,20 +949,20 @@ func (m Model) footer() string {
 	}
 	if m.ActiveView == ViewMigration {
 		if m.Width < 30 {
-			return "Space · Enter · ? · q"
+			return "Space · Enter · ? · Ctrl+Q"
 		}
 		if m.Width < 60 {
-			return "Space Select · Enter · ? Help · q Quit"
+			return "Space · Enter · ? Help · Ctrl+Q Quit"
 		}
-		return "Space Select   Enter Review   r Refresh   ? Help   q Quit"
+		return "Space Select   Enter Review   r Refresh   ? Help   Ctrl+Q Quit"
 	}
 	if m.Width < 30 {
-		return "Enter · / · ? · q"
+		return "Enter · / · ? · Ctrl+Q"
 	}
 	if m.Width < 60 {
-		return "Enter Open · / Find · ? Help · q Quit"
+		return "Enter · / Find · ? Help · Ctrl+Q Quit"
 	}
-	return "Enter Open   / Search   r Refresh   ? Help   q Quit"
+	return "Enter Open   / Search   r Refresh   ? Help   Ctrl+Q Quit"
 }
 
 func viewLabel(view View) string {
@@ -879,7 +1010,14 @@ func (m Model) breadcrumb() string {
 }
 
 func (m Model) selectionRendered() bool {
-	return m.ActiveView == ViewLibrary || m.ActiveView == ViewMigration || (m.ActiveView == ViewWorkspaces && m.Scope.Level == "workspace-global") || m.Mode == ModeScan || m.Mode == ModeUpdates || m.Mode == ModeAddSelect || m.Mode == ModeProjectAgents || m.Mode == ModeWorkspaceSkills || (m.Mode == ModeFilter && (m.filterParent == ModeScan || m.filterParent == ModeUpdates || m.filterParent == ModeAddSelect || m.filterParent == ModeProjectAgents || m.filterParent == ModeWorkspaceSkills))
+	return m.ActiveView == ViewLibrary || m.ActiveView == ViewMigration || (m.ActiveView == ViewWorkspaces && m.Scope.Level == "workspace-global") || (m.ActiveView == ViewPresets && m.Scope.Level == "preset-skills") || m.Mode == ModeScan || m.Mode == ModeUpdates || m.Mode == ModeAddSelect || m.Mode == ModeProjectAgents || m.Mode == ModeWorkspaceSkills || (m.Mode == ModeFilter && (m.filterParent == ModeScan || m.filterParent == ModeUpdates || m.filterParent == ModeAddSelect || m.filterParent == ModeProjectAgents || m.filterParent == ModeWorkspaceSkills))
+}
+
+func (m Model) rowSelected(current row) bool {
+	if m.ActiveView == ViewPresets && m.Scope.Level == "preset-skills" {
+		return m.Selected[current.ID]
+	}
+	return m.Selected[current.selectionKey()]
 }
 
 func joinColumns(left, right string, leftWidth, rightWidth int) string {

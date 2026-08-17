@@ -3,8 +3,66 @@ package library
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
+
+func TestResolveAddSourceUnderstandsSkillsSHAndGitHubShorthand(t *testing.T) {
+	tests := []struct {
+		name       string
+		source     string
+		wantSource string
+		wantSkills []string
+	}{
+		{
+			name:       "exact skills.sh page",
+			source:     "https://skills.sh/vercel-labs/agent-skills/find-skills",
+			wantSource: "https://github.com/vercel-labs/agent-skills.git",
+			wantSkills: []string{"find-skills"},
+		},
+		{
+			name:       "skills.sh repository page",
+			source:     "https://skills.sh/vercel-labs/agent-skills",
+			wantSource: "https://github.com/vercel-labs/agent-skills.git",
+		},
+		{
+			name:       "github shorthand",
+			source:     "vercel-labs/agent-skills",
+			wantSource: "https://github.com/vercel-labs/agent-skills.git",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := ResolveAddSource(test.source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Kind != AddSourceRemote || got.Source != test.wantSource || !reflect.DeepEqual(got.SuggestedSelections, test.wantSkills) {
+				t.Fatalf("ResolveAddSource(%q) = %#v", test.source, got)
+			}
+		})
+	}
+}
+
+func TestResolveAddSourceRejectsUnsafeOrAmbiguousSkillsSHRoutes(t *testing.T) {
+	for _, source := range []string{
+		"http://skills.sh/owner/repo/skill",
+		"https://user:secret@skills.sh/owner/repo/skill",
+		"https://user:secret@example.test/owner/repo.git",
+		"https://skills.sh/owner/repo/skill?x=1",
+		"https://skills.sh/owner/repo/skill#fragment",
+		"https://skills.sh/owner/repo/skill/extra",
+		"https://skills.sh/owner/repo/%2e%2e",
+		"https://skills.sh/owner/repo/a%2fb",
+		"https://skills.sh/owner/.git/skill",
+	} {
+		t.Run(source, func(t *testing.T) {
+			if _, err := ResolveAddSource(source); err == nil {
+				t.Fatalf("ResolveAddSource(%q) succeeded", source)
+			}
+		})
+	}
+}
 
 func TestClassifyAddSourceRecognizesRemoteBeforeFilesystemLookup(t *testing.T) {
 	for _, source := range []string{

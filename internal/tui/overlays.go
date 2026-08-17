@@ -19,7 +19,7 @@ func (m Model) overlayLines() []string {
 			"PgUp/PgDn scroll details and long previews",
 			"Mouse: click rows/actions · wheel scrolls the focused area",
 			"r refresh · Ctrl+K configuration · ? help",
-			"Esc back/cancel · q quit from a page · Ctrl+C force quit",
+			"Esc back/cancel · Ctrl+Q quit · Ctrl+C emergency quit",
 		}
 	case m.Mode == ModeConfiguration:
 		lines := []string{
@@ -33,7 +33,7 @@ func (m Model) overlayLines() []string {
 		}
 		return lines
 	case m.Mode == ModeErrorDetail:
-		lines := []string{activeStyle.Render("Error details")}
+		lines := []string{activeStyle.Render(firstNonEmpty(m.FullDetailTitle, "Error details"))}
 		return append(lines, wrapText(m.FullError, max(1, overlayActionBarWidth(m.Width, m.Height)))...)
 	case m.Mode == ModeConfirm:
 		lines := []string{
@@ -168,6 +168,7 @@ func wrapText(value string, width int) []string {
 	if value == "" {
 		return []string{"No error is selected."}
 	}
+	value = strings.ReplaceAll(strings.ReplaceAll(value, "\r\n", "\n"), "\r", "\n")
 	width = max(1, width)
 	var lines []string
 	for paragraphIndex, paragraph := range strings.Split(value, "\n") {

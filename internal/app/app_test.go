@@ -228,6 +228,36 @@ func TestAddPreflightFailureAbortsWithoutCommittingLibrary(t *testing.T) {
 	}
 }
 
+func TestAddRejectsChangedDiscoveryTokenBeforeLedgerCheckpoint(t *testing.T) {
+	aikitHome, userHome := t.TempDir(), t.TempDir()
+	t.Setenv("AIKIT_HOME", aikitHome)
+	t.Setenv("HOME", userHome)
+	paths := config.PathsForHome(aikitHome)
+	fake := &fakeLibrary{root: paths.LibrarySkills, added: config.Skill{
+		ID: "acme/repo/demo", Name: "demo", Source: "acme/repo", SourcePath: "skills/demo",
+		Resolved: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Hash: "new-hash",
+	}}
+	application := New(Dependencies{Store: config.Store{Paths: paths}, Paths: paths, UserHome: userHome, Library: fake})
+	request := AddRequest{
+		Source: "https://github.com/acme/repo.git", Skills: []string{"skills/demo"},
+		ExpectedResolved:   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		ExpectedCandidates: []ExpectedAddCandidate{{Name: "demo", RelativePath: "skills/demo", Hash: "old-hash"}},
+	}
+	if _, err := application.Add(context.Background(), request); err == nil {
+		t.Fatal("changed remote discovery token was accepted")
+	}
+	if fake.commits != 0 || fake.aborts != 1 {
+		t.Fatalf("changed discovery reached commit: commits=%d aborts=%d", fake.commits, fake.aborts)
+	}
+	cfg, err := (config.Store{Paths: paths}).Load(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Library.Skills) != 0 {
+		t.Fatalf("changed discovery reached ledger: %+v", cfg.Library.Skills)
+	}
+}
+
 func TestUpdateRejectsChangedConfirmationTokenBeforePrepare(t *testing.T) {
 	aikitHome, userHome := t.TempDir(), t.TempDir()
 	t.Setenv("AIKIT_HOME", aikitHome)

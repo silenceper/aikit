@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
 	"github.com/silenceper/aikit/internal/app"
+	"github.com/silenceper/aikit/internal/status"
 	"github.com/silenceper/aikit/internal/updatecheck"
 	"github.com/silenceper/aikit/pkg/config"
 )
@@ -155,6 +156,28 @@ func TestModernOverviewMetricsAndAttentionOrdering(t *testing.T) {
 	}
 }
 
+func TestOverviewDeduplicatesSnapshotAndInventoryForTheSameTarget(t *testing.T) {
+	m := NewModel(context.Background(), &fakeService{}, &fakeMigration{}, ViewOverview, ActionNone)
+	m.Snapshot = testSnapshot()
+	m.Snapshot.Updates = updatecheck.CheckReport{}
+	target := "/work/.cursor/skills/planning"
+	m.Snapshot.Status.Items = []status.Item{{Kind: status.Unmanaged, Name: "planning", Path: target, Scope: config.Scope{Agent: "cursor"}}}
+	m.Inventory = InventoryState{Complete: true, Items: []app.ScanItem{{
+		Key: "g/cursor\x00" + target, Origin: "g/cursor", Target: target,
+		State: app.ScanStateBrokenLink, Action: app.ScanActionAdopt,
+		Skill: config.Skill{Name: "planning"},
+	}}}
+
+	rows := m.attentionRows()
+	if len(rows) != 1 || rows[0].DestinationView != ViewMigration || rows[0].Name != "planning" {
+		t.Fatalf("same target rendered as duplicate attention rows: %+v", rows)
+	}
+	counts := m.attentionCounts()
+	if counts.migration != 1 || counts.status != 1 {
+		t.Fatalf("deduplicated attention counts = %+v", counts)
+	}
+}
+
 func TestModernOverviewUsesOnlySnapshotUpdateData(t *testing.T) {
 	service := &fakeService{}
 	m := NewModel(context.Background(), service, &fakeMigration{}, ViewOverview, ActionNone)
@@ -259,6 +282,158 @@ func TestProgressiveDetailsUseSemanticGroups(t *testing.T) {
 	m.Err = "broken detail"
 	if got = stripANSI(m.ViewString()); !strings.Contains(got, "Diagnostics") || !strings.Contains(got, "broken detail") {
 		t.Fatalf("diagnostics not revealed when relevant:\n%s", got)
+	}
+}
+
+func TestCompactSkillDetailHasHardWrappedDisplayBudgets(t *testing.T) {
+	detail := largeSkillDetail()
+	for _, width := range []int{24, 38, 59, 80, 120} {
+		t.Run(fmt.Sprintf("width-%d", width), func(t *testing.T) {
+			lines := compactSkillDetailLines(detail, width, 18)
+			if len(lines) > 18 {
+				t.Fatalf("detail lines=%d, budget=18: %q", len(lines), lines)
+			}
+			joined := strings.Join(lines, "\n")
+			for _, marker := range []string{"locations", "files", "lines", "64K"} {
+				if !strings.Contains(joined, marker) {
+					t.Fatalf("width=%d missing explicit %q marker:\n%s", width, marker, joined)
+				}
+			}
+			if strings.Contains(joined, "source-line-219") {
+				t.Fatalf("main detail leaked final source line at width=%d:\n%s", width, joined)
+			}
+			for index, line := range lines {
+				if got := lipgloss.Width(line); got > width {
+					t.Fatalf("line %d width=%d > %d: %q", index, got, width, line)
+				}
+			}
+		})
+	}
+	t.Run("four-line short layout keeps summary first and all omissions explicit", func(t *testing.T) {
+		lines := compactSkillDetailLines(detail, 24, 4)
+		if len(lines) != 4 || stripANSI(lines[0]) != "Summary" {
+			t.Fatalf("four-line detail=%q, want Summary first", lines)
+		}
+		joined := strings.Join(lines, "\n")
+		for _, marker := range []string{"locations", "files", "lines", "64K", "View SKILL.md"} {
+			if !strings.Contains(joined, marker) {
+				t.Fatalf("four-line detail missing %q: %q", marker, lines)
+			}
+		}
+	})
+}
+
+func TestCompactSkillDetailScreenStaysBoundedAtRealTerminalSizes(t *testing.T) {
+	for _, width := range []int{24, 38, 59, 80, 120} {
+		for _, height := range []int{12, 24} {
+			t.Run(fmt.Sprintf("%dx%d", width, height), func(t *testing.T) {
+				m := NewModel(context.Background(), &fakeService{}, &fakeMigration{}, ViewLibrary, ActionNone)
+				m.Snapshot, m.Width, m.Height = testSnapshot(), width, height
+				m.Detail, m.Focus, m.SkillDetail = true, FocusDetail, largeSkillDetail()
+				got := m.ViewString()
+				plain := stripANSI(got)
+				if strings.Contains(stripANSI(got), "source-line-219") {
+					t.Fatalf("main detail exposed unbounded content:\n%s", got)
+				}
+				if width == 24 && height == 12 {
+					for _, marker := range []string{"locations", "files", "lines", "64K"} {
+						if !strings.Contains(plain, marker) {
+							t.Fatalf("small terminal silently dropped %q omission marker:\n%s", marker, got)
+						}
+					}
+				}
+				lines := strings.Split(got, "\n")
+				if len(lines) > height {
+					t.Fatalf("screen lines=%d > height=%d", len(lines), height)
+				}
+				for index, line := range lines {
+					if cells := lipgloss.Width(line); cells > width {
+						t.Fatalf("screen line %d width=%d > %d: %q", index, cells, width, line)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestWideLibrarySelectionSplitsEmbeddedDescriptionLinesBeforeJoiningColumns(t *testing.T) {
+	m := NewModel(context.Background(), &fakeService{}, &fakeMigration{}, ViewLibrary, ActionNone)
+	m.Snapshot = testSnapshot()
+	m.Width, m.Height = 180, 30
+	m.Snapshot.Config.Library.Skills[0].Description = strings.Join([]string{
+		"first description paragraph",
+		"second description paragraph",
+		"third description paragraph",
+		"fourth description paragraph",
+		"fifth description paragraph",
+	}, "\n")
+
+	layout := ComputeLayout(m.Width, m.Height)
+	for index, line := range m.detailLinesForWidth(layout.Detail.Width) {
+		if strings.ContainsAny(line, "\r\n") {
+			t.Fatalf("detail line %d still contains a physical newline: %q", index, line)
+		}
+	}
+	assertScreenBounds(t, m.ViewString(), m.Width, m.Height)
+}
+
+func TestCompactLibraryRowCollapsesEmbeddedContextToOnePhysicalLine(t *testing.T) {
+	m := NewModel(context.Background(), &fakeService{}, &fakeMigration{}, ViewLibrary, ActionNone)
+	m.Snapshot = testSnapshot()
+	m.Width, m.Height = 80, 12
+	m.Snapshot.Config.Library.Skills[0].Source = ""
+	m.Snapshot.Config.Library.Skills[0].Description = "first context line\nsecond context line\nthird context line"
+
+	rows := m.rows()
+	rendered := m.renderRowLines(rows[0], true, ComputeLayout(m.Width, m.Height).List.Width)
+	if len(rendered) != 2 || strings.ContainsAny(rendered[1], "\r\n") {
+		t.Fatalf("compact row escaped its two-line geometry: %q", rendered)
+	}
+	assertScreenBounds(t, m.ViewString(), m.Width, m.Height)
+}
+
+func assertScreenBounds(t *testing.T, rendered string, width, height int) {
+	t.Helper()
+	lines := strings.Split(rendered, "\n")
+	if len(lines) > height {
+		t.Fatalf("rendered %d physical lines into height %d:\n%s", len(lines), height, rendered)
+	}
+	for index, line := range lines {
+		if cells := lipgloss.Width(line); cells > width {
+			t.Fatalf("line %d width=%d > %d: %q", index, cells, width, line)
+		}
+	}
+}
+
+func largeSkillDetail() app.SkillDetail {
+	lines := make([]string, 220)
+	for index := range lines {
+		lines[index] = fmt.Sprintf("source-line-%03d %s", index, strings.Repeat("content ", 8))
+	}
+	locations := make([]config.Scope, 7)
+	for index := range locations {
+		locations[index] = config.Scope{Project: fmt.Sprintf("project-%d", index), Agent: "codex"}
+	}
+	files := make([]app.SkillFile, 12)
+	for index := range files {
+		files[index] = app.SkillFile{Path: fmt.Sprintf("references/deep/file-%02d.md", index), Kind: app.SkillFileRegular}
+	}
+	return app.SkillDetail{
+		Skill:            testSnapshot().Config.Library.Skills[0],
+		EnabledLocations: locations,
+		Files:            files,
+		SkillMD:          strings.Join(lines, "\n"),
+		SkillMDTruncated: true,
+	}
+}
+
+func TestInventoryLoadingBeforeFirstRootDoesNotShowZeroOverZero(t *testing.T) {
+	m := NewModel(context.Background(), &fakeService{}, &fakeMigration{}, ViewOverview, ActionNone)
+	m.Width, m.Height = 80, 24
+	m.Inventory.Loading = true
+	got := stripANSI(m.ViewString())
+	if strings.Contains(got, "0/0") || !strings.Contains(got, "Scanning local inventory") {
+		t.Fatalf("initial inventory status = %q", got)
 	}
 }
 

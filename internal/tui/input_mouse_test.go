@@ -43,6 +43,44 @@ func TestModernMouseGeometryUsesNavigationAndTwoLineRows(t *testing.T) {
 	}
 }
 
+func TestLibraryRowMouseClickTogglesSelectionAcrossLayouts(t *testing.T) {
+	for _, width := range []int{120, 80, 59, 38} {
+		t.Run(fmt.Sprintf("width-%d", width), func(t *testing.T) {
+			base := NewModel(context.Background(), &fakeService{}, &fakeMigration{}, ViewLibrary, ActionNone)
+			base.Snapshot, base.Width, base.Height = testSnapshot(), width, 20
+			regions := base.hitRegions()
+			if len(regions.Rows) < 2 || len(regions.Checkboxes) < 2 {
+				t.Fatalf("missing Library row geometry: rows=%+v checkboxes=%+v", regions.Rows, regions.Checkboxes)
+			}
+
+			row := regions.Rows[1]
+			clickX := row.Right() - 1
+			clickY := row.Y
+			if row.Height > 1 {
+				clickY = row.Bottom() - 1
+			}
+			next, cmd := base.Update(click(clickX, clickY))
+			selected := next.(Model)
+			key := selected.rows()[1].selectionKey()
+			if cmd != nil || selected.Cursor != 1 || !selected.Selected[key] {
+				t.Fatalf("row click did not select exact skill: cursor=%d selected=%v cmd=%v", selected.Cursor, selected.Selected, cmd != nil)
+			}
+
+			regions = selected.hitRegions()
+			row = regions.Rows[1]
+			clickY = row.Y
+			if row.Height > 1 {
+				clickY = row.Bottom() - 1
+			}
+			next, cmd = selected.Update(click(row.Right()-1, clickY))
+			deselected := next.(Model)
+			if cmd != nil || deselected.Selected[key] {
+				t.Fatalf("second row click did not deselect exact skill: selected=%v cmd=%v", deselected.Selected, cmd != nil)
+			}
+		})
+	}
+}
+
 func TestCompactOverlayKeepsTitleAndPrimaryActionsVisible(t *testing.T) {
 	for _, height := range []int{8, 12} {
 		t.Run(fmt.Sprintf("height-%d", height), func(t *testing.T) {
@@ -171,7 +209,7 @@ func TestConfirmPanelBodyScrollReachesFinalItem(t *testing.T) {
 	}
 }
 
-func TestDetailScrollIsIndependentForKeyboardAndMouse(t *testing.T) {
+func TestCompactLibraryDetailDoesNotCreateAnUnboundedScrollRegion(t *testing.T) {
 	base := NewModel(context.Background(), &fakeService{}, &fakeMigration{}, ViewLibrary, ActionNone)
 	base.Snapshot, base.Width, base.Height = testSnapshot(), 80, 12
 	base.Detail, base.Focus, base.Cursor, base.Scroll = true, FocusDetail, 1, 1
@@ -182,7 +220,7 @@ func TestDetailScrollIsIndependentForKeyboardAndMouse(t *testing.T) {
 
 	keyboardNext, cmd := base.Update(actionKey(tea.KeyDown))
 	keyboard := keyboardNext.(Model)
-	if cmd != nil || keyboard.DetailScroll != 1 || keyboard.Cursor != base.Cursor || keyboard.Scroll != base.Scroll {
+	if cmd != nil || keyboard.DetailScroll != 0 || keyboard.Cursor != base.Cursor || keyboard.Scroll != base.Scroll {
 		t.Fatalf("detail key scroll=%d cursor=%d listScroll=%d cmd=%v", keyboard.DetailScroll, keyboard.Cursor, keyboard.Scroll, cmd != nil)
 	}
 
@@ -192,8 +230,8 @@ func TestDetailScrollIsIndependentForKeyboardAndMouse(t *testing.T) {
 	if cmd != nil || mouse.DetailScroll != keyboard.DetailScroll || mouse.Cursor != base.Cursor || mouse.Scroll != base.Scroll || mouse.Focus != FocusDetail {
 		t.Fatalf("detail mouse parity scroll=%d cursor=%d listScroll=%d focus=%s cmd=%v", mouse.DetailScroll, mouse.Cursor, mouse.Scroll, mouse.Focus, cmd != nil)
 	}
-	if mouse.ViewString() == base.ViewString() {
-		t.Fatal("detail scroll did not change visible detail body")
+	if mouse.ViewString() != base.ViewString() {
+		t.Fatal("compact detail unexpectedly exposed another scroll page")
 	}
 }
 

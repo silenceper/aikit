@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"reflect"
 	"slices"
 	"strings"
@@ -287,17 +288,14 @@ func TestActionsOnlyExposeValidOperations(t *testing.T) {
 	})
 }
 
-func TestQQuitsOnlyNormalPageWhileEscapeNavigates(t *testing.T) {
+func TestEscapeOnlyNavigatesAndPlainQNeverQuits(t *testing.T) {
 	m := NewModel(nil, &fakeService{}, &fakeMigration{}, ViewLibrary, ActionNone)
 	m.Snapshot = testSnapshot()
 	m.Detail, m.Focus = true, FocusDetail
 
 	qModel, quit := apply(m, "q")
-	if quit == nil || !qModel.Detail || qModel.Focus != FocusDetail {
-		t.Fatalf("q did not quit in place: cmd=%v detail=%v focus=%s", quit != nil, qModel.Detail, qModel.Focus)
-	}
-	if _, ok := quit().(tea.QuitMsg); !ok {
-		t.Fatalf("q command = %T, want tea.QuitMsg", quit())
+	if quit != nil || !qModel.Detail || qModel.Focus != FocusDetail || !strings.Contains(qModel.Status, "Ctrl+Q") {
+		t.Fatalf("q changed page: cmd=%v detail=%v focus=%s status=%q", quit != nil, qModel.Detail, qModel.Focus, qModel.Status)
 	}
 	escaped, escCmd := apply(m, "esc")
 	if escCmd != nil || escaped.Focus != FocusList {
@@ -310,8 +308,110 @@ func TestQQuitsOnlyNormalPageWhileEscapeNavigates(t *testing.T) {
 
 	m.enterConfirm(ActionUpdate)
 	confirmed, modalQuit := apply(m, "q")
-	if modalQuit != nil || confirmed.Mode != ModeConfirm {
-		t.Fatalf("q escaped confirmation: cmd=%v mode=%s", modalQuit != nil, confirmed.Mode)
+	if modalQuit != nil || confirmed.Mode != ModeConfirm || !strings.Contains(confirmed.Status, "Ctrl+Q") {
+		t.Fatalf("q escaped confirmation: cmd=%v mode=%s status=%q", modalQuit != nil, confirmed.Mode, confirmed.Status)
+	}
+}
+
+func TestExitKeyMatrix(t *testing.T) {
+	base := NewModel(context.Background(), &fakeService{}, &fakeMigration{}, ViewLibrary, ActionNone)
+	base.Snapshot = testSnapshot()
+	base.Selected["acme/alpha"] = true
+
+	t.Run("root escape is a strict no-op", func(t *testing.T) {
+		next, cmd := apply(base, "esc")
+		if cmd != nil || next.ActiveView != base.ActiveView || next.Mode != base.Mode || next.Focus != base.Focus || !next.Selected["acme/alpha"] {
+			t.Fatalf("root esc changed state: %+v cmd=%v", next, cmd != nil)
+		}
+	})
+	t.Run("escape from actions and detail returns directly to collection", func(t *testing.T) {
+		for _, focus := range []Focus{FocusActions, FocusDetail} {
+			current := base
+			current.Detail, current.Focus, current.ActionIndex = true, focus, 1
+			next, cmd := apply(current, "esc")
+			if cmd != nil || next.Focus != FocusList {
+				t.Fatalf("esc from %s returned focus=%s cmd=%v", focus, next.Focus, cmd != nil)
+			}
+		}
+	})
+	t.Run("filter and input keep q as text", func(t *testing.T) {
+		filter := base
+		filter.beginFilter()
+		filter, cmd := apply(filter, "q")
+		if cmd != nil || filter.FilterDraft != "q" || filter.Mode != ModeFilter {
+			t.Fatalf("filter q=%q mode=%s cmd=%v", filter.FilterDraft, filter.Mode, cmd != nil)
+		}
+		input := base
+		input.enterInput(inputState{Prompt: "Value"})
+		input, cmd = apply(input, "q")
+		if cmd != nil || input.Input.Value != "q" || input.Mode != ModeInput {
+			t.Fatalf("input q=%q mode=%s cmd=%v", input.Input.Value, input.Mode, cmd != nil)
+		}
+	})
+	t.Run("ctrl q exits ordinary modal and busy read", func(t *testing.T) {
+		for _, setup := range []func(*Model){
+			func(m *Model) {},
+			func(m *Model) { m.enterMore() },
+			func(m *Model) { m.enterErrorDetail("details") },
+			func(m *Model) { m.Busy = true },
+		} {
+			current := base
+			setup(&current)
+			_, cmd := apply(current, "ctrl+q")
+			if !isQuit(cmd) {
+				t.Fatalf("ctrl+q did not quit mode=%s busy=%v", current.Mode, current.Busy)
+			}
+		}
+	})
+	t.Run("mutation refuses normal quit but ctrl c is emergency", func(t *testing.T) {
+		current := base
+		current.Busy, current.MutationBusy = true, true
+		next, cmd := apply(current, "ctrl+q")
+		if cmd != nil || !next.Busy || !next.MutationBusy || !strings.Contains(strings.ToLower(next.Status), "operation in progress") {
+			t.Fatalf("mutation accepted ctrl+q: busy=%v mutation=%v status=%q cmd=%v", next.Busy, next.MutationBusy, next.Status, cmd != nil)
+		}
+		_, cmd = apply(current, "ctrl+c")
+		if !isQuit(cmd) {
+			t.Fatal("mutation blocked emergency ctrl+c")
+		}
+	})
+}
+
+func TestExitKeysAcrossInteractiveStatesUseRealBubbleTeaKeys(t *testing.T) {
+	base := NewModel(context.Background(), &fakeService{}, &fakeMigration{}, ViewLibrary, ActionNone)
+	base.Snapshot = testSnapshot()
+	states := []struct {
+		name  string
+		setup func(*Model)
+	}{
+		{"list", func(m *Model) { m.Focus = FocusList }},
+		{"actions", func(m *Model) { m.Detail, m.Focus = true, FocusActions }},
+		{"detail", func(m *Model) { m.Detail, m.Focus = true, FocusDetail }},
+		{"filter", func(m *Model) { m.beginFilter() }},
+		{"input", func(m *Model) { m.enterInput(inputState{Prompt: "Value"}) }},
+		{"confirm", func(m *Model) { m.enterConfirm(ActionUpdate) }},
+		{"more", func(m *Model) { m.enterMore() }},
+		{"error-detail", func(m *Model) { m.enterErrorDetail("failure") }},
+		{"busy", func(m *Model) { m.Busy = true }},
+	}
+	for _, state := range states {
+		t.Run(state.name+"/ctrl-q", func(t *testing.T) {
+			current := base
+			state.setup(&current)
+			_, cmd := current.Update(tea.KeyMsg{Type: tea.KeyCtrlQ})
+			if !isQuit(cmd) {
+				t.Fatalf("real ctrl+q did not quit state=%s", state.name)
+			}
+		})
+	}
+
+	mutation := base
+	mutation.Busy, mutation.MutationBusy = true, true
+	if _, cmd := mutation.Update(tea.KeyMsg{Type: tea.KeyCtrlQ}); isQuit(cmd) {
+		t.Fatal("real ctrl+q quit during mutation")
+	}
+	if _, cmd := mutation.Update(tea.KeyMsg{Type: tea.KeyCtrlC}); !isQuit(cmd) {
+		t.Fatal("real ctrl+c did not perform emergency quit")
 	}
 }
 
@@ -364,11 +464,11 @@ func TestResponsiveMetricsRangeAndNavigationStayLegible(t *testing.T) {
 	}
 
 	overview.Width = 38
-	if footer := overview.footer(); !strings.Contains(footer, "? Help") || !strings.Contains(footer, "q Quit") || len([]rune(footer)) > overview.Width {
+	if footer := overview.footer(); !strings.Contains(footer, "? Help") || !strings.Contains(footer, "Ctrl+Q Quit") || len([]rune(footer)) > overview.Width {
 		t.Fatalf("38-column footer=%q", footer)
 	}
 	overview.Width = 24
-	if footer := overview.footer(); !strings.Contains(footer, "?") || !strings.Contains(footer, "q") || len([]rune(footer)) > overview.Width {
+	if footer := overview.footer(); !strings.Contains(footer, "?") || !strings.Contains(footer, "Ctrl+Q") || len([]rune(footer)) > overview.Width {
 		t.Fatalf("24-column footer=%q", footer)
 	}
 	overview.Height = 8
@@ -427,7 +527,7 @@ func TestHelpDocumentsAndScrollsEveryInputPath(t *testing.T) {
 	m := NewModel(nil, &fakeService{}, &fakeMigration{}, ViewLibrary, ActionNone)
 	m.Width, m.Height, m.Help = 38, 12, true
 	all := strings.Join(m.overlayLines(), "\n")
-	for _, want := range []string{"clear", "PgUp/PgDn", "Mouse", "Esc", "q quit"} {
+	for _, want := range []string{"clear", "PgUp/PgDn", "Mouse", "Esc", "Ctrl+Q quit"} {
 		if !strings.Contains(all, want) {
 			t.Fatalf("help copy missing %q:\n%s", want, all)
 		}

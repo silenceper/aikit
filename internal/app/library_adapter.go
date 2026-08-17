@@ -17,16 +17,20 @@ func (adapter libraryAdapter) Preview(ctx context.Context, request AddPreviewReq
 	if err := ctx.Err(); err != nil {
 		return AddPreview{}, err
 	}
-	kind, err := library.ClassifyAddSource(request.Source)
+	resolved, err := library.ResolveAddSource(request.Source)
 	if err != nil {
 		return AddPreview{}, err
 	}
-	if kind == library.AddSourceLocal {
-		candidates, err := library.Discover(request.Source)
+	preview := AddPreview{
+		ResolvedSource:      resolved.Source,
+		SuggestedSelections: append([]string(nil), resolved.SuggestedSelections...),
+	}
+	if resolved.Kind == library.AddSourceLocal {
+		candidates, err := library.Discover(resolved.Source)
 		if err != nil {
 			return AddPreview{}, err
 		}
-		preview := AddPreview{Candidates: make([]Candidate, len(candidates))}
+		preview.Candidates = make([]Candidate, len(candidates))
 		for i, candidate := range candidates {
 			preview.Candidates[i] = Candidate{
 				Name: candidate.Name, Description: candidate.Description,
@@ -35,26 +39,59 @@ func (adapter libraryAdapter) Preview(ctx context.Context, request AddPreviewReq
 		}
 		return preview, nil
 	}
-	return AddPreview{
-		NetworkRequired: true,
-		Warnings:        []string{"remote source discovery requires an explicit network-enabled add action"},
-	}, nil
+	if !request.AllowNetwork {
+		preview.NetworkRequired = true
+		preview.Warnings = []string{"remote source discovery requires explicit network access"}
+		return preview, nil
+	}
+	gitPreview, err := adapter.service.PreviewGit(ctx, resolved.Source, request.SourcePath, request.Ref)
+	if err != nil {
+		return AddPreview{}, err
+	}
+	preview.Candidates = make([]Candidate, len(gitPreview.Candidates))
+	for i, candidate := range gitPreview.Candidates {
+		preview.Candidates[i] = Candidate{
+			Name: candidate.Name, Description: candidate.Description,
+			RelativePath: candidate.RelativePath, Hash: candidate.Hash,
+		}
+	}
+	for _, suggestion := range preview.SuggestedSelections {
+		matched := false
+		for _, candidate := range preview.Candidates {
+			if candidate.Name == suggestion || candidate.RelativePath == suggestion {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			preview.Warnings = append(preview.Warnings, "skills.sh suggested skill "+suggestion+" is no longer present in the repository; choose from the current candidates")
+			preview.SuggestedSelections = nil
+			break
+		}
+	}
+	preview.Ref = gitPreview.Ref
+	preview.Resolved = gitPreview.Resolved
+	return preview, nil
 }
 
 func (adapter libraryAdapter) PrepareAdd(ctx context.Context, request AddPrepareRequest, existing []config.Skill) (LibraryMutation, error) {
-	kind, err := library.ClassifyAddSource(request.Source)
+	resolved, err := library.ResolveAddSource(request.Source)
 	if err != nil {
 		return nil, err
 	}
-	if kind == library.AddSourceLocal {
-		mutation, err := adapter.service.PrepareLocal(ctx, request.Source, request.Selections, existing)
+	if resolved.Kind == library.AddSourceLocal {
+		mutation, err := adapter.service.PrepareLocal(ctx, resolved.Source, request.Selections, existing)
 		if err != nil {
 			return nil, err
 		}
 		return libraryMutation{mutation}, nil
 	}
-	mutation, err := adapter.service.PrepareGit(ctx, request.Source, library.GitAddOptions{
-		SourcePath: request.SourcePath, Ref: request.Ref, Skills: request.Selections,
+	selections := append([]string(nil), request.Selections...)
+	if len(selections) == 0 {
+		selections = append(selections, resolved.SuggestedSelections...)
+	}
+	mutation, err := adapter.service.PrepareGit(ctx, resolved.Source, library.GitAddOptions{
+		SourcePath: request.SourcePath, Ref: request.Ref, Skills: selections,
 		Existing: existing, Force: request.Force,
 	})
 	if err != nil {

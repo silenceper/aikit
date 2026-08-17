@@ -127,6 +127,29 @@ func TestInventoryStreamReportsRootErrorsWithoutStoppingOtherRoots(t *testing.T)
 	}
 }
 
+func TestInventorySkipsHiddenAgentMetadataWithoutRecursiveDiscovery(t *testing.T) {
+	service, _, home := testService(t)
+	root := agent.Codex{}.GlobalSkillDir(home)
+	writeSkill(t, filepath.Join(root, ".system", "one"), "one", "one")
+	writeSkill(t, filepath.Join(root, ".system", "two"), "two", "two")
+	writeSkill(t, filepath.Join(root, "visible"), "visible", "visible")
+
+	events := collectInventoryEvents(t, service.Inventory(context.Background(), app.InventoryRequest{Generation: 18}))
+	var codex app.InventoryEvent
+	for _, event := range events {
+		if event.Root == "g/codex" {
+			codex = event
+			break
+		}
+	}
+	if len(codex.Issues) != 0 {
+		t.Fatalf("hidden metadata produced inventory issues: %+v", codex.Issues)
+	}
+	if len(codex.Items) != 1 || codex.Items[0].Skill.Name != "visible" {
+		t.Fatalf("codex inventory = %+v", codex.Items)
+	}
+}
+
 func TestInventoryStreamCancellationClosesWithoutCompletionOrWorkerLeak(t *testing.T) {
 	service, _, home := testService(t)
 	target := filepath.Join(agent.Cursor{}.GlobalSkillDir(home), "blocked")

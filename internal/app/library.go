@@ -63,6 +63,9 @@ func (a *App) Add(ctx context.Context, request AddRequest) (Result, error) {
 		if len(added) == 0 {
 			return fmt.Errorf("source contains no selected skills")
 		}
+		if err := validateExpectedAdd(added, request); err != nil {
+			return err
+		}
 		if (request.Agent != "" || request.Project != "") && len(added) != 1 {
 			return fmt.Errorf("add-and-enable requires exactly one selected skill")
 		}
@@ -119,6 +122,40 @@ func (a *App) Add(ctx context.Context, request AddRequest) (Result, error) {
 		return nil
 	})
 	return output, err
+}
+
+func validateExpectedAdd(added []config.Skill, request AddRequest) error {
+	if request.ExpectedResolved != "" {
+		for _, skill := range added {
+			if skill.Resolved != request.ExpectedResolved {
+				return fmt.Errorf("source changed after preview: resolved object is %q, expected %q", skill.Resolved, request.ExpectedResolved)
+			}
+		}
+	}
+	if len(request.ExpectedCandidates) == 0 {
+		return nil
+	}
+	if len(request.ExpectedCandidates) != len(added) {
+		return fmt.Errorf("source changed after preview: selected candidate count changed")
+	}
+	used := make([]bool, len(added))
+	for _, expected := range request.ExpectedCandidates {
+		matched := false
+		for i, skill := range added {
+			if used[i] || skill.Name != expected.Name || skill.Hash != expected.Hash {
+				continue
+			}
+			if skill.Source != "" && expected.RelativePath != "" && skill.SourcePath != expected.RelativePath {
+				continue
+			}
+			used[i], matched = true, true
+			break
+		}
+		if !matched {
+			return fmt.Errorf("source changed after preview: candidate %q no longer matches", expected.RelativePath)
+		}
+	}
+	return nil
 }
 
 func skillIndex(cfg *config.Config, id string) int {
