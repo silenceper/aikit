@@ -159,7 +159,7 @@ func (m Model) renderFramedCollection(layout Layout) (string, []string) {
 		if m.ActiveView == ViewMigration && current.Origin != "" {
 			current.Name = current.Origin + " · " + current.Name
 		}
-		rendered := m.renderRowLines(current, rowIndex == m.Cursor && m.Focus == FocusList, panel.Body.Width)
+		rendered := []string{m.renderRow(current, rowIndex == m.Cursor && m.Focus == FocusList, panel.Body.Width)}
 		relativeY := rect.Y - panel.Body.Y
 		for lineIndex := 0; lineIndex < len(rendered) && lineIndex < rect.Height; lineIndex++ {
 			if y := relativeY + lineIndex; y >= 0 && y < len(lines) {

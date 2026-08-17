@@ -1,7 +1,7 @@
 package tui
 
 const (
-	collectionRowHeight  = 2
+	collectionRowHeight  = 1
 	collectionHeaderRows = 1
 	overviewHeaderRows   = 4
 )
