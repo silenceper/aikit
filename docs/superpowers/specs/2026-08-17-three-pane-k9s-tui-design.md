@@ -281,12 +281,16 @@ Use strict RED/GREEN cycles and verify:
 5. nested picker selection without implicit preview submission or mutation;
 6. keyboard/mouse parity for every visible row, action, palette item, modal,
    paging control, and back path;
-7. Library add, project configure, and preset member/apply workflows reach an
-   exact preview in no more than three deliberate interactions after choosing
-   the owning page or item; the final safety Confirm is counted separately.
-   Concrete budgets are: Library Add -> source input -> candidate review;
-   Project Add skill -> combined scope/skill picker -> review; and Preset Apply
-   -> exact target picker -> review;
+7. Library add, project configure, and preset workflows contain no redundant
+   navigation round trip and preserve every required safety stage. The expected
+   sequences are: local Add -> source input -> optional candidate checklist ->
+   Review -> Confirm; remote Add -> source input -> explicit network
+   authorization -> discovery -> candidate checklist -> Review -> Confirm;
+   Project Add skill -> combined scope/skill picker -> Apply -> Review ->
+   Confirm; Preset Edit members -> member checklist -> Apply -> Review ->
+   Confirm; and Preset Apply -> exact target picker -> Apply -> Review ->
+   Confirm. Any number of deliberate checklist toggles is allowed and does not
+   justify merging network authorization, preview, or confirmation boundaries;
 8. exact preview/confirm request parity and cancel zero-write;
 9. stable row/scroll identity during filter, snapshot, and inventory updates;
 10. long real-world descriptions, paths, diagnostics, CJK, and emoji bounded
