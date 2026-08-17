@@ -58,6 +58,13 @@ func (m Model) rows() []row {
 		}
 		return m.filtered(rows)
 	}
+	if mode == ModeWorkspaceSkills {
+		rows := make([]row, 0, len(m.Snapshot.Config.Library.Skills))
+		for _, skill := range m.Snapshot.Config.Library.Skills {
+			rows = append(rows, row{Key: "workspace-skill:" + skill.ID, ID: skill.ID, Name: skill.Name, Source: skill.Source, State: "Select", Detail: skill.Description})
+		}
+		return m.filtered(rows)
+	}
 
 	var rows []row
 	switch m.ActiveView {
@@ -285,8 +292,7 @@ func (m Model) workspaceRows() []row {
 		return globalWorkspaceRows(m.Snapshot.Config)
 	}
 	if m.Scope.Level == "agent-skills" {
-		binding := m.Snapshot.Config.Agents[m.Scope.Agent]
-		return bindingRows("agent:"+m.Scope.Agent, m.Snapshot.Config.Library.Skills, binding)
+		return workspaceBindingRows(m.Snapshot.Config, m.Scope)
 	}
 	if m.Scope.Level == "project-targets" || m.Scope.Level == "project-skills" {
 		return m.projectRows()
@@ -309,15 +315,6 @@ func (m Model) workspaceRows() []row {
 	}
 }
 
-func bindingRows(prefix string, skills []config.Skill, binding config.Binding) []row {
-	rows := make([]row, 0, len(skills))
-	for _, skill := range skills {
-		enabled := contains(binding.Skills, skill.ID)
-		rows = append(rows, row{Key: prefix + ":" + skill.ID, ID: skill.ID, Name: skill.Name, State: toggleState(enabled), Enabled: enabled, Severity: enabledSeverity(enabled)})
-	}
-	return rows
-}
-
 func (m Model) projectRows() []row {
 	project, ok := findProject(m.Snapshot.Config.Projects, m.Scope.Project)
 	switch m.Scope.Level {
@@ -325,24 +322,22 @@ func (m Model) projectRows() []row {
 		if !ok {
 			return nil
 		}
-		common := row{Key: "project:" + project.Name + ":common", ID: "common", Name: "Common", State: fmt.Sprintf("%d skills", len(project.Skills))}
+		commonCount, commonOwners := workspaceTargetSummary(m.Snapshot.Config, Scope{Project: project.Name, Level: "project-skills"})
+		common := row{Key: "project:" + project.Name + ":common", ID: "common", Name: "Common", State: fmt.Sprintf("%d available", commonCount), Detail: commonOwners}
 		if len(project.Agents) == 0 {
 			common.Detail = "No agents configured · choose Manage agents"
 		}
 		rows := []row{common}
 		for _, name := range project.Agents {
-			rows = append(rows, row{Key: "project:" + project.Name + ":" + name, ID: name, Name: name, State: fmt.Sprintf("%d skills", len(project.AgentBindings[name].Skills))})
+			count, owners := workspaceTargetSummary(m.Snapshot.Config, Scope{Project: project.Name, Agent: name, Level: "project-skills"})
+			rows = append(rows, row{Key: "project:" + project.Name + ":" + name, ID: name, Name: name, State: fmt.Sprintf("%d available", count), Detail: owners})
 		}
 		return rows
 	case "project-skills":
 		if !ok {
 			return nil
 		}
-		binding := project.Binding
-		if m.Scope.Agent != "" {
-			binding = project.AgentBindings[m.Scope.Agent]
-		}
-		return bindingRows("project:"+project.Name+":"+m.Scope.Agent, m.Snapshot.Config.Library.Skills, binding)
+		return workspaceBindingRows(m.Snapshot.Config, m.Scope)
 	default:
 		var rows []row
 		for _, current := range m.Snapshot.Config.Projects {

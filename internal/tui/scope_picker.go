@@ -13,10 +13,12 @@ import (
 type pickerPurpose string
 
 const (
-	pickerBatchScope            pickerPurpose = "batch-scope"
-	pickerPresetApplyScope      pickerPurpose = "preset-apply-scope"
-	pickerProjectPreset         pickerPurpose = "project-preset"
-	pickerGlobalWorkspacePreset pickerPurpose = "global-workspace-preset"
+	pickerBatchScope             pickerPurpose = "batch-scope"
+	pickerPresetApplyScope       pickerPurpose = "preset-apply-scope"
+	pickerProjectPreset          pickerPurpose = "project-preset"
+	pickerGlobalWorkspacePreset  pickerPurpose = "global-workspace-preset"
+	pickerGlobalPresetApplyScope pickerPurpose = "global-preset-apply-scope"
+	pickerAgentPreset            pickerPurpose = "agent-preset"
 )
 
 type pickerChoice struct {
@@ -29,6 +31,7 @@ type pickerState struct {
 	Purpose pickerPurpose
 	Choices []pickerChoice
 	Project string
+	Agent   string
 	Preset  string
 }
 
@@ -36,7 +39,11 @@ func (m *Model) enterScopePicker(purpose pickerPurpose, project, preset string, 
 	if !preserveReturn {
 		m.captureConfirmReturn()
 	}
-	m.Picker = pickerState{Purpose: purpose, Project: project, Preset: preset, Choices: m.scopeChoices(project)}
+	choices := m.scopeChoices(project)
+	if purpose == pickerGlobalPresetApplyScope {
+		choices = globalScopeChoices()
+	}
+	m.Picker = pickerState{Purpose: purpose, Project: project, Preset: preset, Choices: choices}
 	m.Mode, m.Focus, m.ActionIndex, m.Cursor, m.Scroll, m.OverlayScroll = ModeScopePicker, FocusList, 0, 0, 0, 0
 	m.Status = "Choose an exact target scope"
 }
@@ -52,7 +59,7 @@ func (m *Model) enterPresetPicker(purpose pickerPurpose, project string) {
 	for _, name := range names {
 		choices = append(choices, pickerChoice{Label: name, Preset: name})
 	}
-	m.Picker = pickerState{Purpose: purpose, Project: project, Choices: choices}
+	m.Picker = pickerState{Purpose: purpose, Project: project, Agent: m.Scope.Agent, Choices: choices}
 	m.Mode, m.Focus, m.ActionIndex, m.Cursor, m.Scroll, m.OverlayScroll = ModePresetPicker, FocusList, 0, 0, 0, 0
 	m.Status = "Choose a preset"
 }
@@ -69,14 +76,7 @@ func (m Model) scopeChoices(projectName string) []pickerChoice {
 		}
 		return choices
 	}
-	all := make([]app.BindingRequest, 0, len(agent.Names()))
-	for _, name := range agent.Names() {
-		all = append(all, app.BindingRequest{Agent: name})
-	}
-	choices := []pickerChoice{{Label: "All agents", Bindings: all}}
-	for _, name := range agent.Names() {
-		choices = append(choices, pickerChoice{Label: "Global / " + name, Bindings: []app.BindingRequest{{Agent: name}}})
-	}
+	choices := globalScopeChoices()
 	projects := append([]configProject(nil), projectNames(m.Snapshot.Config.Projects)...)
 	sort.SliceStable(projects, func(i, j int) bool { return projects[i].Name < projects[j].Name })
 	for _, project := range projects {
@@ -84,6 +84,18 @@ func (m Model) scopeChoices(projectName string) []pickerChoice {
 		for _, name := range project.Agents {
 			choices = append(choices, pickerChoice{Label: "Project / " + project.Name + " / " + name, Bindings: []app.BindingRequest{{Project: project.Name, Agent: name}}})
 		}
+	}
+	return choices
+}
+
+func globalScopeChoices() []pickerChoice {
+	all := make([]app.BindingRequest, 0, len(agent.Names()))
+	for _, name := range agent.Names() {
+		all = append(all, app.BindingRequest{Agent: name})
+	}
+	choices := []pickerChoice{{Label: "All agents", Bindings: all}}
+	for _, name := range agent.Names() {
+		choices = append(choices, pickerChoice{Label: "Global / " + name, Bindings: []app.BindingRequest{{Agent: name}}})
 	}
 	return choices
 }
@@ -112,8 +124,14 @@ func (m Model) choosePicker() (tea.Model, tea.Cmd) {
 			m.enterScopePicker(pickerPresetApplyScope, m.Picker.Project, choice.Preset, true)
 			return m, nil
 		case pickerGlobalWorkspacePreset:
-			m.enterScopePicker(pickerPresetApplyScope, "", choice.Preset, true)
+			m.enterScopePicker(pickerGlobalPresetApplyScope, "", choice.Preset, true)
 			return m, nil
+		case pickerAgentPreset:
+			binding := app.BindingRequest{Preset: choice.Preset, Agent: m.Picker.Agent}
+			m.pendingPreset = app.PresetMutationRequest{Operation: app.PresetApply, Name: choice.Preset, Binding: binding}
+			m.confirm, m.confirmReturnReady = ActionPreset, true
+			m.Busy, m.Status = true, "Building exact agent preset preview..."
+			return m, presetMutationPreviewCmd(m.ctx, m.service, m.pendingPreset)
 		}
 	}
 	switch m.Picker.Purpose {
@@ -131,7 +149,7 @@ func (m Model) choosePicker() (tea.Model, tea.Cmd) {
 		m.confirmReturnReady = true
 		m.Busy, m.Status = true, "Building atomic batch preview..."
 		return m, batchPreviewCmd(m.ctx, m.service, m.pendingBatch)
-	case pickerPresetApplyScope:
+	case pickerPresetApplyScope, pickerGlobalPresetApplyScope:
 		if len(choice.Bindings) == 1 {
 			binding := choice.Bindings[0]
 			binding.Preset = m.Picker.Preset

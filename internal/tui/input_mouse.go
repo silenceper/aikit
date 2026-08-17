@@ -349,6 +349,9 @@ func (m Model) performPrimaryAction(index int) (tea.Model, tea.Cmd) {
 		case "Remove selected":
 			operation = app.BatchRemove
 		}
+		if m.Mode == ModeWorkspaceSkills {
+			return m.previewWorkspaceSkills(operation)
+		}
 		if operation == app.BatchEnable || operation == app.BatchDisable {
 			if len(m.selectedBatchSkillIDs()) == 0 {
 				m.Err = "select at least one skill"
@@ -412,6 +415,14 @@ func (m Model) performPrimaryAction(index int) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "Manage agents":
 		return m.openProjectAgents()
+	case "Select skills":
+		m.enterWorkspaceSkills()
+		return m, nil
+	case "Manage source":
+		m.Detail = true
+		m.Focus = FocusDetail
+		m.Status = "Review the owning preset or inherited scope in Details"
+		return m, nil
 	case "Save agents":
 		return m.saveProjectAgents()
 		return m, nil
@@ -420,6 +431,10 @@ func (m Model) performPrimaryAction(index int) (tea.Model, tea.Cmd) {
 	case "Apply preset":
 		if m.ActiveView == ViewWorkspaces && m.Scope.Level == "workspace-global" {
 			m.enterPresetPicker(pickerGlobalWorkspacePreset, "")
+			return m, nil
+		}
+		if m.ActiveView == ViewWorkspaces && m.Scope.Level == "agent-skills" {
+			m.enterPresetPicker(pickerAgentPreset, "")
 			return m, nil
 		}
 		project := m.currentProjectName()

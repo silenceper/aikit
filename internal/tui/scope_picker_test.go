@@ -155,3 +155,35 @@ func TestStructuredScopePickerCancelAndGlobalWorkspace(t *testing.T) {
 		t.Fatalf("global workspace scope=%+v detail=%v rows=%d cmd=%v", global.Scope, global.Detail, len(global.rows()), cmd != nil)
 	}
 }
+
+func TestGlobalWorkspacePresetPickerOnlyOffersGlobalTargets(t *testing.T) {
+	service := &fakeService{}
+	m := NewModel(nil, service, &fakeMigration{}, ViewWorkspaces, ActionNone)
+	m.Snapshot, m.Scope, m.Width, m.Height = testSnapshot(), Scope{Level: "workspace-global"}, 110, 30
+	m, _ = chooseVisibleAction(t, m, "Apply preset", false)
+	if m.Mode != ModePresetPicker {
+		t.Fatalf("preset picker mode=%s", m.Mode)
+	}
+	m, cmd := chooseRowByName(t, m, "review", false)
+	if cmd != nil || m.Mode != ModeScopePicker {
+		t.Fatalf("global target picker mode=%s cmd=%v", m.Mode, cmd != nil)
+	}
+	for _, current := range m.rows() {
+		if strings.HasPrefix(current.Name, "Project /") {
+			t.Fatalf("global workspace offered project target %q", current.Name)
+		}
+	}
+	m, preview := chooseRowByName(t, m, "All agents", false)
+	if preview == nil {
+		t.Fatal("all-agents preset preview was not deferred")
+	}
+	_ = preview()
+	if service.lastBatchPreview.Operation != app.BatchEnable || len(service.lastBatchPreview.Bindings) != 5 {
+		t.Fatalf("all-agent preset batch=%+v", service.lastBatchPreview)
+	}
+	for _, binding := range service.lastBatchPreview.Bindings {
+		if binding.Preset != "review" || binding.Project != "" || binding.Agent == "" {
+			t.Fatalf("invalid global preset binding=%+v", binding)
+		}
+	}
+}

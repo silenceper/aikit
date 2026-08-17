@@ -620,6 +620,9 @@ func (m Model) emptyState() string {
 }
 
 func (m Model) primaryActions() []string {
+	if m.Mode == ModeWorkspaceSkills {
+		return []string{"Enable selected", "Disable selected", "Cancel"}
+	}
 	if m.Mode == ModeScopePicker || m.Mode == ModePresetPicker {
 		return []string{"Select", "Cancel"}
 	}
@@ -664,6 +667,9 @@ func (m Model) primaryActions() []string {
 					actions = append(actions, "Enable selected", "Disable selected", "Clear selection")
 				}
 				return append(actions, "Sync preview", "Close")
+			}
+			if m.Scope.Level == "agent-skills" {
+				return []string{"Apply preset", "Sync preview", "Close"}
 			}
 			return []string{"Sync preview", "Close"}
 		case ViewPresets:
@@ -713,10 +719,13 @@ func (m Model) primaryActions() []string {
 			return []string{"Open", "Create project", "More"}
 		}
 		if m.Scope.Level == "agent-skills" || m.Scope.Level == "project-skills" {
-			if current.Enabled {
-				return []string{"Disable", "More"}
+			if current.Direct {
+				return []string{"Disable", "Select skills", "More"}
 			}
-			return []string{"Enable", "More"}
+			if current.Enabled {
+				return []string{"Manage source", "Select skills", "More"}
+			}
+			return []string{"Enable", "Select skills", "More"}
 		}
 		if m.Scope.Level == "project-targets" {
 			return []string{"Open", "Manage agents", "More"}
@@ -843,7 +852,7 @@ func (m Model) breadcrumb() string {
 }
 
 func (m Model) selectionRendered() bool {
-	return m.ActiveView == ViewLibrary || m.ActiveView == ViewMigration || (m.ActiveView == ViewWorkspaces && m.Scope.Level == "workspace-global") || m.Mode == ModeScan || m.Mode == ModeUpdates || m.Mode == ModeAddSelect || m.Mode == ModeProjectAgents || (m.Mode == ModeFilter && (m.filterParent == ModeScan || m.filterParent == ModeUpdates || m.filterParent == ModeAddSelect || m.filterParent == ModeProjectAgents))
+	return m.ActiveView == ViewLibrary || m.ActiveView == ViewMigration || (m.ActiveView == ViewWorkspaces && m.Scope.Level == "workspace-global") || m.Mode == ModeScan || m.Mode == ModeUpdates || m.Mode == ModeAddSelect || m.Mode == ModeProjectAgents || m.Mode == ModeWorkspaceSkills || (m.Mode == ModeFilter && (m.filterParent == ModeScan || m.filterParent == ModeUpdates || m.filterParent == ModeAddSelect || m.filterParent == ModeProjectAgents || m.filterParent == ModeWorkspaceSkills))
 }
 
 func joinColumns(left, right string, leftWidth, rightWidth int) string {

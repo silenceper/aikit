@@ -76,6 +76,12 @@ func (m Model) toggleSelected() (tea.Model, tea.Cmd) {
 		m.Selected[key] = !m.Selected[key]
 		return m, nil
 	}
+	if m.Mode == ModeWorkspaceSkills {
+		key := current.selectionKey()
+		m.Selected[key] = !m.Selected[key]
+		m.Status = fmt.Sprintf("%d Library skill(s) selected", len(m.selectedWorkspacePickerIDs()))
+		return m, nil
+	}
 	if m.Mode == ModeScopePicker || m.Mode == ModePresetPicker {
 		return m.choosePicker()
 	}
@@ -97,13 +103,23 @@ func (m Model) toggleSelected() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.ActiveView == ViewWorkspaces && m.Scope.Level == "agent-skills" {
-		request := app.BindingPreviewRequest{Binding: app.BindingRequest{SkillID: current.ID, Agent: m.Scope.Agent}, Enable: !current.Enabled}
+		if current.Enabled && !current.Direct {
+			m.Detail = true
+			m.Status = "This skill is provided by " + firstNonEmpty(current.Detail, current.State) + "; manage that source to remove it"
+			return m, nil
+		}
+		request := app.BindingPreviewRequest{Binding: app.BindingRequest{SkillID: current.ID, Agent: m.Scope.Agent}, Enable: !current.Direct}
 		m.pendingBinding, m.confirm = request, ActionBinding
 		m.Busy, m.Status = true, "Building binding preview..."
 		return m, bindingPreviewCmd(m.ctx, m.service, request)
 	}
 	if m.ActiveView == ViewWorkspaces && m.Scope.Level == "project-skills" {
-		request := app.BindingPreviewRequest{Binding: app.BindingRequest{SkillID: current.ID, Project: m.Scope.Project, Agent: m.Scope.Agent}, Enable: !current.Enabled}
+		if current.Enabled && !current.Direct {
+			m.Detail = true
+			m.Status = "This skill is inherited from " + firstNonEmpty(current.Detail, current.State) + "; manage that source to remove it"
+			return m, nil
+		}
+		request := app.BindingPreviewRequest{Binding: app.BindingRequest{SkillID: current.ID, Project: m.Scope.Project, Agent: m.Scope.Agent}, Enable: !current.Direct}
 		m.pendingBinding, m.confirm = request, ActionBinding
 		m.Busy, m.Status = true, "Building binding preview..."
 		return m, bindingPreviewCmd(m.ctx, m.service, request)
@@ -126,6 +142,9 @@ func (m Model) activate() (tea.Model, tea.Cmd) {
 	}
 	current := rows[m.Cursor]
 	if m.Mode == ModeProjectAgents {
+		return m.toggleSelected()
+	}
+	if m.Mode == ModeWorkspaceSkills {
 		return m.toggleSelected()
 	}
 	if m.Mode == ModeUpdates || m.Mode == ModeScan {
@@ -278,6 +297,13 @@ func (m Model) previewSelectedStatusAdopt() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) cancel() (tea.Model, tea.Cmd) {
+	if m.Mode == ModeWorkspaceSkills {
+		if !m.restoreConfirmReturn() {
+			m.Mode, m.Focus = ModeTable, FocusList
+		}
+		m.Status = "Cancelled; no changes made"
+		return m, nil
+	}
 	if m.Mode == ModeScopePicker || m.Mode == ModePresetPicker {
 		if !m.restoreConfirmReturn() {
 			m.Mode, m.Focus = ModeTable, FocusList

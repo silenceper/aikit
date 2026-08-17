@@ -54,19 +54,20 @@ const (
 type Mode string
 
 const (
-	ModeTable         Mode = "table"
-	ModeFilter        Mode = "filter"
-	ModeUpdates       Mode = "updates"
-	ModeScan          Mode = "scan"
-	ModeConfirm       Mode = "confirm"
-	ModeConfiguration Mode = "configuration"
-	ModeInput         Mode = "input"
-	ModeAddSelect     Mode = "add-select"
-	ModeProjectAgents Mode = "project-agents"
-	ModeScopePicker   Mode = "scope-picker"
-	ModePresetPicker  Mode = "preset-picker"
-	ModeMore          Mode = "more"
-	ModeErrorDetail   Mode = "error-detail"
+	ModeTable           Mode = "table"
+	ModeFilter          Mode = "filter"
+	ModeUpdates         Mode = "updates"
+	ModeScan            Mode = "scan"
+	ModeConfirm         Mode = "confirm"
+	ModeConfiguration   Mode = "configuration"
+	ModeInput           Mode = "input"
+	ModeAddSelect       Mode = "add-select"
+	ModeProjectAgents   Mode = "project-agents"
+	ModeWorkspaceSkills Mode = "workspace-skills"
+	ModeScopePicker     Mode = "scope-picker"
+	ModePresetPicker    Mode = "preset-picker"
+	ModeMore            Mode = "more"
+	ModeErrorDetail     Mode = "error-detail"
 )
 
 type Focus string
@@ -141,6 +142,7 @@ type row struct {
 	Action            string
 	Detail            string
 	Enabled           bool
+	Direct            bool
 	Severity          rowSeverity
 	DestinationView   View
 	DestinationMode   Mode

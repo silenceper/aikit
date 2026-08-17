@@ -306,7 +306,7 @@ func TestSemanticBadgesOnCollectionRowsKeepNoColorMarkers(t *testing.T) {
 		{"migration-conflict", ViewMigration, func(m *Model) {
 			m.Inventory.Items = []app.ScanItem{{Key: "conflict", State: app.ScanStateNameConflict, Skill: config.Skill{Name: "conflict"}}}
 		}, "[WARN]"},
-		{"workspace-success", ViewWorkspaces, func(m *Model) { m.Scope = Scope{Agent: "codex", Level: "agent-skills"} }, "[OK] Enabled"},
+		{"workspace-success", ViewWorkspaces, func(m *Model) { m.Scope = Scope{Agent: "codex", Level: "agent-skills"} }, "[OK] Direct"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
