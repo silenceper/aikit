@@ -122,6 +122,21 @@ The six top-level sections keep the first screen intentionally compact:
   Link-existing, or Ignore action before confirmation.
 - **Status** shows reconciliation issues and previews sync work.
 
+Project setup in the TUI is path-first: open **Workspaces > Projects > Create
+project** and enter the existing project directory. Aikit derives the project
+name, detects supported Agent directories, and shows an exact preview. It asks
+for a separate name only when the derived name is invalid or already used.
+After registration, open **Common** or a declared Agent to toggle one skill or
+choose **Select skills** for a searchable atomic batch. **Manage agents** uses
+checkboxes; Rename and Change project directory are separate actions under
+**More**.
+
+Presets are visible in both directions. The **Presets** page shows each
+preset's member count and applied scopes. From **Workspaces > Global**, an
+individual global Agent, or a Project's **More** menu, choose **Apply preset**
+and select the exact visible target. No encoded `agent:name` or pipe-delimited
+project input is required.
+
 Press `Ctrl+K` to open Configuration. The global YAML ledger is
 `$AIKIT_HOME/config.yaml`; when `AIKIT_HOME` is unset the path is
 `~/.aikit/config.yaml`. The configuration view also reports the resolved path,

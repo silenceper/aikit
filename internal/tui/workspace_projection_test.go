@@ -118,6 +118,30 @@ func TestProjectTargetRowsReportEffectiveSkillsNotOnlyDirectEntries(t *testing.T
 	}
 }
 
+func TestWorkspaceAgentAndPresetSummariesExposeEffectiveUsage(t *testing.T) {
+	snapshot := testSnapshot()
+	snapshot.Config.Agents["codex"] = config.Binding{Presets: []string{"review"}}
+	snapshot.Config.Projects[0].Presets = []string{"review"}
+	m := NewModel(nil, &fakeService{}, &fakeMigration{}, ViewWorkspaces, ActionNone)
+	m.Snapshot, m.Scope = snapshot, Scope{Level: "workspace-agents"}
+	codex := rowByID(t, m.rows(), "codex")
+	if codex.State != "1 available" || !strings.Contains(codex.Detail, "Preset: review") {
+		t.Fatalf("agent summary=%+v", codex)
+	}
+
+	m.ActiveView, m.Scope = ViewPresets, Scope{}
+	review := rowByID(t, m.rows(), "review")
+	if review.State != "1 skill · 2 scopes" || !strings.Contains(review.Detail, "Global / codex") || !strings.Contains(review.Detail, "Project / aikit / Common") {
+		t.Fatalf("preset usage=%+v", review)
+	}
+
+	m.ActiveView, m.Scope = ViewWorkspaces, Scope{Project: "aikit", Level: "project-targets"}
+	m.enterMore()
+	if !strings.Contains(strings.Join(m.primaryActions(), " "), "Apply preset") {
+		t.Fatalf("project target More hides preset entry: %v", m.primaryActions())
+	}
+}
+
 func TestWorkspaceSelectSkillsPreviewsOneExactScopeBatch(t *testing.T) {
 	service := &fakeService{}
 	m := NewModel(nil, service, &fakeMigration{}, ViewWorkspaces, ActionNone)

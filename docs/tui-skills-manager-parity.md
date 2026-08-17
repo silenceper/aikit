@@ -1,7 +1,7 @@
 # TUI Skills Manager Parity Audit
 
 Date: 2026-08-17
-Status: Implementation baseline
+Status: In-scope routes verified
 
 This audit compares aikit with its approved workspace TUI specification and
 uses the official `xingkongliang/skills-manager` workspace workflow as an
@@ -15,15 +15,15 @@ the desktop UI or adopting unrelated product scope.
 | Automatic local inventory | Meets | Offline startup Snapshot plus incremental all-project Inventory |
 | Exact import/adopt/link/compare | Meets | Migration exact selectors, preview, confirmation, session Ignore |
 | Global per-agent workspace | Meets | Workspaces > Agents > agent lists Library skills and previews toggles |
-| All Agents global workspace | Missing | `Global` is a non-operable detail row; implement aggregate skill state and explicit agent targets |
-| Project registration | Missing usability | Current TUI requires `name|path|agents`; replace with directory-only preview |
-| Project Common/per-agent skills | Partial | Bindings work after registration; management and provenance need clearer project-local entry |
-| Project name/path/agents | Missing usability | Current TUI requires encoded edit fields; replace with independent inputs and checklist |
+| All Agents global workspace | Meets | Workspaces > Global lists every Library skill with an exact enabled-Agent count; selection uses an explicit All agents or individual target picker |
+| Project registration | Meets | Workspaces > Projects > Create project asks only for an existing directory, derives the default name, detects supported Agents, then previews one typed edit |
+| Project Common/per-agent skills | Meets | Project > Common or Agent shows every Library skill, effective ownership, direct toggle, and Select skills atomic batch |
+| Project name/path/agents | Meets | Project More separates Rename, Change project directory, and a five-Agent checklist; no pipe-delimited input remains |
 | Presets CRUD and members | Meets | Typed create/edit/duplicate/rename/delete previews and force handling |
-| Preset apply in workspace | Partial | Backend exists; target is an encoded string and workspace pages lack direct entry |
-| Library batch operations | Partial | Atomic mutations exist; scope preview is composed in the TUI and selected through encoded text |
-| Workspace batch operations | Missing | Add a searchable Library multi-picker and app-owned atomic preview for current scope |
-| Effective state provenance | Missing | Rows do not distinguish Direct, Preset, Project Common, or Global inherited ownership |
+| Preset apply in workspace | Meets | Global, individual Agent, and Project More menus open a Preset picker followed by exact visible targets; Preset rows show applied scope usage |
+| Library batch operations | Meets | Library More uses a structured scope picker and the app-owned atomic PreviewBatch/Batch contract |
+| Workspace batch operations | Meets | Agent, Project Common, and Project Agent pages expose Select skills with search, multi-select, exact preview, and one atomic Batch |
+| Effective state provenance | Meets | Workspace rows distinguish Direct, Preset, Project common, Global inherited, mixed ownership, and Conflict; inherited-only rows do not promise a false Disable |
 | Status and explicit recovery | Meets | Structured issues, retry/sync preview, exact recovery review/resume |
 | Keyboard/mouse/narrow operation | Meets generally | Shared geometry and parity tests exist; every new picker must retain the same bar |
 | Marketplace, tags, archives | Excluded | Not part of aikit's approved local Git/path first-version scope |
@@ -31,5 +31,8 @@ the desktop UI or adopting unrelated product scope.
 | Backup and multi-machine sync | Excluded | Explicitly outside the approved single-machine scope |
 | Activity logs and desktop updates | Excluded | Desktop-product functionality, not required for the CLI/TUI manager |
 
-Release completion requires every in-scope `Partial` or `Missing` row above to
-become `Meets`, with an exact TUI route and an automated keyboard/mouse test.
+The excluded rows intentionally remain different from the current desktop
+skills-manager product. The in-scope routes above are covered by
+`TestSkillsManagerParityRoutesAreVisibleAndStructured`, project registration
+and management tests, structured scope picker tests, and workspace projection
+keyboard/mouse tests at wide and narrow terminal widths.

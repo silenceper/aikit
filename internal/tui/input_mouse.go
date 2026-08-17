@@ -425,7 +425,6 @@ func (m Model) performPrimaryAction(index int) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "Save agents":
 		return m.saveProjectAgents()
-		return m, nil
 	case "Remove project":
 		return m.previewCurrentProjectRemove()
 	case "Apply preset":

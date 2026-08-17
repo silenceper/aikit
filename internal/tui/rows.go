@@ -88,7 +88,12 @@ func (m Model) rows() []row {
 			}
 		} else {
 			for _, preset := range m.Snapshot.Config.Presets {
-				rows = append(rows, row{Key: "preset:" + preset.Name, ID: preset.Name, Name: preset.Name, State: fmt.Sprintf("%d skills", len(preset.Skills))})
+				usage := presetUsage(m.Snapshot.Config, preset.Name)
+				skillNoun := "skills"
+				if len(preset.Skills) == 1 {
+					skillNoun = "skill"
+				}
+				rows = append(rows, row{Key: "preset:" + preset.Name, ID: preset.Name, Name: preset.Name, State: fmt.Sprintf("%d %s · %d scopes", len(preset.Skills), skillNoun, len(usage)), Detail: strings.Join(usage, " · ")})
 			}
 		}
 	case ViewMigration:
@@ -300,8 +305,8 @@ func (m Model) workspaceRows() []row {
 	if m.Scope.Level == "workspace-agents" {
 		var rows []row
 		for _, name := range agent.Names() {
-			binding := m.Snapshot.Config.Agents[name]
-			rows = append(rows, row{Key: "agent:" + name, ID: name, Name: name, State: fmt.Sprintf("%d skills", len(binding.Skills))})
+			count, owners := workspaceTargetSummary(m.Snapshot.Config, Scope{Agent: name, Level: "agent-skills"})
+			rows = append(rows, row{Key: "agent:" + name, ID: name, Name: name, State: fmt.Sprintf("%d available", count), Detail: owners})
 		}
 		return rows
 	}

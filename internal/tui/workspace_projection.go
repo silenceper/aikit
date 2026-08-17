@@ -99,6 +99,26 @@ func workspaceTargetSummary(cfg config.Config, scope Scope) (int, string) {
 	return count, strings.Join(owners, " · ")
 }
 
+func presetUsage(cfg config.Config, presetName string) []string {
+	usage := make([]string, 0)
+	for _, agentName := range agent.Names() {
+		if contains(cfg.Agents[agentName].Presets, presetName) {
+			usage = append(usage, "Global / "+agentName)
+		}
+	}
+	for _, project := range cfg.Projects {
+		if contains(project.Presets, presetName) {
+			usage = append(usage, "Project / "+project.Name+" / Common")
+		}
+		for _, agentName := range project.Agents {
+			if contains(project.AgentBindings[agentName].Presets, presetName) {
+				usage = append(usage, "Project / "+project.Name+" / "+agentName)
+			}
+		}
+	}
+	return usage
+}
+
 func workspaceSkillProjection(cfg config.Config, project config.Project, projectOK bool, scope Scope, skill config.Skill) workspaceProjection {
 	projection := workspaceProjection{}
 	if scope.Project == "" {
