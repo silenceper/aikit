@@ -54,12 +54,12 @@ func enterProjectText(m Model, value string) Model {
 	return m
 }
 
-func TestProjectEditRebindPreviewConfirmKeyboardMouse(t *testing.T) {
+func TestProjectDirectoryRebindPreviewConfirmKeyboardMouse(t *testing.T) {
 	tests := []struct {
 		name, action, input string
 		want                app.ProjectEditRequest
 	}{
-		{"edit-rebind", "Edit project", "renamed|/work/moved|cursor|codex", app.ProjectEditRequest{Project: "aikit", Name: "renamed", Path: "/work/moved", AddAgents: []string{"cursor"}, RemoveAgents: []string{"codex"}}},
+		{"edit-rebind", "Change project directory", "/work/moved", app.ProjectEditRequest{Project: "aikit", Path: "/work/moved"}},
 	}
 	for _, tt := range tests {
 		for _, mouse := range []bool{false, true} {

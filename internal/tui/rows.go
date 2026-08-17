@@ -38,6 +38,19 @@ func (m Model) rows() []row {
 		}
 		return m.filtered(rows)
 	}
+	if mode == ModeProjectAgents {
+		project, projectOK := findProject(m.Snapshot.Config.Projects, m.pendingID)
+		rows := make([]row, 0, len(agent.Names()))
+		for _, name := range agent.Names() {
+			configured := projectOK && contains(project.Agents, name)
+			state := "Available"
+			if configured {
+				state = "Configured"
+			}
+			rows = append(rows, row{Key: "project-agent:" + name, ID: name, Name: name, State: state, Enabled: configured, Severity: enabledSeverity(configured)})
+		}
+		return m.filtered(rows)
+	}
 
 	var rows []row
 	switch m.ActiveView {
@@ -302,7 +315,11 @@ func (m Model) projectRows() []row {
 		if !ok {
 			return nil
 		}
-		rows := []row{{Key: "project:" + project.Name + ":common", ID: "common", Name: "Common", State: fmt.Sprintf("%d skills", len(project.Skills))}}
+		common := row{Key: "project:" + project.Name + ":common", ID: "common", Name: "Common", State: fmt.Sprintf("%d skills", len(project.Skills))}
+		if len(project.Agents) == 0 {
+			common.Detail = "No agents configured · choose Manage agents"
+		}
+		rows := []row{common}
 		for _, name := range project.Agents {
 			rows = append(rows, row{Key: "project:" + project.Name + ":" + name, ID: name, Name: name, State: fmt.Sprintf("%d skills", len(project.AgentBindings[name].Skills))})
 		}

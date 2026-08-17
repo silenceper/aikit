@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/silenceper/aikit/internal/agent"
 	"github.com/silenceper/aikit/internal/app"
 	"github.com/silenceper/aikit/internal/updatecheck"
 	"github.com/silenceper/aikit/pkg/config"
@@ -70,6 +71,11 @@ func (m Model) toggleSelected() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	current := rows[m.Cursor]
+	if m.Mode == ModeProjectAgents {
+		key := current.selectionKey()
+		m.Selected[key] = !m.Selected[key]
+		return m, nil
+	}
 	if m.ActiveView == ViewMigration || m.Mode == ModeScan || m.Mode == ModeUpdates || m.Mode == ModeAddSelect {
 		key := current.selectionKey()
 		m.Selected[key] = !m.Selected[key]
@@ -110,6 +116,9 @@ func (m Model) activate() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	current := rows[m.Cursor]
+	if m.Mode == ModeProjectAgents {
+		return m.toggleSelected()
+	}
 	if m.Mode == ModeUpdates || m.Mode == ModeScan {
 		sourceMode := m.Mode
 		if !m.Selected[current.selectionKey()] {
@@ -130,6 +139,15 @@ func (m Model) activate() (tea.Model, tea.Cmd) {
 		m.enterConfirm(ActionAdd)
 		m.Preview = app.MutationPreview{Title: "Add selected skills", Summary: fmt.Sprintf("Add %d selected skill(s) from %s", len(m.pendingAdd.Skills), m.pendingAdd.Source), RequiresConfirmation: true}
 		m.Status = "Review selected skills, then confirm"
+		return m, nil
+	}
+	if m.Mode == ModeProjectAgents {
+		if m.restoreConfirmReturn() {
+			m.Status = "Cancelled; no changes made"
+		} else {
+			m.Mode = ModeTable
+		}
+		m.Selected = make(map[string]bool)
 		return m, nil
 	}
 	if m.ActiveView == ViewMigration {
@@ -454,11 +472,11 @@ func (m Model) confirmCurrent(action Action) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) previewCurrentProjectRemove() (tea.Model, tea.Cmd) {
-	rows := m.rows()
-	if m.Cursor < 0 || m.Cursor >= len(rows) {
+	project := m.currentProjectName()
+	if project == "" {
 		return m, nil
 	}
-	m.pendingID, m.confirm = rows[m.Cursor].ID, ActionRemoveProject
+	m.pendingID, m.confirm = project, ActionRemoveProject
 	m.Busy, m.Status = true, "Building exact project removal preview..."
 	return m, projectRemovePreviewCmd(m.ctx, m.service, app.ProjectRemoveRequest{Project: m.pendingID})
 }
@@ -550,14 +568,15 @@ func (m Model) submitInput() (tea.Model, tea.Cmd) {
 		}
 		m.Busy, m.Status = true, "Rebuilding project registration preview..."
 		return m, projectRegistrationPreviewCmd(m.ctx, m.service, app.ProjectRegistrationRequest{Path: m.pendingProjectPath, Name: value})
-	case inputProjectEdit:
-		request, err := m.parseProjectEditInput(value)
-		if err != nil {
-			m.Err = err.Error()
-			return m, nil
-		}
+	case inputProjectRename:
+		request := app.ProjectEditRequest{Project: m.pendingID, Name: value}
 		m.pendingProject = request
-		m.Busy, m.Status = true, "Building project edit preview..."
+		m.Busy, m.Status = true, "Building project rename preview..."
+		return m, projectPreviewCmd(m.ctx, m.service, request)
+	case inputProjectPath:
+		request := app.ProjectEditRequest{Project: m.pendingID, Path: value}
+		m.pendingProject = request
+		m.Busy, m.Status = true, "Building project directory change preview..."
 		return m, projectPreviewCmd(m.ctx, m.service, request)
 	default:
 		m.Err = "Unsupported input action"
@@ -565,36 +584,66 @@ func (m Model) submitInput() (tea.Model, tea.Cmd) {
 	}
 }
 
-func (m Model) parseProjectEditInput(value string) (app.ProjectEditRequest, error) {
-	parts := strings.Split(value, "|")
-	want := 4
-	if len(parts) != want {
-		return app.ProjectEditRequest{}, fmt.Errorf("expected %d pipe-separated fields", want)
+func (m Model) currentProjectName() string {
+	if m.Scope.Project != "" {
+		return m.Scope.Project
 	}
-	for i := range parts {
-		parts[i] = strings.TrimSpace(parts[i])
+	rows := m.rows()
+	if m.Cursor >= 0 && m.Cursor < len(rows) && m.Scope.Level == "workspace-projects" {
+		return rows[m.Cursor].ID
 	}
-	request := app.ProjectEditRequest{Name: parts[0], Path: parts[1], AddAgents: splitAgents(parts[2])}
-	request.Project = m.pendingID
-	request.RemoveAgents = splitAgents(parts[3])
-	if request.Project == "" {
-		return app.ProjectEditRequest{}, fmt.Errorf("select a project to edit")
-	}
-	if request.Name == "" && request.Path == "" && len(request.AddAgents) == 0 && len(request.RemoveAgents) == 0 {
-		return app.ProjectEditRequest{}, fmt.Errorf("project edit requires at least one change")
-	}
-	return request, nil
+	return ""
 }
 
-func splitAgents(value string) []string {
-	var agents []string
-	for _, name := range strings.Split(value, ",") {
-		name = strings.TrimSpace(name)
-		if name != "" && !contains(agents, name) {
-			agents = append(agents, name)
+func (m Model) openProjectAgents() (tea.Model, tea.Cmd) {
+	projectName := m.currentProjectName()
+	project, ok := findProject(m.Snapshot.Config.Projects, projectName)
+	if !ok {
+		m.Err = "select a registered project"
+		return m, nil
+	}
+	m.captureConfirmReturn()
+	m.pendingID = project.Name
+	m.Mode, m.Focus, m.Cursor, m.Scroll = ModeProjectAgents, FocusList, 0, 0
+	m.Selected = make(map[string]bool)
+	for _, name := range project.Agents {
+		m.Selected["project-agent:"+name] = true
+	}
+	m.Status = "Select the agents enabled for this project"
+	return m, nil
+}
+
+func (m Model) saveProjectAgents() (tea.Model, tea.Cmd) {
+	project, ok := findProject(m.Snapshot.Config.Projects, m.pendingID)
+	if !ok {
+		m.Err = "selected project no longer exists"
+		return m, nil
+	}
+	selected := make([]string, 0, len(agent.Names()))
+	for _, name := range agent.Names() {
+		if m.Selected["project-agent:"+name] {
+			selected = append(selected, name)
 		}
 	}
-	return agents
+	request := app.ProjectEditRequest{Project: project.Name}
+	for _, name := range selected {
+		if !contains(project.Agents, name) {
+			request.AddAgents = append(request.AddAgents, name)
+		}
+	}
+	for _, name := range project.Agents {
+		if !contains(selected, name) {
+			request.RemoveAgents = append(request.RemoveAgents, name)
+		}
+	}
+	if len(request.AddAgents)+len(request.RemoveAgents) == 0 {
+		m.Status = "Agent selection is unchanged"
+		return m, nil
+	}
+	m.pendingProject = request
+	m.confirmReturnReady = true
+	m.Busy, m.Status = true, "Building exact project agent preview..."
+	return m, projectPreviewCmd(m.ctx, m.service, request)
 }
 
 func (m Model) parsePresetApplyTarget(value string) (app.BindingRequest, error) {

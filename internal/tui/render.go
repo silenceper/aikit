@@ -617,6 +617,9 @@ func (m Model) emptyState() string {
 }
 
 func (m Model) primaryActions() []string {
+	if m.Mode == ModeProjectAgents {
+		return []string{"Save agents", "Cancel"}
+	}
 	if m.Mode == ModeErrorDetail {
 		return []string{"Close"}
 	}
@@ -646,8 +649,8 @@ func (m Model) primaryActions() []string {
 			}
 			return append(actions, "Close")
 		case ViewWorkspaces:
-			if m.Scope.Level == "workspace-projects" {
-				return []string{"Edit project", "Remove project", "Close"}
+			if m.Scope.Level == "workspace-projects" || m.Scope.Level == "project-targets" || m.Scope.Level == "project-skills" {
+				return []string{"Rename project", "Manage agents", "Change project directory", "Remove project", "Close"}
 			}
 			return []string{"Sync preview", "Close"}
 		case ViewPresets:
@@ -701,6 +704,9 @@ func (m Model) primaryActions() []string {
 				return []string{"Disable", "More"}
 			}
 			return []string{"Enable", "More"}
+		}
+		if m.Scope.Level == "project-targets" {
+			return []string{"Open", "Manage agents", "More"}
 		}
 		return []string{"Open", "More"}
 	case ViewPresets:
@@ -821,7 +827,7 @@ func (m Model) breadcrumb() string {
 }
 
 func (m Model) selectionRendered() bool {
-	return m.ActiveView == ViewLibrary || m.ActiveView == ViewMigration || m.Mode == ModeScan || m.Mode == ModeUpdates || m.Mode == ModeAddSelect || (m.Mode == ModeFilter && (m.filterParent == ModeScan || m.filterParent == ModeUpdates || m.filterParent == ModeAddSelect))
+	return m.ActiveView == ViewLibrary || m.ActiveView == ViewMigration || m.Mode == ModeScan || m.Mode == ModeUpdates || m.Mode == ModeAddSelect || m.Mode == ModeProjectAgents || (m.Mode == ModeFilter && (m.filterParent == ModeScan || m.filterParent == ModeUpdates || m.filterParent == ModeAddSelect || m.filterParent == ModeProjectAgents))
 }
 
 func joinColumns(left, right string, leftWidth, rightWidth int) string {

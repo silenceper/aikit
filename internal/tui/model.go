@@ -62,6 +62,7 @@ const (
 	ModeConfiguration Mode = "configuration"
 	ModeInput         Mode = "input"
 	ModeAddSelect     Mode = "add-select"
+	ModeProjectAgents Mode = "project-agents"
 	ModeMore          Mode = "more"
 	ModeErrorDetail   Mode = "error-detail"
 )
@@ -102,7 +103,8 @@ const (
 	inputBatchScope      inputKind = "batch-scope"
 	inputProjectCreate   inputKind = "project-create"
 	inputProjectName     inputKind = "project-name"
-	inputProjectEdit     inputKind = "project-edit"
+	inputProjectRename   inputKind = "project-rename"
+	inputProjectPath     inputKind = "project-path"
 )
 
 type inputState struct {
@@ -563,7 +565,8 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.Err = ""
-		if m.pendingProject.Project == "" {
+		m.pendingProjectOpen = m.pendingProject.Project
+		if m.pendingProject.Name != "" {
 			m.pendingProjectOpen = m.pendingProject.Name
 		}
 		if msg.result.Exit == app.ExitPartial || len(msg.result.Plan.Issues)+len(msg.result.Link.Failures)+len(msg.result.Link.Issues) > 0 {

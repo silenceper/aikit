@@ -404,14 +404,20 @@ func (m Model) performPrimaryAction(index int) (tea.Model, tea.Cmd) {
 		m.enterInput(inputState{Kind: inputProjectCreate, Prompt: "Project directory"})
 		m.Status = "Enter an existing project directory; agents will be detected automatically"
 		return m, nil
-	case "Edit project":
-		rows := m.rows()
-		if m.Cursor < 0 || m.Cursor >= len(rows) {
-			return m, nil
-		}
-		m.pendingID = rows[m.Cursor].ID
-		m.enterInput(inputState{Kind: inputProjectEdit, Prompt: "Edit (name|path|add-agents|remove-agents)"})
-		m.Status = "Leave unchanged fields empty; path changes require plan confirmation"
+	case "Rename project":
+		m.pendingID = m.currentProjectName()
+		m.enterInput(inputState{Kind: inputProjectRename, Prompt: "Project name"})
+		m.Status = "Enter the new project name"
+		return m, nil
+	case "Change project directory":
+		m.pendingID = m.currentProjectName()
+		m.enterInput(inputState{Kind: inputProjectPath, Prompt: "Project directory"})
+		m.Status = "Enter the new existing project directory"
+		return m, nil
+	case "Manage agents":
+		return m.openProjectAgents()
+	case "Save agents":
+		return m.saveProjectAgents()
 		return m, nil
 	case "Remove project":
 		return m.previewCurrentProjectRemove()
