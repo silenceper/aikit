@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 
@@ -16,6 +15,17 @@ import (
 func (a *App) EditProject(ctx context.Context, request ProjectEditRequest) (Result, error) {
 	var output Result
 	err := a.deps.Store.WithLock(ctx, func(tx *config.Tx) error {
+		var validatedPath string
+		if request.Project == "" || request.Path != "" {
+			path, identity, err := validateProjectDirectory(request.Path)
+			if err != nil {
+				return err
+			}
+			if !sameProjectPathIdentity(request.ExpectedPathIdentity, identity) {
+				return fmt.Errorf("project directory changed since preview")
+			}
+			validatedPath = path
+		}
 		if err := a.beforeMutation(ctx, tx.Config); err != nil {
 			return err
 		}
@@ -23,11 +33,7 @@ func (a *App) EditProject(ctx context.Context, request ProjectEditRequest) (Resu
 			if request.Name == "" || request.Path == "" {
 				return fmt.Errorf("new project name and path are required")
 			}
-			path, err := canonicalInputPath(request.Path)
-			if err != nil {
-				return err
-			}
-			project := config.Project{Name: request.Name, Path: path, Agents: append([]string(nil), request.AddAgents...), AgentBindings: map[string]config.Binding{}}
+			project := config.Project{Name: request.Name, Path: validatedPath, Agents: append([]string(nil), request.AddAgents...), AgentBindings: map[string]config.Binding{}}
 			tx.Config.Projects = append(tx.Config.Projects, project)
 			if err := tx.Config.Validate(); err != nil {
 				return err
@@ -60,15 +66,11 @@ func (a *App) EditProject(ctx context.Context, request ProjectEditRequest) (Resu
 		}
 		pathChanged := false
 		if request.Path != "" {
-			path, err := canonicalInputPath(request.Path)
-			if err != nil {
-				return err
-			}
-			pathChanged = path != project.Path
+			pathChanged = validatedPath != project.Path
 			if pathChanged && !request.Confirmed {
 				return fmt.Errorf("project path rebind requires confirmation")
 			}
-			project.Path = path
+			project.Path = validatedPath
 		}
 		if request.Name != "" {
 			project.Name = request.Name
@@ -223,12 +225,16 @@ func (a *App) PreviewProjectEdit(ctx context.Context, request ProjectEditRequest
 	if err != nil {
 		return ProjectEditPreview{}, err
 	}
+	return a.previewProjectEditWithConfig(cfg, request)
+}
+
+func (a *App) previewProjectEditWithConfig(cfg *config.Config, request ProjectEditRequest) (ProjectEditPreview, error) {
 	copy := cloneConfig(cfg)
 	if request.Project == "" {
 		if request.Name == "" || request.Path == "" {
 			return ProjectEditPreview{}, fmt.Errorf("new project name and path are required")
 		}
-		path, err := canonicalInputPath(request.Path)
+		path, identity, err := validateProjectDirectory(request.Path)
 		if err != nil {
 			return ProjectEditPreview{}, err
 		}
@@ -238,7 +244,7 @@ func (a *App) PreviewProjectEdit(ctx context.Context, request ProjectEditRequest
 			return ProjectEditPreview{}, err
 		}
 		next := link.BuildPlan(a.deps.Paths.LibrarySkills, buildTargets(copy, a.deps.UserHome), copy.PendingOperations, link.Selector{Project: project.Name})
-		return ProjectEditPreview{Next: next}, nil
+		return ProjectEditPreview{Next: next, PathIdentity: identity}, nil
 	}
 	project, err := findProject(copy, request.Project)
 	if err != nil {
@@ -251,10 +257,12 @@ func (a *App) PreviewProjectEdit(ctx context.Context, request ProjectEditRequest
 		project.Name = request.Name
 	}
 	if request.Path != "" {
-		project.Path, err = canonicalInputPath(request.Path)
+		var identity string
+		project.Path, identity, err = validateProjectDirectory(request.Path)
 		if err != nil {
 			return ProjectEditPreview{}, err
 		}
+		request.ExpectedPathIdentity = identity
 	}
 	for _, name := range request.AddAgents {
 		project.Agents = appendUnique(project.Agents, name)
@@ -279,7 +287,7 @@ func (a *App) PreviewProjectEdit(ctx context.Context, request ProjectEditRequest
 	}
 	cleanupPlan := link.BuildPlan(a.deps.Paths.LibrarySkills, nil, operations, link.Selector{})
 	nextPlan := link.BuildPlan(a.deps.Paths.LibrarySkills, buildTargets(copy, a.deps.UserHome), nil, link.Selector{Project: project.Name})
-	return ProjectEditPreview{Cleanup: cleanupPlan, Next: nextPlan}, nil
+	return ProjectEditPreview{Cleanup: cleanupPlan, Next: nextPlan, PathIdentity: request.ExpectedPathIdentity}, nil
 }
 
 func (a *App) PreviewProjectRemove(ctx context.Context, request ProjectRemoveRequest) (MutationPreview, error) {
@@ -362,18 +370,4 @@ func cloneBindings(values map[string]config.Binding) map[string]config.Binding {
 		result[key] = value
 	}
 	return result
-}
-
-func canonicalInputPath(path string) (string, error) {
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return "", err
-	}
-	abs = filepath.Clean(abs)
-	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
-		abs = filepath.Clean(resolved)
-	} else if !os.IsNotExist(err) {
-		return "", err
-	}
-	return abs, nil
 }

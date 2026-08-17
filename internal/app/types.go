@@ -30,6 +30,7 @@ type Service interface {
 	Sync(context.Context, SyncRequest) (Result, error)
 	Update(context.Context, UpdateRequest) (Result, error)
 	EditProject(context.Context, ProjectEditRequest) (Result, error)
+	PreviewProjectRegistration(context.Context, ProjectRegistrationRequest) (ProjectRegistrationPreview, error)
 	PreviewProjectEdit(context.Context, ProjectEditRequest) (ProjectEditPreview, error)
 	PreviewProjectRemove(context.Context, ProjectRemoveRequest) (MutationPreview, error)
 	RemoveProject(context.Context, ProjectRemoveRequest) (Result, error)
@@ -207,12 +208,36 @@ type ExpectedUpdate struct {
 }
 
 type ProjectEditRequest struct {
-	Project      string
+	Project              string
+	Name                 string
+	Path                 string
+	AddAgents            []string
+	RemoveAgents         []string
+	ExpectedPathIdentity string
+	Confirmed            bool
+}
+
+type ProjectNameIssue string
+
+const (
+	ProjectNameInvalid   ProjectNameIssue = "invalid"
+	ProjectNameDuplicate ProjectNameIssue = "duplicate"
+)
+
+type ProjectRegistrationRequest struct {
+	Path string
+	Name string
+}
+
+type ProjectRegistrationPreview struct {
 	Name         string
 	Path         string
-	AddAgents    []string
-	RemoveAgents []string
-	Confirmed    bool
+	PathIdentity string
+	Agents       []string
+	Preview      ProjectEditPreview
+	Warnings     []string
+	NeedsName    bool
+	NameIssue    ProjectNameIssue
 }
 
 type ProjectRemoveRequest struct {
@@ -221,8 +246,9 @@ type ProjectRemoveRequest struct {
 }
 
 type ProjectEditPreview struct {
-	Cleanup link.Plan
-	Next    link.Plan
+	Cleanup      link.Plan
+	Next         link.Plan
+	PathIdentity string
 }
 
 // BatchOperation identifies a single transaction spanning all selected items.

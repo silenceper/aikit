@@ -113,6 +113,9 @@ func (f *fakeService) EditProject(_ context.Context, request app.ProjectEditRequ
 	f.lastProject = request
 	return app.Result{}, nil
 }
+func (f *fakeService) PreviewProjectRegistration(context.Context, app.ProjectRegistrationRequest) (app.ProjectRegistrationPreview, error) {
+	return app.ProjectRegistrationPreview{}, nil
+}
 func (f *fakeService) PreviewProjectEdit(context.Context, app.ProjectEditRequest) (app.ProjectEditPreview, error) {
 	return app.ProjectEditPreview{}, nil
 }

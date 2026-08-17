@@ -256,6 +256,9 @@ func (s errorService) Update(context.Context, app.UpdateRequest) (app.Result, er
 func (s errorService) EditProject(context.Context, app.ProjectEditRequest) (app.Result, error) {
 	return app.Result{}, s.fail()
 }
+func (s errorService) PreviewProjectRegistration(context.Context, app.ProjectRegistrationRequest) (app.ProjectRegistrationPreview, error) {
+	return app.ProjectRegistrationPreview{}, s.fail()
+}
 func (s errorService) PreviewProjectEdit(context.Context, app.ProjectEditRequest) (app.ProjectEditPreview, error) {
 	return app.ProjectEditPreview{}, s.fail()
 }
