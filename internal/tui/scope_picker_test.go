@@ -110,7 +110,6 @@ func TestStructuredScopePickerPresetAndProjectApply(t *testing.T) {
 	t.Run("project workspace", func(t *testing.T) {
 		service := &fakeService{}
 		m := projectWorkspaceModel(service)
-		m.Scope = Scope{Project: "aikit", Level: "project-targets"}
 		m, _ = keyboardAction(t, m, actionIndex(t, m, "More"))
 		m, _ = chooseVisibleAction(t, m, "Apply preset", false)
 		if m.Mode != ModePresetPicker {

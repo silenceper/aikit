@@ -31,8 +31,9 @@ func (m Model) render() string {
 		}
 	} else {
 		navigation := make(map[int]string)
-		for _, item := range layoutNavigation(layout, topViews, m.ActiveView) {
+		for index, item := range layoutNavigation(layout, topViews, m.ActiveView) {
 			item.Label = m.navigationLabel(item)
+			item.Label = fmt.Sprintf("%d %s", index+1, item.Label)
 			label := "  " + item.Label
 			if item.Active {
 				label = uiTheme.focused(item.Label)
@@ -658,18 +659,21 @@ func (m Model) primaryActions() []string {
 			}
 			return append(actions, "Close")
 		case ViewWorkspaces:
-			if m.Scope.Level == "workspace-projects" || m.Scope.Level == "project-targets" || m.Scope.Level == "project-skills" {
-				return []string{"Apply preset", "Rename project", "Manage agents", "Change project directory", "Remove project", "Close"}
+			if m.Scope.Level == "workspace-projects" || m.Scope.Level == "project-skills" {
+				return []string{m.workspacePresetAction(), "Rename project", "Manage agents", "Change project directory", "Remove project", "Close"}
+			}
+			if m.Scope.Level == "project-targets" {
+				return []string{m.workspacePresetAction(), "Rename project", "Manage agents", "Change project directory", "Remove project", "Close"}
 			}
 			if m.Scope.Level == "workspace-global" {
-				actions := []string{"Apply preset"}
+				actions := []string{m.workspacePresetAction()}
 				if len(m.selectedWorkspaceSkillIDs()) > 0 {
 					actions = append(actions, "Enable selected", "Disable selected", "Clear selection")
 				}
 				return append(actions, "Sync preview", "Close")
 			}
 			if m.Scope.Level == "agent-skills" {
-				return []string{"Apply preset", "Sync preview", "Close"}
+				return []string{m.workspacePresetAction(), "Sync preview", "Close"}
 			}
 			return []string{"Sync preview", "Close"}
 		case ViewPresets:
@@ -718,6 +722,9 @@ func (m Model) primaryActions() []string {
 		if m.Scope.Level == "workspace-projects" {
 			return []string{"Open", "Create project", "More"}
 		}
+		if m.Scope.Level == "workspace-agents" {
+			return []string{"Open", m.workspacePresetAction(), "More"}
+		}
 		if m.Scope.Level == "agent-skills" || m.Scope.Level == "project-skills" {
 			if current.Direct {
 				return []string{"Disable", "Select skills", "More"}
@@ -728,10 +735,13 @@ func (m Model) primaryActions() []string {
 			return []string{"Enable", "Select skills", "More"}
 		}
 		if m.Scope.Level == "project-targets" {
+			if project, ok := findProject(m.Snapshot.Config.Projects, m.Scope.Project); ok && len(project.Agents) > 0 {
+				return []string{"Open", m.workspacePresetAction(), "More"}
+			}
 			return []string{"Open", "Manage agents", "More"}
 		}
 		if m.Scope.Level == "workspace-global" {
-			return []string{"Open", "Apply preset", "More"}
+			return []string{"Open", m.workspacePresetAction(), "More"}
 		}
 		return []string{"Open", "More"}
 	case ViewPresets:
@@ -752,6 +762,13 @@ func (m Model) primaryActions() []string {
 	default:
 		return nil
 	}
+}
+
+func (m Model) workspacePresetAction() string {
+	if len(m.Snapshot.Config.Presets) == 0 {
+		return "Create preset"
+	}
+	return "Apply preset"
 }
 
 func (m Model) renderStatus(width int) string {
@@ -788,6 +805,16 @@ func (m Model) footer() string {
 	}
 	if m.Detail && m.Width < 60 {
 		return "Esc Back"
+	}
+	if m.Focus == FocusActions {
+		actions := m.currentActions()
+		if len(actions) > 0 {
+			index := min(max(0, m.ActionIndex), len(actions)-1)
+			if m.Width < 30 {
+				return "Enter " + actions[index]
+			}
+			return "Enter " + actions[index] + "   ←/→ Actions   Esc List"
+		}
 	}
 	if m.ActiveView == ViewMigration {
 		if m.Width < 30 {

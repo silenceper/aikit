@@ -432,8 +432,34 @@ func (m Model) performPrimaryAction(index int) (tea.Model, tea.Cmd) {
 			m.enterPresetPicker(pickerGlobalWorkspacePreset, "")
 			return m, nil
 		}
+		if m.ActiveView == ViewWorkspaces && m.Scope.Level == "workspace-agents" {
+			rows := m.rows()
+			if m.Cursor < 0 || m.Cursor >= len(rows) {
+				m.Err = "select an agent before applying a preset"
+				return m, nil
+			}
+			m.enterPresetPickerForAgent(rows[m.Cursor].ID)
+			return m, nil
+		}
 		if m.ActiveView == ViewWorkspaces && m.Scope.Level == "agent-skills" {
 			m.enterPresetPicker(pickerAgentPreset, "")
+			return m, nil
+		}
+		if m.ActiveView == ViewWorkspaces && m.Scope.Level == "project-targets" {
+			rows := m.rows()
+			if m.Cursor < 0 || m.Cursor >= len(rows) {
+				m.Err = "select a project target before applying a preset"
+				return m, nil
+			}
+			agentName := rows[m.Cursor].ID
+			if agentName == "common" {
+				agentName = ""
+			}
+			m.enterPresetPickerForProjectTarget(m.Scope.Project, agentName)
+			return m, nil
+		}
+		if m.ActiveView == ViewWorkspaces && m.Scope.Level == "project-skills" {
+			m.enterPresetPickerForProjectTarget(m.Scope.Project, m.Scope.Agent)
 			return m, nil
 		}
 		project := m.currentProjectName()
@@ -454,6 +480,10 @@ func (m Model) performPrimaryAction(index int) (tea.Model, tea.Cmd) {
 		return m, presetMutationPreviewCmd(m.ctx, m.service, m.pendingPreset)
 	case "Create":
 		m.enterInput(inputState{Kind: inputPresetCreate, Prompt: "Preset name"})
+		return m, nil
+	case "Create preset":
+		m.enterInput(inputState{Kind: inputPresetCreate, Prompt: "Preset name"})
+		m.Status = "Create a preset, then apply it to this workspace"
 		return m, nil
 	case "Duplicate", "Rename", "Apply":
 		rows := m.rows()

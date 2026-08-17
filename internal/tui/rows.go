@@ -123,7 +123,8 @@ func (m Model) rows() []row {
 			rows = append(rows, row{Key: "status:update-warning:" + base64.RawURLEncoding.EncodeToString([]byte(warning)), ID: warning, Name: "Update check warning", State: "Update check failed", Detail: warning, Severity: rowSeverityError})
 		}
 	}
-	if m.ActiveView != ViewMigration && m.ActiveView != ViewOverview && !(m.ActiveView == ViewWorkspaces && m.Scope.Level == "") {
+	preserveWorkspaceOrder := m.ActiveView == ViewWorkspaces && (m.Scope.Level == "" || m.Scope.Level == "workspace-agents" || m.Scope.Level == "project-targets")
+	if m.ActiveView != ViewMigration && m.ActiveView != ViewOverview && !preserveWorkspaceOrder {
 		sort.SliceStable(rows, func(i, j int) bool { return rows[i].selectionKey() < rows[j].selectionKey() })
 	}
 	return m.filtered(rows)
@@ -315,7 +316,7 @@ func (m Model) workspaceRows() []row {
 	}
 	return []row{
 		{Key: "workspace:global", ID: "global", Name: "Global", State: "All agents"},
-		{Key: "workspace:agents", ID: "agents", Name: "Agents", State: fmt.Sprintf("%d configured", len(m.Snapshot.Config.Agents))},
+		{Key: "workspace:agents", ID: "agents", Name: "Agents", State: fmt.Sprintf("%d supported", len(agent.Names()))},
 		{Key: "workspace:projects", ID: "projects", Name: "Projects", State: fmt.Sprintf("%d registered", len(m.Snapshot.Config.Projects))},
 	}
 }

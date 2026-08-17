@@ -88,14 +88,14 @@ func TestSkillsManagerParityRoutesAreVisibleAndStructured(t *testing.T) {
 	t.Run("project common agent management and preset routes", func(t *testing.T) {
 		m := projectWorkspaceModel(&fakeService{})
 		m.Scope = Scope{Project: "aikit", Level: "project-targets"}
-		for _, action := range []string{"Open", "Manage agents", "More"} {
+		for _, action := range []string{"Open", "Apply preset", "More"} {
 			if !strings.Contains(strings.Join(m.primaryActions(), " "), action) {
 				t.Fatalf("project route missing %q: %v", action, m.primaryActions())
 			}
 		}
 		m.enterMore()
-		if !strings.Contains(strings.Join(m.primaryActions(), " "), "Apply preset") {
-			t.Fatalf("project preset route missing: %v", m.primaryActions())
+		if !strings.Contains(strings.Join(m.primaryActions(), " "), "Manage agents") {
+			t.Fatalf("project agent management route missing: %v", m.primaryActions())
 		}
 		m.Mode, m.Focus = ModeTable, FocusList
 		for index, current := range m.rows() {

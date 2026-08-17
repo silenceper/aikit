@@ -101,13 +101,7 @@ func TestProjectAgentChecklistSavesOneExactDiff(t *testing.T) {
 			service := &fakeService{projectPreview: app.ProjectEditPreview{}}
 			m := projectWorkspaceModel(service)
 			m.Scope = Scope{Project: "aikit", Level: "project-targets"}
-			index := actionIndex(t, m, "Manage agents")
-			var cmd tea.Cmd
-			if mouse {
-				m, cmd = mouseAction(t, m, index)
-			} else {
-				m, cmd = keyboardAction(t, m, index)
-			}
+			m, cmd := openProjectMoreAction(t, m, "Manage agents", mouse)
 			if cmd != nil || m.Mode != ModeProjectAgents || len(m.rows()) != len(agent.Names()) || !m.Selected["project-agent:codex"] {
 				t.Fatalf("agent checklist mode=%s rows=%d selected=%v cmd=%v", m.Mode, len(m.rows()), m.Selected, cmd != nil)
 			}

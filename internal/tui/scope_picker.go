@@ -16,6 +16,7 @@ const (
 	pickerBatchScope             pickerPurpose = "batch-scope"
 	pickerPresetApplyScope       pickerPurpose = "preset-apply-scope"
 	pickerProjectPreset          pickerPurpose = "project-preset"
+	pickerProjectTargetPreset    pickerPurpose = "project-target-preset"
 	pickerGlobalWorkspacePreset  pickerPurpose = "global-workspace-preset"
 	pickerGlobalPresetApplyScope pickerPurpose = "global-preset-apply-scope"
 	pickerAgentPreset            pickerPurpose = "agent-preset"
@@ -50,6 +51,20 @@ func (m *Model) enterScopePicker(purpose pickerPurpose, project, preset string, 
 
 func (m *Model) enterPresetPicker(purpose pickerPurpose, project string) {
 	m.captureConfirmReturn()
+	m.enterPresetPickerWithReturn(purpose, project, m.Scope.Agent)
+}
+
+func (m *Model) enterPresetPickerForAgent(agentName string) {
+	m.captureConfirmReturn()
+	m.enterPresetPickerWithReturn(pickerAgentPreset, "", agentName)
+}
+
+func (m *Model) enterPresetPickerForProjectTarget(project, agentName string) {
+	m.captureConfirmReturn()
+	m.enterPresetPickerWithReturn(pickerProjectTargetPreset, project, agentName)
+}
+
+func (m *Model) enterPresetPickerWithReturn(purpose pickerPurpose, project, agentName string) {
 	names := make([]string, 0, len(m.Snapshot.Config.Presets))
 	for _, preset := range m.Snapshot.Config.Presets {
 		names = append(names, preset.Name)
@@ -59,7 +74,7 @@ func (m *Model) enterPresetPicker(purpose pickerPurpose, project string) {
 	for _, name := range names {
 		choices = append(choices, pickerChoice{Label: name, Preset: name})
 	}
-	m.Picker = pickerState{Purpose: purpose, Project: project, Agent: m.Scope.Agent, Choices: choices}
+	m.Picker = pickerState{Purpose: purpose, Project: project, Agent: agentName, Choices: choices}
 	m.Mode, m.Focus, m.ActionIndex, m.Cursor, m.Scroll, m.OverlayScroll = ModePresetPicker, FocusList, 0, 0, 0, 0
 	m.Status = "Choose a preset"
 }
@@ -131,6 +146,12 @@ func (m Model) choosePicker() (tea.Model, tea.Cmd) {
 			m.pendingPreset = app.PresetMutationRequest{Operation: app.PresetApply, Name: choice.Preset, Binding: binding}
 			m.confirm, m.confirmReturnReady = ActionPreset, true
 			m.Busy, m.Status = true, "Building exact agent preset preview..."
+			return m, presetMutationPreviewCmd(m.ctx, m.service, m.pendingPreset)
+		case pickerProjectTargetPreset:
+			binding := app.BindingRequest{Preset: choice.Preset, Project: m.Picker.Project, Agent: m.Picker.Agent}
+			m.pendingPreset = app.PresetMutationRequest{Operation: app.PresetApply, Name: choice.Preset, Binding: binding}
+			m.confirm, m.confirmReturnReady = ActionPreset, true
+			m.Busy, m.Status = true, "Building exact project preset preview..."
 			return m, presetMutationPreviewCmd(m.ctx, m.service, m.pendingPreset)
 		}
 	}

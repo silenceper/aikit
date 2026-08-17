@@ -98,7 +98,8 @@ supported global Agent roots and every registered project incrementally. This
 startup inventory is offline and read-only: it does not fetch Git sources,
 rewrite configuration, import skills, or adopt existing directories.
 
-The TUI is English-first and supports both keyboard and mouse input. Use `1`–`6`
+The TUI is English-first and supports both keyboard and mouse input. The
+navigation rail displays `1`–`6` next to the matching sections; use those keys
 to switch sections, `j`/`k` or the arrow keys to move, `Tab` to move between the
 list, details, and actions, `Enter` to activate, `/` to filter, `?` for help,
 and the mouse wheel or clickable rows and buttons for the same operations.
@@ -132,10 +133,12 @@ checkboxes; Rename and Change project directory are separate actions under
 **More**.
 
 Presets are visible in both directions. The **Presets** page shows each
-preset's member count and applied scopes. From **Workspaces > Global**, an
-individual global Agent, or a Project's **More** menu, choose **Apply preset**
-and select the exact visible target. No encoded `agent:name` or pipe-delimited
-project input is required.
+preset's member count and applied scopes. **Workspaces > Global** and Agent rows
+expose **Apply preset** directly. Inside a Project, select **Common** or an Agent
+and choose **Apply preset**; that selected scope is reused instead of asking for
+the target twice. If no Preset exists, the same workspace action becomes
+**Create preset**. No encoded `agent:name` or pipe-delimited project input is
+required.
 
 Press `Ctrl+K` to open Configuration. The global YAML ledger is
 `$AIKIT_HOME/config.yaml`; when `AIKIT_HOME` is unset the path is

@@ -60,9 +60,9 @@ func ComputeLayout(width, height int) Layout {
 		layout.Breadcrumb = Rect{Y: bodyY, Width: width, Height: min(1, bodyHeight)}
 		layout.Main = Rect{Y: layout.Breadcrumb.Bottom(), Width: width, Height: max(0, bodyHeight-layout.Breadcrumb.Height)}
 	} else {
-		navigationWidth := 14
+		navigationWidth := 16
 		if layout.Wide {
-			navigationWidth = 18
+			navigationWidth = 20
 		}
 		layout.Navigation = Rect{Y: bodyY, Width: min(navigationWidth, width), Height: bodyHeight}
 		layout.Tabs = layout.Navigation
