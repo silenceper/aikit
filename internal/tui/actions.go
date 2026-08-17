@@ -23,6 +23,10 @@ const (
 	uiConfirm
 	uiRefresh
 	uiBack
+	uiAddSource
+	uiCreateProject
+	uiCreatePreset
+	uiReviewRecovery
 )
 
 func (m Model) perform(action uiAction) (tea.Model, tea.Cmd) {
@@ -55,6 +59,26 @@ func (m Model) perform(action uiAction) (tea.Model, tea.Cmd) {
 			m.back()
 		} else if m.ActiveView != ViewOverview {
 			m.switchView(ViewOverview)
+		}
+	case uiAddSource:
+		m.switchView(ViewLibrary)
+		m.enterInput(inputState{Kind: inputAddSource, Prompt: "Local path, owner/repo, Git URL, or skills.sh URL"})
+		m.Status = "Enter a local path or remote Git source"
+	case uiCreateProject:
+		m.switchView(ViewWorkspaces)
+		m.enterInput(inputState{Kind: inputProjectCreate, Prompt: "Project directory"})
+		m.Status = "Enter the project directory"
+	case uiCreatePreset:
+		m.switchView(ViewPresets)
+		m.enterInput(inputState{Kind: inputPresetCreate, Prompt: "Preset name"})
+		m.Status = "Enter the new preset name"
+	case uiReviewRecovery:
+		operations := make([]app.RecoveryOperation, 0, len(m.Snapshot.Config.PendingOperations))
+		for _, operation := range m.Snapshot.Config.PendingOperations {
+			operations = append(operations, app.RecoveryOperation{Operation: operation})
+		}
+		if len(operations) > 0 {
+			return m.openRecoveryPreview(operations)
 		}
 	}
 	return m, nil

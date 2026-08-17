@@ -105,15 +105,30 @@ func (m Model) renderFooterBody(width int) string {
 }
 
 func (m Model) renderNavigationBody(width int) []string {
-	lines := make([]string, 0, len(topViews))
-	for index, view := range topViews {
-		item := navigationItem{View: view, Label: viewLabel(view), Active: view == m.ActiveView}
-		label := fmt.Sprintf("%d %s", index+1, m.navigationLabel(item))
-		if item.Active {
+	layout := ComputeLayout(m.Width, m.Height)
+	items := layoutNavigationEntries(layout, m)
+	lines := make([]string, 0, layout.NavigationPanel.Body.Height)
+	previousY := layout.NavigationPanel.Body.Y - 1
+	mainIndex := 0
+	for _, item := range items {
+		for previousY+1 < item.Rect.Y {
+			lines = append(lines, uiTheme.muted.Render("  Tools"))
+			previousY++
+		}
+		label := item.Entry.Label
+		if item.Entry.Section == "Main" {
+			mainIndex++
+			label = fmt.Sprintf("%d %s", mainIndex, label)
+		} else {
+			label = "· " + label
+		}
+		active := item.Entry.Kind == navigationView && item.Entry.View == m.ActiveView
+		if active {
 			lines = append(lines, uiTheme.focused(label))
 		} else {
 			lines = append(lines, uiTheme.navigation.Render("  "+label))
 		}
+		previousY = item.Rect.Y
 	}
 	return lines
 }

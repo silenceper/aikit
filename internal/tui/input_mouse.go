@@ -6,20 +6,23 @@ import (
 )
 
 type HitRegions struct {
-	Layout        Layout
-	Tabs          map[View]Rect
-	Rows          []Rect
-	Checkboxes    []Rect
-	Actions       []Rect
-	ActionIndexes []int
-	ActionBar     Rect
-	Confirm       Rect
-	Cancel        Rect
-	Back          Rect
-	ActionPrev    Rect
-	ActionNext    Rect
-	actionPrev    int
-	actionNext    int
+	Layout         Layout
+	Tabs           map[View]Rect
+	Navigation     []navigationEntryItem
+	Commands       []Rect
+	CommandIndexes []int
+	Rows           []Rect
+	Checkboxes     []Rect
+	Actions        []Rect
+	ActionIndexes  []int
+	ActionBar      Rect
+	Confirm        Rect
+	Cancel         Rect
+	Back           Rect
+	ActionPrev     Rect
+	ActionNext     Rect
+	actionPrev     int
+	actionNext     int
 }
 
 func (m Model) hitRegions() HitRegions {
@@ -31,6 +34,7 @@ func (m Model) hitRegions() HitRegions {
 	for _, item := range layoutNavigation(layout, topViews, m.ActiveView) {
 		regions.Tabs[item.View] = item.Rect
 	}
+	regions.Navigation = layoutNavigationEntries(layout, m)
 	if layout.Narrow && !layout.Breadcrumb.Empty() {
 		regions.Back = Rect{X: layout.Breadcrumb.X, Y: layout.Breadcrumb.Y, Width: min(2, layout.Breadcrumb.Width), Height: 1}
 	}
@@ -47,6 +51,17 @@ func (m Model) hitRegions() HitRegions {
 		visible := layoutMoreActions(layout, m.primaryActions(), m.ActionIndex, m.OverlayScroll)
 		regions.Actions = append(regions.Actions, visible.Rects...)
 		regions.ActionIndexes = append(regions.ActionIndexes, visible.Indexes...)
+	} else if m.Mode == ModeCommand {
+		panel := layoutOverlayPanel(layout, nil, false, 0)
+		entries := m.commandEntries()
+		for index := range entries {
+			y := panel.Body.Y + 1 + index
+			if y >= panel.Body.Bottom() {
+				break
+			}
+			regions.Commands = append(regions.Commands, Rect{X: panel.Body.X, Y: y, Width: panel.Body.Width, Height: 1})
+			regions.CommandIndexes = append(regions.CommandIndexes, index)
+		}
 	} else if actions := m.overlayPanelActions(); len(actions) > 0 {
 		panel := layoutOverlayPanel(layout, actions, true, m.ActionIndex)
 		regions.ActionBar = panel.Actions
@@ -115,6 +130,19 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	regions := m.hitRegions()
 	if m.hasOverlay() {
+		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft && m.Mode == ModeCommand {
+			entries := m.commandEntries()
+			for visible, rect := range regions.Commands {
+				if !rect.Contains(msg.X, msg.Y) {
+					continue
+				}
+				index := regions.CommandIndexes[visible]
+				m.CommandIndex = index
+				if index < len(entries) {
+					return m.activateCommandEntry(entries[index])
+				}
+			}
+		}
 		if (m.Mode == ModeConfiguration || m.Mode == ModeErrorDetail) && regions.ActionBar.Contains(msg.X, msg.Y) {
 			switch msg.Button {
 			case tea.MouseButtonWheelUp:
@@ -229,10 +257,9 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if regions.Back.Contains(msg.X, msg.Y) {
 		return m.perform(uiBack)
 	}
-	for _, view := range topViews {
-		if regions.Tabs[view].Contains(msg.X, msg.Y) {
-			m.switchView(view)
-			return m, nil
+	for _, item := range regions.Navigation {
+		if item.Rect.Contains(msg.X, msg.Y) {
+			return m.activateCommandEntry(item.Entry)
 		}
 	}
 	start := m.visibleRowsLayout(regions.Layout).Start
@@ -286,7 +313,7 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) hasOverlay() bool {
-	return m.Help || m.Mode == ModeConfiguration || m.Mode == ModeFilter || m.Mode == ModeConfirm || m.Mode == ModeInput || m.Mode == ModeMore || m.Mode == ModeErrorDetail
+	return m.Help || m.Mode == ModeConfiguration || m.Mode == ModeFilter || m.Mode == ModeCommand || m.Mode == ModeConfirm || m.Mode == ModeInput || m.Mode == ModeMore || m.Mode == ModeErrorDetail
 }
 
 func (m Model) performPrimaryAction(index int) (tea.Model, tea.Cmd) {

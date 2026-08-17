@@ -93,6 +93,38 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	if m.Mode == ModeCommand {
+		entries := m.commandEntries()
+		switch key {
+		case "esc":
+			m.Mode, m.CommandDraft, m.CommandIndex = ModeTable, "", 0
+			return m, nil
+		case "up", "k":
+			m.CommandIndex = max(0, m.CommandIndex-1)
+			return m, nil
+		case "down", "j":
+			m.CommandIndex = min(max(0, len(entries)-1), m.CommandIndex+1)
+			return m, nil
+		case "backspace":
+			chars := []rune(m.CommandDraft)
+			if len(chars) > 0 {
+				m.CommandDraft = string(chars[:len(chars)-1])
+			}
+			m.CommandIndex = 0
+			return m, nil
+		case "enter":
+			if len(entries) > 0 {
+				return m.activateCommandEntry(entries[min(m.CommandIndex, len(entries)-1)])
+			}
+			return m, nil
+		default:
+			if msg.Type == tea.KeyRunes {
+				m.CommandDraft += string(msg.Runes)
+				m.CommandIndex = 0
+			}
+			return m, nil
+		}
+	}
 	if m.Mode == ModeFilter {
 		switch key {
 		case "esc":
@@ -199,6 +231,10 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if key == "y" {
 			return m.perform(uiConfirm)
 		}
+		return m, nil
+	}
+	if key == "ctrl+p" || key == ":" {
+		m.enterCommandPalette()
 		return m, nil
 	}
 	if view, ok := viewKey(key); ok {
@@ -473,8 +509,6 @@ func viewKey(key string) (View, bool) {
 	case "4":
 		return ViewPresets, true
 	case "5":
-		return ViewMigration, true
-	case "6":
 		return ViewStatus, true
 	default:
 		return "", false

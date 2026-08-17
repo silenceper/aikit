@@ -141,6 +141,20 @@ func (m Model) overlayLines() []string {
 		return lines
 	case m.Mode == ModeFilter:
 		return []string{activeStyle.Render("Search: ") + m.FilterDraft + "█"}
+	case m.Mode == ModeCommand:
+		lines := []string{activeStyle.Render("Command palette"), "> " + m.CommandDraft + "█"}
+		entries := m.commandEntries()
+		for index, entry := range entries {
+			marker := "  "
+			if index == m.CommandIndex {
+				marker = "> "
+			}
+			lines = append(lines, marker+entry.Section+" · "+entry.Label)
+		}
+		if len(entries) == 0 {
+			lines = append(lines, "No matching command")
+		}
+		return lines
 	case m.Mode == ModeInput:
 		return []string{activeStyle.Render(m.Input.Prompt), m.Input.Value + "█"}
 	case m.Mode == ModeMore:

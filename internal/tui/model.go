@@ -27,7 +27,7 @@ const (
 	ViewProjects View = "projects"
 )
 
-var topViews = []View{ViewOverview, ViewLibrary, ViewWorkspaces, ViewPresets, ViewMigration, ViewStatus}
+var topViews = []View{ViewOverview, ViewLibrary, ViewWorkspaces, ViewPresets, ViewStatus}
 
 type Action string
 
@@ -69,6 +69,7 @@ const (
 	ModePresetPicker    Mode = "preset-picker"
 	ModeMore            Mode = "more"
 	ModeErrorDetail     Mode = "error-detail"
+	ModeCommand         Mode = "command"
 )
 
 type Focus string
@@ -211,6 +212,8 @@ type Model struct {
 	Mode                Mode
 	Focus               Focus
 	ActionIndex         int
+	CommandDraft        string
+	CommandIndex        int
 	Scope               Scope
 	Cursor              int
 	Scroll              int
@@ -300,6 +303,9 @@ func NewModel(ctx context.Context, service app.Service, migration app.MigrationS
 }
 
 func validView(view View) bool {
+	if view == ViewMigration {
+		return true
+	}
 	for _, current := range topViews {
 		if current == view {
 			return true
