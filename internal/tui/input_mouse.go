@@ -72,11 +72,19 @@ func (m Model) hitRegions() HitRegions {
 		}
 	} else if layout.List.Height > 1 && len(m.primaryActions()) > 0 {
 		actions := m.primaryActions()
-		actionArea := layout.List
-		if !layout.Detail.Empty() {
-			actionArea = layout.Detail
+		actionArea := layout.CollectionPanel.Actions
+		if !layout.DetailPanel.Actions.Empty() {
+			actionArea = layout.DetailPanel.Actions
 		}
-		actionX, actionY, actionRight := actionArea.X, actionArea.Bottom()-1, actionArea.Right()
+		if actionArea.Empty() {
+			actionArea = layout.List
+			if !layout.Detail.Empty() {
+				actionArea = layout.Detail
+			}
+			actionArea.Y = actionArea.Bottom() - 1
+			actionArea.Height = 1
+		}
+		actionX, actionY, actionRight := actionArea.X, actionArea.Y, actionArea.Right()
 		bar := layoutActionBar(actions, m.Focus == FocusActions, m.ActionIndex, actionRight-actionX)
 		regions.ActionBar = Rect{X: actionX, Y: actionY, Width: bar.Bar.Width, Height: bar.Bar.Height}
 		regions.ActionPrev = translateRect(bar.Previous, actionX, actionY)

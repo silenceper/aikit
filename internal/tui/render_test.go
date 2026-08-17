@@ -377,6 +377,57 @@ func TestWideLibrarySelectionSplitsEmbeddedDescriptionLinesBeforeJoiningColumns(
 	assertScreenBounds(t, m.ViewString(), m.Width, m.Height)
 }
 
+func TestFramedShellUsesSharedThreePaneGeometry(t *testing.T) {
+	m := loadedModel(t, &fakeService{snapshot: testSnapshot()}, &fakeMigration{})
+	m.Width, m.Height = 120, 30
+	m.switchView(ViewLibrary)
+
+	view := stripANSI(m.ViewString())
+	corner := m.frameGlyphs().TopLeft
+	for _, want := range []string{corner, "Navigation", "Library skills", "Details", "Shortcuts", "> Library skills"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("framed shell missing %q:\n%s", want, view)
+		}
+	}
+	if strings.Count(view, corner) < 5 {
+		t.Fatalf("expected app/navigation/collection/detail/footer frames:\n%s", view)
+	}
+	for _, line := range strings.Split(view, "\n") {
+		if lipgloss.Width(line) > m.Width {
+			t.Fatalf("line width=%d exceeds %d: %q", lipgloss.Width(line), m.Width, line)
+		}
+	}
+
+	regions := m.hitRegions()
+	if len(regions.Rows) == 0 || !regions.Layout.CollectionPanel.Body.Contains(regions.Rows[0].X, regions.Rows[0].Y) {
+		t.Fatalf("row hit is not inside collection body: panel=%+v rows=%+v", regions.Layout.CollectionPanel.Body, regions.Rows)
+	}
+	if regions.ActionBar.Empty() || !regions.Layout.DetailPanel.Actions.Contains(regions.ActionBar.X, regions.ActionBar.Y) {
+		t.Fatalf("action bar is not inside detail actions: panel=%+v bar=%+v", regions.Layout.DetailPanel.Actions, regions.ActionBar)
+	}
+}
+
+func TestFramedShellLowHeightKeepsOneActivePanel(t *testing.T) {
+	m := NewModel(nil, &fakeService{}, &fakeMigration{}, ViewLibrary, ActionNone)
+	m.Snapshot, m.Width, m.Height = testSnapshot(), 120, 8
+	view := stripANSI(m.ViewString())
+	glyphs, frameLines := m.frameGlyphs(), 0
+	for _, line := range strings.Split(view, "\n") {
+		if (strings.HasPrefix(line, glyphs.TopLeft) && strings.HasSuffix(line, glyphs.TopRight)) || (strings.HasPrefix(line, glyphs.BottomLeft) && strings.HasSuffix(line, glyphs.BottomRight)) {
+			frameLines++
+		}
+	}
+	if frameLines != 2 || !strings.Contains(view, "> Library skills") {
+		t.Fatalf("low-height frame is not one active collection panel: frame lines=%d:\n%s", frameLines, view)
+	}
+	if strings.Contains(view, "Navigation") || strings.Contains(view, "Details") {
+		t.Fatalf("low-height view rendered hidden panes:\n%s", view)
+	}
+	if got := len(strings.Split(view, "\n")); got != 8 {
+		t.Fatalf("height=%d want=8:\n%s", got, view)
+	}
+}
+
 func TestCompactLibraryRowCollapsesEmbeddedContextToOnePhysicalLine(t *testing.T) {
 	m := NewModel(context.Background(), &fakeService{}, &fakeMigration{}, ViewLibrary, ActionNone)
 	m.Snapshot = testSnapshot()

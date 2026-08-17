@@ -106,6 +106,10 @@ func (layout *Layout) computeFramedPanels() {
 	}
 	if layout.LowHeight {
 		layout.CollectionPanel = layoutPanel(Rect{X: 0, Y: 1, Width: layout.Width, Height: max(0, layout.Height-2)}, true)
+		layout.List = layout.CollectionPanel.Body
+		layout.Main = layout.CollectionPanel.Outer
+		layout.Breadcrumb = layout.CollectionPanel.Title
+		layout.Overlay = framedOverlayPanel(*layout, true).Outer
 		return
 	}
 
@@ -117,6 +121,7 @@ func (layout *Layout) computeFramedPanels() {
 	}
 	if layout.Narrow {
 		layout.CollectionPanel = layoutPanel(body, true)
+		layout.applyFramedAliases()
 		return
 	}
 
@@ -130,6 +135,7 @@ func (layout *Layout) computeFramedPanels() {
 	contentWidth := max(0, body.Right()-contentX)
 	if !layout.Wide {
 		layout.CollectionPanel = layoutPanel(Rect{X: contentX, Y: body.Y, Width: contentWidth, Height: body.Height}, true)
+		layout.applyFramedAliases()
 		return
 	}
 
@@ -138,6 +144,26 @@ func (layout *Layout) computeFramedPanels() {
 	layout.CollectionPanel = layoutPanel(Rect{X: contentX, Y: body.Y, Width: collectionWidth, Height: body.Height}, true)
 	detailX := layout.CollectionPanel.Outer.Right() + 1
 	layout.DetailPanel = layoutPanel(Rect{X: detailX, Y: body.Y, Width: max(0, body.Right()-detailX), Height: body.Height}, true)
+	layout.applyFramedAliases()
+}
+
+func (layout *Layout) applyFramedAliases() {
+	layout.Header = layout.AppBar.Body
+	layout.Footer = layout.FooterPanel.Body
+	layout.Status = Rect{}
+	layout.Navigation = layout.NavigationPanel.Body
+	layout.Tabs = layout.Navigation
+	layout.List = layout.CollectionPanel.Body
+	layout.Detail = layout.DetailPanel.Body
+	layout.Main = layout.CollectionPanel.Outer
+	if !layout.DetailPanel.Outer.Empty() {
+		layout.Main.Width = layout.DetailPanel.Outer.Right() - layout.Main.X
+	}
+	if layout.Narrow {
+		layout.Breadcrumb = layout.CollectionPanel.Title
+	}
+	overlay := framedOverlayPanel(*layout, true)
+	layout.Overlay = overlay.Outer
 }
 
 // VisibleRange returns an end-exclusive window and preserves a valid explicit

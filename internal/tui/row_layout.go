@@ -25,6 +25,17 @@ func layoutVisibleRows(area Rect, total, cursor, scroll, headerRows, reservedBot
 }
 
 func (m Model) visibleRowsLayout(layout Layout) visibleRowsLayout {
+	if !layout.CollectionPanel.Outer.Empty() {
+		area := layout.CollectionPanel.Body
+		if m.ActiveView == ViewOverview && m.Mode == ModeTable {
+			rowHeight := collectionRowHeight
+			if area.Height <= 5 {
+				rowHeight = 1
+			}
+			return layoutVisibleRows(area, len(m.rows()), m.Cursor, m.Scroll, m.overviewHeaderHeight(area.Width, area.Height), 0, rowHeight)
+		}
+		return layoutVisibleRows(area, len(m.rows()), m.Cursor, m.Scroll, 0, 0, collectionRowHeight)
+	}
 	if m.ActiveView == ViewOverview && m.Mode == ModeTable {
 		rowHeight := collectionRowHeight
 		if layout.Main.Height <= 5 {

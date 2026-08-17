@@ -9,19 +9,14 @@ type overlayPanelLayout struct {
 }
 
 func layoutOverlayPanel(layout Layout, actions []string, focused bool, selected int) overlayPanelLayout {
-	panel := layout.Overlay
-	result := overlayPanelLayout{Panel: panel}
-	if panel.Empty() {
+	framed := framedOverlayPanel(layout, len(actions) > 0)
+	result := overlayPanelLayout{Panel: framed.Outer, Title: framed.Title, Body: framed.Body, Actions: framed.Actions}
+	if framed.Outer.Empty() {
 		return result
 	}
-	result.Title = Rect{X: panel.X, Y: panel.Y, Width: panel.Width, Height: min(1, panel.Height)}
-	actionRows := 0
-	if len(actions) > 0 && panel.Height > 1 {
-		actionRows = 1
-		result.Actions = Rect{X: panel.X, Y: panel.Bottom() - 1, Width: panel.Width, Height: 1}
-		result.ActionBar = layoutActionBar(actions, focused, selected, panel.Width)
+	if len(actions) > 0 && !result.Actions.Empty() {
+		result.ActionBar = layoutActionBar(actions, focused, selected, result.Actions.Width)
 	}
-	result.Body = Rect{X: panel.X, Y: result.Title.Bottom(), Width: panel.Width, Height: max(0, panel.Height-result.Title.Height-actionRows)}
 	return result
 }
 

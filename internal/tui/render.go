@@ -15,58 +15,179 @@ func (m Model) View() string       { return m.render() }
 
 func (m Model) render() string {
 	layout := ComputeLayout(max(20, m.Width), max(1, m.Height))
-	lines := make([]string, layout.Height)
 	if layout.TooShort {
+		lines := make([]string, layout.Height)
 		message := clipPlain("terminal too short; need 8 rows", layout.Width)
 		if len(lines) > 0 {
 			lines[len(lines)/2] = message
 		}
 		return strings.Join(lines, "\n")
 	}
-	if !layout.Header.Empty() {
-		lines[layout.Header.Y] = clip(m.renderAppBar(layout.Header.Width), layout.Header.Width)
+	if layout.LowHeight {
+		return m.renderLowHeightShell(layout)
 	}
-	main := m.renderMain(layout)
-	if layout.Narrow {
-		if !layout.Breadcrumb.Empty() {
-			lines[layout.Breadcrumb.Y] = clip("‹ "+m.breadcrumb(), layout.Breadcrumb.Width)
-		}
-		for i, line := range main {
-			if y := layout.Main.Y + i; y < layout.Main.Bottom() && y < len(lines) {
-				lines[y] = clip(line, layout.Main.Width)
-			}
-		}
+	return m.renderFramedShell(layout)
+}
+
+func (m Model) frameGlyphs() FrameGlyphs {
+	if uiTheme.mode == themeNoColor || uiTheme.mode == themeReduced {
+		return asciiFrameGlyphs()
+	}
+	return unicodeFrameGlyphs()
+}
+
+func (m Model) renderFramedShell(layout Layout) string {
+	glyphs := m.frameGlyphs()
+	groups := []positionedLines{
+		{X: layout.AppBar.Outer.X, Y: layout.AppBar.Outer.Y, Lines: renderPanel(layout.AppBar, "aikit", false, []string{m.renderAppContext(layout.AppBar.Body.Width)}, "", glyphs)},
+		{X: layout.FooterPanel.Outer.X, Y: layout.FooterPanel.Outer.Y, Lines: renderPanel(layout.FooterPanel, "Shortcuts", false, []string{m.renderFooterBody(layout.FooterPanel.Body.Width)}, "", glyphs)},
+	}
+	if !layout.NavigationPanel.Outer.Empty() {
+		groups = append(groups, positionedLines{X: layout.NavigationPanel.Outer.X, Y: layout.NavigationPanel.Outer.Y, Lines: renderPanel(layout.NavigationPanel, "Navigation", false, m.renderNavigationBody(layout.NavigationPanel.Body.Width), "", glyphs)})
+	}
+	if m.hasOverlay() {
+		panel, lines := m.renderFramedOverlay(layout, glyphs)
+		groups = append(groups, positionedLines{X: panel.Outer.X, Y: panel.Outer.Y, Lines: lines})
 	} else {
-		navigation := make(map[int]string)
-		for index, item := range layoutNavigation(layout, topViews, m.ActiveView) {
-			item.Label = m.navigationLabel(item)
-			item.Label = fmt.Sprintf("%d %s", index+1, item.Label)
-			label := "  " + item.Label
-			if item.Active {
-				label = uiTheme.focused(item.Label)
-			} else {
-				label = uiTheme.navigation.Render(label)
-			}
-			navigation[item.Rect.Y] = label
+		collectionTitle, collectionBody := m.renderFramedCollection(layout)
+		collectionAction := ""
+		if layout.DetailPanel.Outer.Empty() {
+			collectionAction = m.renderActionBar(layout.CollectionPanel.Actions.Width)
 		}
-		for y := layout.Navigation.Y; y < layout.Navigation.Bottom(); y++ {
-			right := ""
-			if i := y - layout.Main.Y; i >= 0 && i < len(main) {
-				right = main[i]
-			}
-			lines[y] = joinRail(navigation[y], right, layout.Navigation.Width, layout.Main.Width)
+		groups = append(groups, positionedLines{X: layout.CollectionPanel.Outer.X, Y: layout.CollectionPanel.Outer.Y, Lines: renderPanel(layout.CollectionPanel, collectionTitle, m.Focus == FocusList, collectionBody, collectionAction, glyphs)})
+		if !layout.DetailPanel.Outer.Empty() {
+			groups = append(groups, positionedLines{X: layout.DetailPanel.Outer.X, Y: layout.DetailPanel.Outer.Y, Lines: renderPanel(layout.DetailPanel, m.detailTitle(), m.Focus == FocusDetail || m.Focus == FocusActions, m.renderFramedDetail(layout.DetailPanel.Body), m.renderActionBar(layout.DetailPanel.Actions.Width), glyphs)})
 		}
 	}
-	if !layout.Status.Empty() {
-		lines[layout.Status.Y] = m.renderStatus(layout.Status.Width)
+	return strings.Join(composePositioned(layout.Width, layout.Height, groups...), "\n")
+}
+
+func (m Model) renderLowHeightShell(layout Layout) string {
+	glyphs := m.frameGlyphs()
+	title, body := m.renderFramedCollection(layout)
+	if m.Detail || m.hasPinnedDetail() {
+		title, body = m.detailTitle(), m.renderFramedDetail(layout.CollectionPanel.Body)
 	}
-	if !layout.Footer.Empty() {
-		lines[layout.Footer.Y] = clip(m.footer(), layout.Footer.Width)
+	panel := layout.CollectionPanel
+	panelLines := renderPanel(panel, title, true, body, m.renderActionBar(panel.Actions.Width), glyphs)
+	groups := []positionedLines{{X: panel.Outer.X, Y: panel.Outer.Y, Lines: panelLines}}
+	if m.hasOverlay() {
+		overlay, lines := m.renderFramedOverlay(layout, glyphs)
+		groups = []positionedLines{{X: overlay.Outer.X, Y: overlay.Outer.Y, Lines: lines}}
 	}
-	for i := range lines {
-		lines[i] = clip(lines[i], layout.Width)
+	lines := composePositioned(layout.Width, layout.Height, groups...)
+	if len(lines) > 0 {
+		lines[0] = clip(m.renderAppBar(layout.Width), layout.Width)
+	}
+	if len(lines) > 1 {
+		lines[len(lines)-1] = clip(m.footer(), layout.Width)
 	}
 	return strings.Join(lines, "\n")
+}
+
+func (m Model) renderAppContext(width int) string {
+	value := viewLabel(m.ActiveView) + m.scopeBreadcrumb()
+	if m.Inventory.Loading {
+		value += " · scanning"
+	} else if m.Busy || m.MutationBusy {
+		value += " · busy"
+	}
+	return clip(value, width)
+}
+
+func (m Model) renderFooterBody(width int) string {
+	status := stripANSI(m.renderStatus(width))
+	shortcut := m.footer()
+	if strings.TrimSpace(status) == "" {
+		return clip(shortcut, width)
+	}
+	return clip(status+" │ "+shortcut, width)
+}
+
+func (m Model) renderNavigationBody(width int) []string {
+	lines := make([]string, 0, len(topViews))
+	for index, view := range topViews {
+		item := navigationItem{View: view, Label: viewLabel(view), Active: view == m.ActiveView}
+		label := fmt.Sprintf("%d %s", index+1, m.navigationLabel(item))
+		if item.Active {
+			lines = append(lines, uiTheme.focused(label))
+		} else {
+			lines = append(lines, uiTheme.navigation.Render("  "+label))
+		}
+	}
+	return lines
+}
+
+func (m Model) renderFramedCollection(layout Layout) (string, []string) {
+	panel := layout.CollectionPanel
+	if m.ActiveView == ViewOverview && m.Mode == ModeTable {
+		return m.collectionTitle(), m.renderOverview(panel.Body.Width, panel.Body.Height)
+	}
+	if panel.Outer.Empty() {
+		return m.collectionTitle(), nil
+	}
+	if (m.Detail || m.hasPinnedDetail()) && layout.DetailPanel.Outer.Empty() {
+		return m.detailTitle(), m.renderFramedDetail(panel.Body)
+	}
+	rows := m.rows()
+	geometry := m.visibleRowsLayout(layout)
+	lines := make([]string, panel.Body.Height)
+	if len(rows) == 0 && len(lines) > 0 {
+		lines[0] = mutedStyle.Render(m.emptyState())
+	}
+	for visibleIndex, rect := range geometry.Rects {
+		rowIndex := geometry.Start + visibleIndex
+		if rowIndex < 0 || rowIndex >= len(rows) {
+			continue
+		}
+		current := rows[rowIndex]
+		if m.ActiveView == ViewMigration && current.Origin != "" {
+			current.Name = current.Origin + " · " + current.Name
+		}
+		rendered := m.renderRowLines(current, rowIndex == m.Cursor && m.Focus == FocusList, panel.Body.Width)
+		relativeY := rect.Y - panel.Body.Y
+		for lineIndex := 0; lineIndex < len(rendered) && lineIndex < rect.Height; lineIndex++ {
+			if y := relativeY + lineIndex; y >= 0 && y < len(lines) {
+				lines[y] = rendered[lineIndex]
+			}
+		}
+	}
+	return rangeTitle(m.collectionTitle(), geometry.Start, geometry.End, len(rows)), lines
+}
+
+func (m Model) renderFramedDetail(area Rect) []string {
+	if area.Empty() {
+		return nil
+	}
+	detail := m.detailLinesForArea(area.Width, area.Height)
+	start := min(max(0, m.DetailScroll), max(0, len(detail)-area.Height))
+	end := min(len(detail), start+area.Height)
+	if start >= end {
+		return []string{"Select an item to see details."}
+	}
+	return detail[start:end]
+}
+
+func (m Model) renderFramedOverlay(layout Layout, glyphs FrameGlyphs) (PanelLayout, []string) {
+	actions := m.overlayPanelActions()
+	panel := framedOverlayPanel(layout, len(actions) > 0)
+	overlay := m.overlayLines()
+	if panel.Outer.Empty() || len(overlay) == 0 {
+		return panel, nil
+	}
+	title, body := overlay[0], wrapOverlayBody(overlay[1:], panel.Body.Width)
+	capacity := panel.Body.Height
+	if len(body) > capacity {
+		capacity = max(1, capacity-1)
+		start := min(max(0, m.OverlayScroll), max(0, len(body)-capacity))
+		end := min(len(body), start+capacity)
+		body = append(append([]string(nil), body[start:end]...), fmt.Sprintf("View %d-%d/%d · ↑/↓", start+1, end, len(body)))
+	}
+	action := ""
+	if !panel.Actions.Empty() {
+		action = layoutActionBar(actions, m.Focus == FocusActions, m.ActionIndex, panel.Actions.Width).Text
+	}
+	return panel, renderPanel(panel, title, true, body, action, glyphs)
 }
 
 func (m Model) navigationLabel(item navigationItem) string {
