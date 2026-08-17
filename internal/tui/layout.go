@@ -17,20 +17,27 @@ func (r Rect) Overlaps(other Rect) bool {
 }
 
 type Layout struct {
-	Width, Height int
-	Wide          bool
-	Compact       bool
-	Narrow        bool
-	Header        Rect
-	Tabs          Rect
-	Navigation    Rect
-	Main          Rect
-	Breadcrumb    Rect
-	List          Rect
-	Detail        Rect
-	Status        Rect
-	Footer        Rect
-	Overlay       Rect
+	Width, Height   int
+	Wide            bool
+	Compact         bool
+	Narrow          bool
+	LowHeight       bool
+	TooShort        bool
+	AppBar          PanelLayout
+	NavigationPanel PanelLayout
+	CollectionPanel PanelLayout
+	DetailPanel     PanelLayout
+	FooterPanel     PanelLayout
+	Header          Rect
+	Tabs            Rect
+	Navigation      Rect
+	Main            Rect
+	Breadcrumb      Rect
+	List            Rect
+	Detail          Rect
+	Status          Rect
+	Footer          Rect
+	Overlay         Rect
 }
 
 // ComputeLayout is the single source of terminal geometry for rendering and
@@ -38,7 +45,11 @@ type Layout struct {
 func ComputeLayout(width, height int) Layout {
 	width = max(0, width)
 	height = max(0, height)
-	layout := Layout{Width: width, Height: height, Wide: width >= 96, Compact: width >= 60 && width < 96, Narrow: width < 60}
+	layout := Layout{
+		Width: width, Height: height,
+		Wide: width >= 96, Compact: width >= 60 && width < 96, Narrow: width < 60,
+		LowHeight: height >= 8 && height < 12, TooShort: height > 0 && height < 8,
+	}
 	if width == 0 || height == 0 {
 		return layout
 	}
@@ -85,7 +96,48 @@ func ComputeLayout(width, height int) Layout {
 		Width:  overlayWidth,
 		Height: overlayHeight,
 	}
+	layout.computeFramedPanels()
 	return layout
+}
+
+func (layout *Layout) computeFramedPanels() {
+	if layout.Width <= 0 || layout.Height <= 0 || layout.TooShort {
+		return
+	}
+	if layout.LowHeight {
+		layout.CollectionPanel = layoutPanel(Rect{X: 0, Y: 1, Width: layout.Width, Height: max(0, layout.Height-2)}, true)
+		return
+	}
+
+	layout.AppBar = layoutPanel(Rect{X: 0, Y: 0, Width: layout.Width, Height: 3}, false)
+	layout.FooterPanel = layoutPanel(Rect{X: 0, Y: layout.Height - 3, Width: layout.Width, Height: 3}, false)
+	body := Rect{X: 0, Y: 3, Width: layout.Width, Height: max(0, layout.Height-6)}
+	if body.Height < 2 {
+		return
+	}
+	if layout.Narrow {
+		layout.CollectionPanel = layoutPanel(body, true)
+		return
+	}
+
+	navigationWidth := 18
+	if layout.Wide {
+		navigationWidth = 20
+	}
+	navigationWidth = min(navigationWidth, max(2, body.Width-3))
+	layout.NavigationPanel = layoutPanel(Rect{X: body.X, Y: body.Y, Width: navigationWidth, Height: body.Height}, false)
+	contentX := layout.NavigationPanel.Outer.Right() + 1
+	contentWidth := max(0, body.Right()-contentX)
+	if !layout.Wide {
+		layout.CollectionPanel = layoutPanel(Rect{X: contentX, Y: body.Y, Width: contentWidth, Height: body.Height}, true)
+		return
+	}
+
+	collectionWidth := max(32, contentWidth*48/100)
+	collectionWidth = min(collectionWidth, max(2, contentWidth-3))
+	layout.CollectionPanel = layoutPanel(Rect{X: contentX, Y: body.Y, Width: collectionWidth, Height: body.Height}, true)
+	detailX := layout.CollectionPanel.Outer.Right() + 1
+	layout.DetailPanel = layoutPanel(Rect{X: detailX, Y: body.Y, Width: max(0, body.Right()-detailX), Height: body.Height}, true)
 }
 
 // VisibleRange returns an end-exclusive window and preserves a valid explicit

@@ -16,6 +16,13 @@ func (m Model) View() string       { return m.render() }
 func (m Model) render() string {
 	layout := ComputeLayout(max(20, m.Width), max(1, m.Height))
 	lines := make([]string, layout.Height)
+	if layout.TooShort {
+		message := clipPlain("terminal too short; need 8 rows", layout.Width)
+		if len(lines) > 0 {
+			lines[len(lines)/2] = message
+		}
+		return strings.Join(lines, "\n")
+	}
 	if !layout.Header.Empty() {
 		lines[layout.Header.Y] = clip(m.renderAppBar(layout.Header.Width), layout.Header.Width)
 	}

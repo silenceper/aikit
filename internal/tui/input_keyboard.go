@@ -44,6 +44,17 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	if ComputeLayout(m.Width, m.Height).TooShort {
+		switch key {
+		case "?":
+			m.Help = true
+		case "esc":
+			return m.perform(uiCancel)
+		default:
+			m.Status = "terminal too short; need 8 rows"
+		}
+		return m, nil
+	}
 	if m.Mode == ModeConfiguration {
 		if key == "esc" {
 			return m.perform(uiCancel)

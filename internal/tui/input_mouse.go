@@ -25,6 +25,9 @@ type HitRegions struct {
 func (m Model) hitRegions() HitRegions {
 	layout := ComputeLayout(m.Width, m.Height)
 	regions := HitRegions{Layout: layout, Tabs: make(map[View]Rect), actionPrev: -1, actionNext: -1}
+	if layout.TooShort {
+		return regions
+	}
 	for _, item := range layoutNavigation(layout, topViews, m.ActiveView) {
 		regions.Tabs[item.View] = item.Rect
 	}
