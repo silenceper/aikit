@@ -59,7 +59,7 @@ func TestRenderedActionBarClickBoundariesAndWhitespace(t *testing.T) {
 }
 
 func TestNarrowConfigurationActionViewportKeepsEveryFocusedActionReachable(t *testing.T) {
-	for wanted, label := range []string{"Validate", "Reload", "Show path", "Close"} {
+	for wanted, label := range []string{"Validate", "Reload", "Show paths", "Close"} {
 		m := configurationModel(&fakeService{})
 		m.Width, m.Height, m.ActionIndex = 24, 12, wanted
 		plain := stripANSI(m.ViewString())
@@ -84,7 +84,7 @@ func TestNarrowConfigurationActionViewportKeepsEveryFocusedActionReachable(t *te
 			if cmd == nil || !got.Busy {
 				t.Fatalf("%s mouse action cmd=%v busy=%v", label, cmd != nil, got.Busy)
 			}
-		case "Show path":
+		case "Show paths":
 			if cmd != nil || got.Mode != ModeErrorDetail {
 				t.Fatalf("Show path mode=%s cmd=%v", got.Mode, cmd != nil)
 			}
@@ -97,7 +97,7 @@ func TestNarrowConfigurationActionViewportKeepsEveryFocusedActionReachable(t *te
 }
 
 func TestNarrowConfigurationActionViewportIsFullyMouseReachableFromDefault(t *testing.T) {
-	for _, label := range []string{"Validate", "Reload", "Show path", "Close"} {
+	for _, label := range []string{"Validate", "Reload", "Show paths", "Close"} {
 		t.Run(label, func(t *testing.T) {
 			m := configurationModel(&fakeService{})
 			m.Width, m.Height = 24, 12
@@ -118,7 +118,7 @@ func TestNarrowConfigurationActionViewportIsFullyMouseReachableFromDefault(t *te
 						if cmd == nil || !got.Busy {
 							t.Fatalf("%s mouse result cmd=%v busy=%v", label, cmd != nil, got.Busy)
 						}
-					case "Show path":
+					case "Show paths":
 						if cmd != nil || got.Mode != ModeErrorDetail {
 							t.Fatalf("Show path mode=%s cmd=%v", got.Mode, cmd != nil)
 						}

@@ -23,10 +23,18 @@ func TestModernMouseGeometryUsesNavigationAndTwoLineRows(t *testing.T) {
 					t.Fatalf("navigation %s rect=%+v want=%+v", item.View, got, item.Rect)
 				}
 			}
-			if len(regions.Rows) < 2 || regions.Rows[0].Height != 2 || regions.Rows[1].Y != regions.Rows[0].Y+2 {
-				t.Fatalf("two-line row rects=%+v", regions.Rows)
+			rowHeight := collectionRowHeight
+			if !regions.Layout.Detail.Empty() {
+				rowHeight = 1
 			}
-			next, cmd := m.Update(click(regions.Rows[1].X+1, regions.Rows[1].Y+1))
+			if len(regions.Rows) < 2 || regions.Rows[0].Height != rowHeight || regions.Rows[1].Y != regions.Rows[0].Y+rowHeight {
+				t.Fatalf("row rects=%+v", regions.Rows)
+			}
+			clickY := regions.Rows[1].Y
+			if rowHeight > 1 {
+				clickY++
+			}
+			next, cmd := m.Update(click(regions.Rows[1].X+1, clickY))
 			got := next.(Model)
 			if cmd != nil || got.Cursor != 1 {
 				t.Fatalf("second physical row line selected cursor=%d cmd=%v", got.Cursor, cmd != nil)

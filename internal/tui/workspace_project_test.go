@@ -210,7 +210,7 @@ func TestConfirmOverlayScrollKeyboardAndMouseInspectEveryPlanItem(t *testing.T) 
 		m.Preview.Plan.Actions = append(m.Preview.Plan.Actions, link.Action{Path: fmt.Sprintf("/cleanup/%02d", i)})
 	}
 	initial := m.ViewString()
-	if !strings.Contains(initial, "/cleanup/00") || strings.Contains(initial, "/cleanup/17") || !strings.Contains(initial, "1/") {
+	if !strings.Contains(initial, "/cleanup/00") || strings.Contains(initial, "/cleanup/17") || !strings.Contains(initial, "/19") {
 		t.Fatalf("initial confirm viewport invalid:\n%s", initial)
 	}
 	for i := 0; i < 18; i++ {

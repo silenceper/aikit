@@ -71,7 +71,11 @@ func (m Model) hitRegions() HitRegions {
 		}
 	} else if layout.List.Height > 1 && len(m.primaryActions()) > 0 {
 		actions := m.primaryActions()
-		actionX, actionY, actionRight := layout.List.X, layout.List.Bottom()-1, layout.List.Right()
+		actionArea := layout.List
+		if !layout.Detail.Empty() {
+			actionArea = layout.Detail
+		}
+		actionX, actionY, actionRight := actionArea.X, actionArea.Bottom()-1, actionArea.Right()
 		bar := layoutActionBar(actions, m.Focus == FocusActions, m.ActionIndex, actionRight-actionX)
 		regions.ActionBar = Rect{X: actionX, Y: actionY, Width: bar.Bar.Width, Height: bar.Bar.Height}
 		regions.ActionPrev = translateRect(bar.Previous, actionX, actionY)
@@ -130,11 +134,11 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		if (m.Mode == ModeConfirm || m.Mode == ModeErrorDetail) && msg.Button == tea.MouseButtonWheelUp {
+		if (m.Mode == ModeConfirm || m.Mode == ModeErrorDetail || m.Help) && msg.Button == tea.MouseButtonWheelUp {
 			m.moveOverlayScroll(-1)
 			return m, nil
 		}
-		if (m.Mode == ModeConfirm || m.Mode == ModeErrorDetail) && msg.Button == tea.MouseButtonWheelDown {
+		if (m.Mode == ModeConfirm || m.Mode == ModeErrorDetail || m.Help) && msg.Button == tea.MouseButtonWheelDown {
 			m.moveOverlayScroll(1)
 			return m, nil
 		}
@@ -287,7 +291,7 @@ func (m Model) performPrimaryAction(index int) (tea.Model, tea.Cmd) {
 	case "Reload":
 		m.Busy, m.Status = true, "Reloading configuration paths..."
 		return m, reloadConfigurationCmd(m.ctx, m.service)
-	case "Show path":
+	case "Show paths":
 		m.enterErrorDetail("Config: " + m.Config.Config + "\nLibrary: " + m.Config.Library + "\nCache: " + m.Config.Cache)
 		m.Status = "Configuration paths shown; no clipboard operation was performed"
 		return m, nil
@@ -366,7 +370,12 @@ func (m Model) performPrimaryAction(index int) (tea.Model, tea.Cmd) {
 		}
 		m.Status = "Review the library batch, then confirm"
 		return m, nil
-	case "Open", "Review", "Adopt", "Import", "Link existing":
+	case "Open", "Review", "Import", "Link existing":
+		return m.perform(uiActivate)
+	case "Adopt":
+		if m.ActiveView == ViewStatus {
+			return m.previewSelectedStatusAdopt()
+		}
 		return m.perform(uiActivate)
 	case "Compare":
 		rows := m.rows()

@@ -205,6 +205,7 @@ func TestStatusRefreshRetryAndFullErrorDetailActions(t *testing.T) {
 	service := &fakeService{snapshot: testSnapshot()}
 	m := NewModel(nil, service, &fakeMigration{}, ViewStatus, ActionNone)
 	m.Snapshot, m.Width, m.Height = testSnapshot(), 100, 24
+	m.Snapshot.Status.Items[0].Kind = status.Missing
 	m.Err = "compare failed: left hash abcdef does not match right hash fedcba at /very/long/path/to/skill"
 	more, _ := keyboardAction(t, m, actionIndex(t, m, "More"))
 	for _, label := range []string{"Refresh", "Retry", "Error details"} {

@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/silenceper/aikit/internal/app"
+	"github.com/silenceper/aikit/internal/status"
 	"github.com/silenceper/aikit/pkg/config"
 )
 
@@ -77,8 +78,12 @@ func TestActionFocusTabLeftRightEnterAndEsc(t *testing.T) {
 	}
 	next, _ = m.Update(actionKey(tea.KeyEsc))
 	m = next.(Model)
-	if m.Focus != FocusList {
-		t.Fatalf("Esc focus=%s, want list when no detail is visible", m.Focus)
+	wantFocus := FocusList
+	if !ComputeLayout(m.Width, m.Height).Detail.Empty() {
+		wantFocus = FocusDetail
+	}
+	if m.Focus != wantFocus {
+		t.Fatalf("Esc focus=%s, want %s", m.Focus, wantFocus)
 	}
 }
 
@@ -102,11 +107,16 @@ func TestTabNeverEntersInvisibleDetailPane(t *testing.T) {
 	for _, width := range []int{80, 120} {
 		m := NewModel(nil, &fakeService{}, &fakeMigration{}, ViewLibrary, ActionNone)
 		m.Snapshot, m.Width, m.Height = testSnapshot(), width, 20
-		if !ComputeLayout(width, m.Height).Detail.Empty() {
-			t.Fatalf("fixture width=%d unexpectedly has detail rect", width)
-		}
+		detailVisible := !ComputeLayout(width, m.Height).Detail.Empty()
 		next, _ := m.Update(actionKey(tea.KeyTab))
 		m = next.(Model)
+		if detailVisible {
+			if m.Focus != FocusDetail {
+				t.Fatalf("width=%d Tab focus=%s, want detail", width, m.Focus)
+			}
+			next, _ = m.Update(actionKey(tea.KeyTab))
+			m = next.(Model)
+		}
 		if m.Focus != FocusActions || m.ActionIndex != 0 || !strings.Contains(stripANSI(m.ViewString()), "{Open}") {
 			t.Fatalf("width=%d Tab focus=%s action=%d:\n%s", width, m.Focus, m.ActionIndex, m.ViewString())
 		}
@@ -115,8 +125,12 @@ func TestTabNeverEntersInvisibleDetailPane(t *testing.T) {
 		}
 		next, _ = m.Update(actionKey(tea.KeyShiftTab))
 		m = next.(Model)
-		if m.Focus != FocusList {
-			t.Fatalf("width=%d Shift-Tab focus=%s, want list", width, m.Focus)
+		wantFocus := FocusList
+		if detailVisible {
+			wantFocus = FocusDetail
+		}
+		if m.Focus != wantFocus {
+			t.Fatalf("width=%d Shift-Tab focus=%s, want %s", width, m.Focus, wantFocus)
 		}
 	}
 }
@@ -175,7 +189,11 @@ func TestRenderedActionEndToEndKeyboardMouseParity(t *testing.T) {
 				t.Fatalf("more mode=%s cmd=%v", m.Mode, cmd != nil)
 			}
 		}},
-		{name: "sync", label: "Sync preview", setup: func(m Model) Model { m.switchView(ViewStatus); return m }, assert: func(t *testing.T, _ Model, cmd tea.Cmd, service *fakeService) {
+		{name: "sync", label: "Sync preview", setup: func(m Model) Model {
+			m.switchView(ViewStatus)
+			m.Snapshot.Status.Items[0].Kind = status.Missing
+			return m
+		}, assert: func(t *testing.T, _ Model, cmd tea.Cmd, service *fakeService) {
 			if cmd == nil {
 				t.Fatal("sync returned no command")
 			}

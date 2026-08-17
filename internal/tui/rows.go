@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/base64"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -81,6 +82,14 @@ func (m Model) rows() []row {
 				rows = append(rows, row{Key: "status:update-failure:" + failed.SkillID, ID: "update-failure:" + failed.SkillID, Name: skillName(m.Snapshot.Config.Library.Skills, failed.SkillID), State: "Update check failed", Detail: failed.Error, Severity: rowSeverityError})
 			}
 		}
+		seenWarnings := make(map[string]bool)
+		for _, warning := range m.Snapshot.Updates.Warnings {
+			if seenWarnings[warning] {
+				continue
+			}
+			seenWarnings[warning] = true
+			rows = append(rows, row{Key: "status:update-warning:" + base64.RawURLEncoding.EncodeToString([]byte(warning)), ID: warning, Name: "Update check warning", State: "Update check failed", Detail: warning, Severity: rowSeverityError})
+		}
 	}
 	if m.ActiveView != ViewMigration && m.ActiveView != ViewOverview {
 		sort.SliceStable(rows, func(i, j int) bool { return rows[i].selectionKey() < rows[j].selectionKey() })
@@ -91,24 +100,38 @@ func (m Model) rows() []row {
 func (m Model) attentionRows() []row {
 	rows := make([]row, 0, len(m.Inventory.Items)+len(m.Snapshot.Status.Items)+len(m.Inventory.Issues))
 	for _, operation := range m.Snapshot.Config.PendingOperations {
-		rows = append(rows, row{Key: "attention:recovery:" + operation.ID, ID: operation.ID, Name: "Recovery required", State: "Error", Detail: firstNonEmpty(operation.SkillID, operation.ID), Severity: rowSeverityRecovery})
+		rows = append(rows, row{Key: "attention:recovery:" + operation.ID, ID: operation.ID, Name: "Recovery required", State: "Error", Detail: firstNonEmpty(operation.SkillID, operation.ID), Severity: rowSeverityRecovery, DestinationAction: ActionRecovery})
 	}
 	for _, item := range m.Snapshot.Status.Items {
 		severity := statusSeverity(item.Kind)
-		rows = append(rows, row{Key: "attention:" + statusItemKey(item), ID: item.SkillID, Name: firstNonEmpty(item.Name, item.SkillID, humanState(string(item.Kind))), State: humanState(string(item.Kind)), Detail: firstNonEmpty(item.Message, "Review local status"), Severity: severity})
+		key := statusItemKey(item)
+		rows = append(rows, row{Key: "attention:" + key, ID: item.SkillID, Name: firstNonEmpty(item.Name, item.SkillID, humanState(string(item.Kind))), State: humanState(string(item.Kind)), Detail: firstNonEmpty(item.Message, "Review local status"), Severity: severity, DestinationView: ViewStatus, DestinationKey: key})
 	}
 	for _, item := range m.Snapshot.Updates.Results {
-		if item.State != updatecheck.StateCheckFailed {
-			continue
+		switch item.State {
+		case updatecheck.StateUpdateAvailable:
+			rows = append(rows, row{
+				Key:             "attention:update:" + base64.RawURLEncoding.EncodeToString([]byte(item.SkillID)),
+				ID:              item.SkillID,
+				Name:            skillName(m.Snapshot.Config.Library.Skills, item.SkillID),
+				State:           "Update available",
+				Detail:          shortOID(item.Current) + " -> " + shortOID(item.Remote),
+				Severity:        rowSeverityWarning,
+				DestinationMode: ModeUpdates,
+				DestinationKey:  item.SkillID,
+			})
+		case updatecheck.StateCheckFailed:
+			rows = append(rows, row{
+				Key:             "attention:update-failure:" + base64.RawURLEncoding.EncodeToString([]byte(item.SkillID)),
+				ID:              item.SkillID,
+				Name:            "Update check failed · " + skillName(m.Snapshot.Config.Library.Skills, item.SkillID),
+				State:           "Update check failed",
+				Detail:          firstNonEmpty(item.Error, "Update check failed"),
+				Severity:        rowSeverityError,
+				DestinationView: ViewStatus,
+				DestinationKey:  "status:update-failure:" + item.SkillID,
+			})
 		}
-		rows = append(rows, row{
-			Key:      "attention:update-failure:" + base64.RawURLEncoding.EncodeToString([]byte(item.SkillID)),
-			ID:       item.SkillID,
-			Name:     "Update check failed · " + skillName(m.Snapshot.Config.Library.Skills, item.SkillID),
-			State:    "Update check failed",
-			Detail:   firstNonEmpty(item.Error, "Update check failed"),
-			Severity: rowSeverityError,
-		})
 	}
 	seenWarnings := make(map[string]bool)
 	for _, warning := range m.Snapshot.Updates.Warnings {
@@ -117,16 +140,18 @@ func (m Model) attentionRows() []row {
 		}
 		seenWarnings[warning] = true
 		rows = append(rows, row{
-			Key:      "attention:update-warning:" + base64.RawURLEncoding.EncodeToString([]byte(warning)),
-			ID:       warning,
-			Name:     "Update check warning",
-			State:    "Update check failed",
-			Detail:   warning,
-			Severity: rowSeverityError,
+			Key:             "attention:update-warning:" + base64.RawURLEncoding.EncodeToString([]byte(warning)),
+			ID:              warning,
+			Name:            "Update check warning",
+			State:           "Update check failed",
+			Detail:          warning,
+			Severity:        rowSeverityError,
+			DestinationView: ViewStatus,
+			DestinationKey:  "status:update-warning:" + base64.RawURLEncoding.EncodeToString([]byte(warning)),
 		})
 	}
-	for _, issue := range m.Inventory.Issues {
-		rows = append(rows, row{Key: "attention:issue:" + issue.Origin + "\x00" + issue.Path, ID: issue.Origin, Name: firstNonEmpty(issue.Origin, "Inventory issue"), State: "Error", Detail: firstNonEmpty(issue.Message, "Review inventory"), Severity: rowSeverityError})
+	for index, issue := range m.Inventory.Issues {
+		rows = append(rows, row{Key: "attention:issue:" + issue.Origin + "\x00" + issue.Path, ID: issue.Origin, Name: firstNonEmpty(issue.Origin, "Inventory issue"), State: "Error", Detail: firstNonEmpty(issue.Message, "Review inventory"), Severity: rowSeverityError, DestinationView: ViewStatus, DestinationKey: fmt.Sprintf("inventory-issue:%d:%s", index, issue.Origin)})
 	}
 	for _, item := range m.Inventory.Items {
 		state := item.State
@@ -138,7 +163,7 @@ func (m Model) attentionRows() []row {
 			continue
 		}
 		name := firstNonEmpty(item.Skill.Name, item.Discovered.Name, item.MatchedLibraryID, item.Key)
-		rows = append(rows, row{Key: "attention:inventory:" + item.Key, ID: item.Key, Name: name, State: humanState(string(state)), Detail: firstNonEmpty(humanAction(item.Action), "Review in Migration"), Severity: severity})
+		rows = append(rows, row{Key: "attention:inventory:" + item.Key, ID: item.Key, Name: name, State: humanState(string(state)), Detail: firstNonEmpty(humanAction(item.Action), "Review in Migration"), Severity: severity, DestinationView: ViewMigration, DestinationKey: item.Key})
 	}
 	sort.SliceStable(rows, func(i, j int) bool {
 		if severityRank(rows[i].Severity) != severityRank(rows[j].Severity) {
@@ -213,8 +238,15 @@ func (m Model) scanRows(items []app.ScanItem) []row {
 		if m.Ignored[item.Key] {
 			continue
 		}
-		id := firstNonEmpty(item.Skill.ID, item.Discovered.RelativePath, item.MatchedLibraryID, item.Key)
-		name := firstNonEmpty(item.Skill.Name, item.Discovered.Name, id)
+		id := firstNonEmpty(item.Skill.ID, item.Discovered.RelativePath, item.MatchedLibraryID, item.Target, item.Key)
+		name := item.Skill.Name
+		if name == "" {
+			name = item.Discovered.Name
+		}
+		if name == "" && item.Target != "" {
+			name = filepath.Base(filepath.Clean(item.Target))
+		}
+		name = firstNonEmpty(name, item.MatchedLibraryID, id)
 		state := item.State
 		if state == "" {
 			state = item.ManagementState
@@ -294,7 +326,11 @@ func (m Model) projectRows() []row {
 }
 
 func (m Model) filtered(rows []row) []row {
-	query := strings.ToLower(strings.TrimSpace(m.Filter))
+	value := m.Filter
+	if m.Mode == ModeFilter {
+		value = m.FilterDraft
+	}
+	query := strings.ToLower(strings.TrimSpace(value))
 	if query == "" {
 		return rows
 	}
@@ -366,8 +402,19 @@ func inventoryDetail(item app.ScanItem) string {
 	if item.Project != "" || item.Scope.Project != "" {
 		scope = "Project"
 	}
-	parts := []string{scope, firstNonEmpty(item.Agent, item.Scope.Agent)}
-	if project := firstNonEmpty(item.Project, item.Scope.Project); project != "-" {
+	parts := []string{scope}
+	agent := item.Agent
+	if agent == "" {
+		agent = item.Scope.Agent
+	}
+	if agent != "" {
+		parts = append(parts, agent)
+	}
+	project := item.Project
+	if project == "" {
+		project = item.Scope.Project
+	}
+	if project != "" {
 		parts = append(parts, project)
 	}
 	return strings.Join(parts, " · ")
@@ -475,3 +522,29 @@ func shortOID(value string) string {
 }
 
 func isUnmanaged(item status.Item) bool { return item.Kind == status.Unmanaged }
+
+func (m Model) selectedStatusItem() (status.Item, bool) {
+	rows := m.rows()
+	if m.ActiveView != ViewStatus || m.Cursor < 0 || m.Cursor >= len(rows) {
+		return status.Item{}, false
+	}
+	for _, item := range m.Snapshot.Status.Items {
+		if rows[m.Cursor].Key == statusItemKey(item) {
+			return item, true
+		}
+	}
+	return status.Item{}, false
+}
+
+func (m Model) selectedStatusCanSync() bool {
+	item, ok := m.selectedStatusItem()
+	if !ok {
+		return false
+	}
+	switch item.Kind {
+	case status.Missing, status.LibraryMissing, status.Conflict, status.ScopeConflict, status.OrphanedLink, status.PendingCleanup:
+		return true
+	default:
+		return false
+	}
+}

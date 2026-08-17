@@ -36,7 +36,7 @@ func invokeConfigurationAction(t *testing.T, m Model, label string, mouse bool) 
 }
 
 func TestConfigurationReadOnlyActionsKeyboardMouseParity(t *testing.T) {
-	for _, label := range []string{"Validate", "Reload", "Show path", "Close"} {
+	for _, label := range []string{"Validate", "Reload", "Show paths", "Close"} {
 		for _, mouse := range []bool{false, true} {
 			t.Run(label+map[bool]string{false: "-keyboard", true: "-mouse"}[mouse], func(t *testing.T) {
 				service := &fakeService{configuration: app.ConfigurationDetail{Config: "/new/config.yaml", Library: "/new/library", Cache: "/new/cache"}, configurationValidation: app.ConfigurationValidation{Path: "/home/aikit/config.yaml", Valid: true}}
@@ -65,7 +65,7 @@ func TestConfigurationReadOnlyActionsKeyboardMouseParity(t *testing.T) {
 					if service.configurationCalls != 1 || service.snapshotCalls != 1 || !service.lastSnapshot.Offline || service.lastSnapshot.ForceRefresh {
 						t.Fatalf("Reload config=%d snapshot=%d request=%+v", service.configurationCalls, service.snapshotCalls, service.lastSnapshot)
 					}
-				case "Show path":
+				case "Show paths":
 					if cmd != nil || m.Mode != ModeErrorDetail || !strings.Contains(m.ViewString(), "/home/aikit/config.yaml") || strings.Contains(strings.ToLower(m.Status), "copied") {
 						t.Fatalf("Show path invalid:\n%s", m.ViewString())
 					}
@@ -82,7 +82,7 @@ func TestConfigurationReadOnlyActionsKeyboardMouseParity(t *testing.T) {
 func TestConfigurationActionsExposeNoClipboardOrEditor(t *testing.T) {
 	m := configurationModel(&fakeService{})
 	actions := m.primaryActions()
-	if !reflect.DeepEqual(actions, []string{"Validate", "Reload", "Show path", "Close"}) {
+	if !reflect.DeepEqual(actions, []string{"Validate", "Reload", "Show paths", "Close"}) {
 		t.Fatalf("configuration actions=%v", actions)
 	}
 	joined := strings.ToLower(strings.Join(actions, " "))
@@ -97,7 +97,7 @@ func TestConfigurationShowPathDetailCloseKeyboardMouseParity(t *testing.T) {
 	for _, closeWithMouse := range []bool{false, true} {
 		name := map[bool]string{false: "escape", true: "mouse-close"}[closeWithMouse]
 		t.Run(name, func(t *testing.T) {
-			m, cmd := invokeConfigurationAction(t, configurationModel(&fakeService{}), "Show path", true)
+			m, cmd := invokeConfigurationAction(t, configurationModel(&fakeService{}), "Show paths", true)
 			if cmd != nil || m.Mode != ModeErrorDetail {
 				t.Fatalf("Show path mode=%s cmd=%v", m.Mode, cmd != nil)
 			}

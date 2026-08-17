@@ -13,9 +13,13 @@ func (m Model) overlayLines() []string {
 	case m.Help:
 		return []string{
 			activeStyle.Render("Keyboard help"),
-			"1-6 switch pages · j/k move · Enter open",
-			"space select · / search · r refresh",
-			"Ctrl+K configuration · Esc back · q quit",
+			"1-6 pages · ↑/↓ or j/k move · Enter open",
+			"Tab/Shift+Tab focus · ←/→ actions · space select",
+			"/ search · Enter apply · Esc cancel · Backspace to clear draft",
+			"PgUp/PgDn scroll details and long previews",
+			"Mouse: click rows/actions · wheel scrolls the focused area",
+			"r refresh · Ctrl+K configuration · ? help",
+			"Esc back/cancel · q quit from a page · Ctrl+C force quit",
 		}
 	case m.Mode == ModeConfiguration:
 		lines := []string{
@@ -128,7 +132,7 @@ func (m Model) overlayLines() []string {
 		}
 		return lines
 	case m.Mode == ModeFilter:
-		return []string{activeStyle.Render("Search: ") + m.Filter + "█"}
+		return []string{activeStyle.Render("Search: ") + m.FilterDraft + "█"}
 	case m.Mode == ModeInput:
 		return []string{activeStyle.Render(m.Input.Prompt), m.Input.Value + "█"}
 	case m.Mode == ModeMore:
@@ -187,6 +191,18 @@ func wrapText(value string, width int) []string {
 		}
 	}
 	return lines
+}
+
+func wrapOverlayBody(body []string, width int) []string {
+	wrapped := make([]string, 0, len(body))
+	for _, line := range body {
+		if line == "" {
+			wrapped = append(wrapped, "")
+			continue
+		}
+		wrapped = append(wrapped, wrapText(line, width)...)
+	}
+	return wrapped
 }
 
 func (m Model) selectorPending(key string) bool {

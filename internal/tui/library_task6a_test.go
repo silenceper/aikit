@@ -403,15 +403,8 @@ func TestBatchUpdateRejectsHiddenInvalidSelectionBeforeConfirmation(t *testing.T
 		}
 	}
 	m, _ = keyboardAction(t, m, actionIndex(t, m, "More"))
-	index := actionIndex(t, m, "Update selected")
-	for i := 0; i < index; i++ {
-		next, _ := m.Update(actionKey(tea.KeyRight))
-		m = next.(Model)
-	}
-	next, cmd := m.Update(actionKey(tea.KeyEnter))
-	m = next.(Model)
-	if cmd != nil || m.Mode == ModeConfirm || service.batchCalls != 0 || !strings.Contains(m.Err, "acme/beta") {
-		t.Fatalf("invalid hidden update accepted: mode=%s err=%q cmd=%v calls=%d", m.Mode, m.Err, cmd != nil, service.batchCalls)
+	if strings.Contains(strings.Join(m.primaryActions(), " "), "Update selected") || m.Mode != ModeMore || service.batchCalls != 0 {
+		t.Fatalf("invalid hidden update exposed: mode=%s actions=%v calls=%d", m.Mode, m.primaryActions(), service.batchCalls)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 
 	"github.com/silenceper/aikit/internal/app"
 	"github.com/silenceper/aikit/internal/link"
+	"github.com/silenceper/aikit/internal/status"
 	"github.com/silenceper/aikit/pkg/config"
 )
 
@@ -127,6 +128,7 @@ func TestStatusSyncUsesDryRunPreviewAndCancelDoesNotMutate(t *testing.T) {
 	service := &fakeService{snapshot: testSnapshot(), syncResult: app.Result{Plan: link.Plan{Actions: []link.Action{{Path: "/work/link"}}}}}
 	m := loadedModel(t, service, &fakeMigration{})
 	m.switchView(ViewStatus)
+	m.Snapshot.Status.Items[0].Kind = status.Missing
 
 	m, preview := apply(m, "s")
 	if preview == nil || service.syncCalls != 0 {

@@ -72,7 +72,7 @@ func TestVisualStateMatrixStaysBoundedAndKeepsLandmarks(t *testing.T) {
 		setup    func(*Model)
 	}{
 		{"healthy", "Overview", func(m *Model) { m.Snapshot.Status.Items = nil }},
-		{"empty", "No items", func(m *Model) { m.ActiveView = ViewLibrary; m.Snapshot.Config.Library.Skills = nil }},
+		{"empty", "Add source", func(m *Model) { m.ActiveView = ViewLibrary; m.Snapshot.Config.Library.Skills = nil }},
 		{"loading", "scanning", func(m *Model) { m.Inventory.Loading = true }},
 		{"partial", "partial warning", func(m *Model) {
 			m.ActiveView = ViewWorkspaces
@@ -95,7 +95,11 @@ func TestVisualStateMatrixStaysBoundedAndKeepsLandmarks(t *testing.T) {
 					got := m.ViewString()
 					landmark := state.landmark
 					if height == 8 && (state.name == "warning" || state.name == "error") {
-						landmark = "Needs attention"
+						if width < 60 {
+							landmark = "Attention"
+						} else {
+							landmark = "Needs attention"
+						}
 					}
 					if state.name == "loading" && (height == 8 || width == 24) {
 						landmark = "aikit"
@@ -179,13 +183,13 @@ func TestOverviewIncludesTypedUpdateFailuresAndWarningsAsErrors(t *testing.T) {
 	m.Width, m.Height = 120, 24
 
 	rows := m.attentionRows()
-	if len(rows) != 2 || rows[0].Severity != rowSeverityError || rows[1].Severity != rowSeverityError {
+	if len(rows) != 3 || rows[0].Severity != rowSeverityError || rows[1].Severity != rowSeverityError || rows[2].Severity != rowSeverityWarning {
 		t.Fatalf("update attention rows=%+v", rows)
 	}
-	keys := []string{rows[0].selectionKey(), rows[1].selectionKey()}
+	keys := []string{rows[0].selectionKey(), rows[1].selectionKey(), rows[2].selectionKey()}
 	again := m.attentionRows()
-	if keys[0] != again[0].selectionKey() || keys[1] != again[1].selectionKey() {
-		t.Fatalf("update attention keys unstable: %v then %q/%q", keys, again[0].selectionKey(), again[1].selectionKey())
+	if keys[0] != again[0].selectionKey() || keys[1] != again[1].selectionKey() || keys[2] != again[2].selectionKey() {
+		t.Fatalf("update attention keys unstable: %v then %q/%q/%q", keys, again[0].selectionKey(), again[1].selectionKey(), again[2].selectionKey())
 	}
 	got := stripANSI(m.ViewString())
 	for _, want := range []string{"Updates  1", "Issues  2", "remote authentication failed", "update cache is unreadable"} {
@@ -278,7 +282,7 @@ func TestModernNavigationShowsCompactCountsAndAttention(t *testing.T) {
 		want  []string
 	}{
 		{120, []string{"Library  2", "Migration  !", "Status  1"}},
-		{80, []string{"Lib  2", "Mig  !", "Stat  1"}},
+		{80, []string{"Library  2", "Migration  !", "Status  1"}},
 	} {
 		m.Width, m.Height = tt.width, 20
 		got := stripANSI(m.ViewString())
@@ -298,10 +302,10 @@ func TestSemanticBadgesOnCollectionRowsKeepNoColorMarkers(t *testing.T) {
 		configure func(*Model)
 		want      string
 	}{
-		{"library-warning", ViewLibrary, nil, "[WARN] Update available"},
+		{"library-warning", ViewLibrary, nil, "[WARN]"},
 		{"migration-conflict", ViewMigration, func(m *Model) {
 			m.Inventory.Items = []app.ScanItem{{Key: "conflict", State: app.ScanStateNameConflict, Skill: config.Skill{Name: "conflict"}}}
-		}, "[WARN] Name conflict"},
+		}, "[WARN]"},
 		{"workspace-success", ViewWorkspaces, func(m *Model) { m.Scope = Scope{Agent: "codex", Level: "agent-skills"} }, "[OK] Enabled"},
 	}
 	for _, tt := range tests {
@@ -328,7 +332,7 @@ func TestBadgeRenderingUsesTypedRowSeverityOnly(t *testing.T) {
 		marker   string
 	}{
 		{"healthy words", rowSeverityError, "[ERR]"},
-		{"error conflict unmanaged update", rowSeverityInfo, "[INFO]"},
+		{"error conflict unmanaged update", rowSeverityInfo, "error conflict"},
 		{"anything", rowSeverityConflict, "[WARN]"},
 		{"anything", rowSeveritySuccess, "[OK]"},
 	}

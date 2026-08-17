@@ -60,7 +60,7 @@ func ComputeLayout(width, height int) Layout {
 		layout.Breadcrumb = Rect{Y: bodyY, Width: width, Height: min(1, bodyHeight)}
 		layout.Main = Rect{Y: layout.Breadcrumb.Bottom(), Width: width, Height: max(0, bodyHeight-layout.Breadcrumb.Height)}
 	} else {
-		navigationWidth := 10
+		navigationWidth := 14
 		if layout.Wide {
 			navigationWidth = 18
 		}
@@ -70,6 +70,13 @@ func ComputeLayout(width, height int) Layout {
 		layout.Main = Rect{X: mainX, Y: bodyY, Width: max(0, width-mainX), Height: bodyHeight}
 	}
 	layout.List = layout.Main
+	if layout.Wide && layout.Main.Width >= 72 {
+		gap := 1
+		available := layout.Main.Width - gap
+		listWidth := min(55, max(38, available/2))
+		layout.List = Rect{X: layout.Main.X, Y: layout.Main.Y, Width: listWidth, Height: layout.Main.Height}
+		layout.Detail = Rect{X: layout.List.Right() + gap, Y: layout.Main.Y, Width: max(0, layout.Main.Right()-layout.List.Right()-gap), Height: layout.Main.Height}
+	}
 	overlayWidth := min(layout.Main.Width, max(20, layout.Main.Width-2))
 	overlayHeight := min(layout.Main.Height, max(3, layout.Main.Height*2/3))
 	layout.Overlay = Rect{

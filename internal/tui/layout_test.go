@@ -38,7 +38,7 @@ func TestLayoutNavigationUsesResponsiveLabelsAndRects(t *testing.T) {
 		label string
 	}{
 		{120, len(topViews), "Workspaces"},
-		{80, len(topViews), "Work"},
+		{80, len(topViews), "Workspaces"},
 		{59, 1, "Library"},
 	} {
 		layout := ComputeLayout(tt.width, 20)

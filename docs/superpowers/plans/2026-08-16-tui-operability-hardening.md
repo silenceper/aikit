@@ -19,10 +19,10 @@
 - Modify: `internal/tui/rows.go`
 - Test: `internal/tui/operability_regression_test.go`
 
-- [ ] Write failing tests for Overview destinations and migration-confirm cancellation.
-- [ ] Run the focused tests and confirm the expected failures.
-- [ ] Add typed attention destinations and saved confirmation parent/focus state.
-- [ ] Run the focused tests and confirm they pass.
+- [x] Write failing tests for Overview destinations and migration-confirm cancellation.
+- [x] Run the focused tests and confirm the expected failures.
+- [x] Add typed attention destinations and saved confirmation parent/focus state.
+- [x] Run the focused tests and confirm they pass.
 
 ### Task 2: Search transaction and visible collection state
 
@@ -34,10 +34,10 @@
 - Modify: `internal/tui/render.go`
 - Test: `internal/tui/operability_regression_test.go`
 
-- [ ] Write failing tests for draft/apply/cancel, visible query, and result count.
-- [ ] Run the focused tests and confirm the expected failures.
-- [ ] Implement filter draft state and collection-heading feedback.
-- [ ] Run the focused tests and confirm they pass.
+- [x] Write failing tests for draft/apply/cancel, visible query, and result count.
+- [x] Run the focused tests and confirm the expected failures.
+- [x] Implement filter draft state and collection-heading feedback.
+- [x] Run the focused tests and confirm they pass.
 
 ### Task 3: Contextual actions and truthful help
 
@@ -49,10 +49,10 @@
 - Test: `internal/tui/operability_regression_test.go`
 - Test: `internal/tui/action_focus_test.go`
 
-- [ ] Write failing tests for invalid action removal and q/Esc behavior.
-- [ ] Run the focused tests and confirm the expected failures.
-- [ ] Derive primary/More actions from row capabilities and update help copy.
-- [ ] Run keyboard/mouse parity tests and confirm they pass.
+- [x] Write failing tests for invalid action removal and q/Esc behavior.
+- [x] Run the focused tests and confirm the expected failures.
+- [x] Derive primary/More actions from row capabilities and update help copy.
+- [x] Run keyboard/mouse parity tests and confirm they pass.
 
 ### Task 4: Identity, responsive hierarchy, and exact previews
 
@@ -63,10 +63,10 @@
 - Test: `internal/tui/render_test.go`
 - Test: `internal/tui/operability_regression_test.go`
 
-- [ ] Write failing tests for duplicate origins, broken-link labels, narrow metrics, range indicators, and wrapped paths.
-- [ ] Run the focused tests and confirm the expected failures.
-- [ ] Implement the minimal responsive rendering and identity changes.
-- [ ] Run render matrices and `NO_COLOR` fixtures.
+- [x] Write failing tests for duplicate origins, broken-link labels, narrow metrics, range indicators, and wrapped paths.
+- [x] Run the focused tests and confirm the expected failures.
+- [x] Implement the minimal responsive rendering and identity changes.
+- [x] Run render matrices and `NO_COLOR` fixtures.
 
 ### Task 5: Configuration copy and final verification
 
@@ -74,8 +74,8 @@
 - Modify: `internal/tui/render.go`
 - Test: `internal/tui/configuration_test.go`
 
-- [ ] Add a failing test for the truthful `Show paths` label and read-only help.
-- [ ] Update configuration copy without adding clipboard or editor authority.
-- [ ] Run `go test -count=1 -race ./internal/tui`.
-- [ ] Run `go test -count=1 -race ./...`, `go vet ./...`, `make test-e2e`, cross-platform builds, and `git diff --check`.
-- [ ] Perform fresh 120x30, 80x24, 38x12, and 24x8 manual TUI walkthroughs.
+- [x] Add a failing test for the truthful `Show paths` label and read-only help.
+- [x] Update configuration copy without adding clipboard or editor authority.
+- [x] Run `go test -count=1 -race ./internal/tui`.
+- [x] Run `go test -count=1 -race ./...`, `go vet ./...`, `make test-e2e`, cross-platform builds, and `git diff --check`.
+- [x] Perform fresh 120x30, 80x24, 38x12, and 24x8 manual TUI walkthroughs.

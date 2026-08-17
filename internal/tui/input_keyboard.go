@@ -21,13 +21,23 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.Help {
-		if key == "esc" || key == "?" || key == "q" {
+		if key == "esc" || key == "?" {
 			return m.perform(uiCancel)
+		}
+		switch key {
+		case "up", "k":
+			m.moveOverlayScroll(-1)
+		case "down", "j":
+			m.moveOverlayScroll(1)
+		case "pgup":
+			m.moveOverlayScroll(-m.overlayPageSize())
+		case "pgdown":
+			m.moveOverlayScroll(m.overlayPageSize())
 		}
 		return m, nil
 	}
 	if m.Mode == ModeConfiguration {
-		if key == "esc" || key == "q" {
+		if key == "esc" {
 			return m.perform(uiCancel)
 		}
 		switch key {
@@ -45,7 +55,7 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.Mode == ModeErrorDetail {
-		if key == "esc" || key == "q" || key == "enter" {
+		if key == "esc" || key == "enter" {
 			return m.perform(uiCancel)
 		}
 		switch key {
@@ -66,16 +76,20 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.Mode == ModeFilter {
 		switch key {
-		case "esc", "enter":
-			m.Mode = m.filterParent
+		case "esc":
+			m.cancelFilterDraft()
+			return m, nil
+		case "enter":
+			m.applyFilterDraft()
+			return m, nil
 		case "backspace":
-			chars := []rune(m.Filter)
+			chars := []rune(m.FilterDraft)
 			if len(chars) > 0 {
-				m.Filter = string(chars[:len(chars)-1])
+				m.FilterDraft = string(chars[:len(chars)-1])
 			}
 		default:
 			if msg.Type == tea.KeyRunes {
-				m.Filter += string(msg.Runes)
+				m.FilterDraft += string(msg.Runes)
 			}
 		}
 		m.Cursor, m.Scroll = 0, 0
@@ -107,7 +121,7 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.Mode == ModeMore {
-		if key == "esc" || key == "q" {
+		if key == "esc" {
 			return m.perform(uiCancel)
 		}
 		switch key {
@@ -137,7 +151,7 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.Mode == ModeConfirm {
-		if key == "esc" || key == "q" {
+		if key == "esc" {
 			return m.perform(uiCancel)
 		}
 		switch key {
@@ -188,7 +202,7 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "enter":
 			return m.performPrimaryAction(m.ActionIndex)
-		case "esc", "q":
+		case "esc":
 			if m.detailFocusVisible() {
 				m.Focus = FocusDetail
 			} else {
@@ -198,7 +212,7 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	if m.Focus == FocusDetail {
-		if key == "esc" || key == "q" {
+		if key == "esc" {
 			m.Focus = FocusList
 			if m.Width < 60 {
 				m.Detail = false
@@ -232,7 +246,7 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "?":
 		m.Help = true
 	case "/":
-		m.filterParent, m.Mode, m.Filter = m.Mode, ModeFilter, ""
+		m.beginFilter()
 	case "j", "down":
 		return m.perform(uiMoveDown)
 	case "k", "up":
@@ -282,24 +296,19 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "A":
 		if m.ActiveView == ViewStatus {
-			rows := m.rows()
-			if m.Cursor < len(rows) {
-				for _, item := range m.Snapshot.Status.Items {
-					if isUnmanaged(item) && (item.Name == rows[m.Cursor].Name || item.Path == rows[m.Cursor].Source) {
-						m.Busy = true
-						return m, scanCmd(m.ctx, m.migration, app.ScanRequest{Agent: item.Scope.Agent, Project: item.Scope.Project, Targets: []string{item.Path}, DryRun: true})
-					}
-				}
-			}
+			return m.previewSelectedStatusAdopt()
 		}
 	case "s":
-		if m.ActiveView == ViewStatus {
+		if m.ActiveView == ViewStatus && m.selectedStatusCanSync() {
 			m.pendingSync = app.SyncRequest{}
 			m.Busy, m.Status = true, "Building sync preview..."
 			return m, syncPreviewCmd(m.ctx, m.service, app.SyncRequest{DryRun: true})
 		}
-	case "esc", "q":
+	case "esc":
 		return m.perform(uiCancel)
+	case "q":
+		m.cancelInventory()
+		return m, tea.Quit
 	}
 	return m, nil
 }
@@ -316,7 +325,13 @@ func (m *Model) moveMoreAction(delta int) {
 
 func (m *Model) moveOverlayScroll(delta int) {
 	layout := ComputeLayout(m.Width, m.Height)
-	bodyLength := max(0, len(m.overlayLines())-1)
+	panel := layoutOverlayPanel(layout, m.overlayPanelActions(), m.Focus == FocusActions, m.ActionIndex)
+	overlay := m.overlayLines()
+	body := []string(nil)
+	if len(overlay) > 1 {
+		body = wrapOverlayBody(overlay[1:], panel.Body.Width)
+	}
+	bodyLength := len(body)
 	capacity := overlayBodyCapacity(layout, bodyLength)
 	maximum := max(0, bodyLength-capacity)
 	m.OverlayScroll = min(max(0, m.OverlayScroll+delta), maximum)
@@ -324,7 +339,12 @@ func (m *Model) moveOverlayScroll(delta int) {
 
 func (m Model) overlayPageSize() int {
 	layout := ComputeLayout(m.Width, m.Height)
-	bodyLength := max(0, len(m.overlayLines())-1)
+	panel := layoutOverlayPanel(layout, m.overlayPanelActions(), m.Focus == FocusActions, m.ActionIndex)
+	overlay := m.overlayLines()
+	bodyLength := 0
+	if len(overlay) > 1 {
+		bodyLength = len(wrapOverlayBody(overlay[1:], panel.Body.Width))
+	}
 	return overlayBodyCapacity(layout, bodyLength)
 }
 

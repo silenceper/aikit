@@ -128,17 +128,21 @@ type InventoryState struct {
 }
 
 type row struct {
-	Key      string
-	ID       string
-	Name     string
-	Origin   string
-	Target   string
-	Source   string
-	State    string
-	Action   string
-	Detail   string
-	Enabled  bool
-	Severity rowSeverity
+	Key               string
+	ID                string
+	Name              string
+	Origin            string
+	Target            string
+	Source            string
+	State             string
+	Action            string
+	Detail            string
+	Enabled           bool
+	Severity          rowSeverity
+	DestinationView   View
+	DestinationMode   Mode
+	DestinationKey    string
+	DestinationAction Action
 }
 
 type rowSeverity uint8
@@ -175,6 +179,19 @@ func (r row) selectionKey() string {
 	return r.ID
 }
 
+type confirmReturnState struct {
+	Valid         bool
+	ActiveView    View
+	Mode          Mode
+	Focus         Focus
+	ActionIndex   int
+	Cursor        int
+	Scroll        int
+	DetailScroll  int
+	OverlayScroll int
+	Selected      map[string]bool
+}
+
 type Model struct {
 	ctx             context.Context
 	service         app.Service
@@ -194,6 +211,7 @@ type Model struct {
 	OverlayScroll       int
 	errorDetailParent   Mode
 	Filter              string
+	FilterDraft         string
 	LibraryStateFilter  LibraryStateFilter
 	LibrarySourceFilter LibrarySourceFilter
 	Help                bool
@@ -240,6 +258,10 @@ type Model struct {
 	pendingRecovery     app.RecoveryRequest
 	forceAcknowledged   bool
 	filterParent        Mode
+	filterCursor        int
+	filterScroll        int
+	confirmReturn       confirmReturnState
+	confirmReturnReady  bool
 }
 
 func NewModel(ctx context.Context, service app.Service, migration app.MigrationService, initialView View, initialAction Action) Model {
@@ -333,6 +355,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case scanMsg:
 		m.Busy = false
 		if msg.err != nil {
+			m.confirmReturn, m.confirmReturnReady = confirmReturnState{}, false
 			m.Err = msg.err.Error()
 			m.Status = "Migration preview failed"
 			return m, nil
@@ -652,11 +675,34 @@ func (m *Model) switchView(view View) {
 	m.Focus, m.ActionIndex = FocusList, 0
 	m.Scope = Scope{}
 	m.Cursor, m.Scroll = 0, 0
-	m.Filter = ""
+	m.Filter, m.FilterDraft = "", ""
 	m.Detail, m.Help = false, false
 	m.DetailScroll = 0
 	m.Selected = make(map[string]bool)
 	m.filterParent = ModeTable
+}
+
+func (m *Model) beginFilter() {
+	m.filterParent = m.Mode
+	m.filterCursor, m.filterScroll = m.Cursor, m.Scroll
+	m.FilterDraft = m.Filter
+	m.Mode = ModeFilter
+	m.Cursor, m.Scroll = 0, 0
+	m.clampCursor()
+}
+
+func (m *Model) applyFilterDraft() {
+	m.Filter = m.FilterDraft
+	m.Mode = m.filterParent
+	m.Cursor, m.Scroll = 0, 0
+	m.clampCursor()
+}
+
+func (m *Model) cancelFilterDraft() {
+	m.Mode = m.filterParent
+	m.FilterDraft = m.Filter
+	m.Cursor, m.Scroll = m.filterCursor, m.filterScroll
+	m.clampCursor()
 }
 
 func (m *Model) clampCursor() {

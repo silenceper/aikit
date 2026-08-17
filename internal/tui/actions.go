@@ -133,6 +133,7 @@ func (m Model) activate() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.ActiveView == ViewMigration {
+		m.prepareConfirmReturn()
 		for _, item := range m.migrationItems() {
 			if item.Action != m.scanActionForKey(current.Key) {
 				delete(m.Selected, item.Key)
@@ -149,14 +150,7 @@ func (m Model) activate() (tea.Model, tea.Cmd) {
 	}
 	switch m.ActiveView {
 	case ViewOverview:
-		switch current.ID {
-		case "migration":
-			m.switchView(ViewMigration)
-		case "status":
-			m.switchView(ViewStatus)
-		case "updates":
-			m.openUpdates()
-		}
+		return m.openAttention(current)
 	case ViewLibrary:
 		m.Detail, m.DetailScroll, m.pendingDetailID, m.Status = true, 0, current.ID, "Loading skill detail..."
 		return m, skillDetailCmd(m.ctx, m.service, current.ID)
@@ -204,6 +198,26 @@ func (m Model) activate() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) openAttention(current row) (tea.Model, tea.Cmd) {
+	if current.DestinationAction == ActionRecovery {
+		for _, operation := range m.Snapshot.Config.PendingOperations {
+			if operation.ID == current.ID {
+				return m.openRecoveryPreview([]app.RecoveryOperation{{Operation: operation}})
+			}
+		}
+	}
+	if current.DestinationMode == ModeUpdates {
+		m.openUpdates()
+		m.restoreActiveKey(current.DestinationKey)
+		return m, nil
+	}
+	if current.DestinationView != "" {
+		m.switchView(current.DestinationView)
+		m.restoreActiveKey(current.DestinationKey)
+	}
+	return m, nil
+}
+
 func (m Model) scanActionForKey(key string) app.ScanAction {
 	for _, item := range m.migrationItems() {
 		if item.Key == key {
@@ -211,6 +225,24 @@ func (m Model) scanActionForKey(key string) app.ScanAction {
 		}
 	}
 	return app.ScanActionNone
+}
+
+func (m Model) migrationCanCompare(key string) bool {
+	for _, item := range m.migrationItems() {
+		if item.Key == key {
+			return item.MatchedLibraryID != "" && item.Skill.ID != ""
+		}
+	}
+	return false
+}
+
+func (m Model) previewSelectedStatusAdopt() (tea.Model, tea.Cmd) {
+	item, ok := m.selectedStatusItem()
+	if !ok || !isUnmanaged(item) {
+		return m, nil
+	}
+	m.Busy, m.Status = true, "Building exact adoption preview..."
+	return m, scanCmd(m.ctx, m.migration, app.ScanRequest{Agent: item.Scope.Agent, Project: item.Scope.Project, Targets: []string{item.Path}, DryRun: true})
 }
 
 func (m Model) cancel() (tea.Model, tea.Cmd) {
@@ -257,21 +289,24 @@ func (m Model) cancel() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.Mode == ModeFilter {
-		m.Mode = m.filterParent
+		m.cancelFilterDraft()
 		return m, nil
 	}
 	if m.Mode == ModeConfirm {
-		if m.confirm == ActionUpdate {
+		restored := m.restoreConfirmReturn()
+		if !restored && m.confirm == ActionUpdate {
 			m.Mode = ModeUpdates
-		} else if m.confirm == ActionScan && len(m.Scan.Items) > 0 {
+		} else if !restored && m.confirm == ActionScan && len(m.Scan.Items) > 0 {
 			m.Mode = ModeScan
-		} else {
+		} else if !restored {
 			m.Mode = ModeTable
 		}
 		m.confirm, m.pendingID = ActionNone, ""
 		m.Preview = app.MutationPreview{}
 		m.PlanPreview = app.Result{}
-		m.OverlayScroll = 0
+		if !restored {
+			m.OverlayScroll = 0
+		}
 		m.forceAcknowledged = false
 		m.pendingBatch = app.BatchRequest{}
 		m.pendingUpdate = app.UpdateRequest{}
