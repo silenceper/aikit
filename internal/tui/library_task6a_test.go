@@ -39,6 +39,7 @@ func TestExplicitRefChangeIsConfirmedRollbackSafeAndKeyboardMouseEquivalent(t *t
 		m := NewModel(nil, service, &fakeMigration{}, ViewLibrary, ActionNone)
 		m.Snapshot, m.Width, m.Height = testSnapshot(), 100, 22
 		m.Selected["library:acme/alpha"] = true
+		m.ActionPane = actionPaneDetail
 		if mouse {
 			m, _ = mouseAction(t, m, actionIndex(t, m, "More"))
 			index := actionIndex(t, m, "Change ref")

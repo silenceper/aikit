@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -14,10 +15,10 @@ func actionKey(key tea.KeyType) tea.KeyMsg { return tea.KeyMsg{Type: key} }
 
 func focusActionsWithTab(t *testing.T, m Model) Model {
 	t.Helper()
-	for step := 0; step < 2; step++ {
+	for step := 0; step < 8; step++ {
 		next, _ := m.Update(actionKey(tea.KeyTab))
 		m = next.(Model)
-		if m.Focus == FocusActions {
+		if m.Focus == FocusActions || m.Focus == FocusCollectionActions || m.Focus == FocusDetailActions {
 			if m.ActionIndex != 0 {
 				t.Fatalf("Tab action=%d, want 0", m.ActionIndex)
 			}
@@ -33,13 +34,42 @@ func focusActionsWithTab(t *testing.T, m Model) Model {
 
 func keyboardAction(t *testing.T, m Model, index int) (Model, tea.Cmd) {
 	t.Helper()
-	m = focusActionsWithTab(t, m)
-	for i := 0; i < index; i++ {
+	if m.Mode != ModeTable {
+		m = focusActionsWithTab(t, m)
+		for i := 0; i < index; i++ {
+			next, _ := m.Update(actionKey(tea.KeyRight))
+			m = next.(Model)
+		}
+		next, cmd := m.Update(actionKey(tea.KeyEnter))
+		return next.(Model), cmd
+	}
+	actions := testActions(m)
+	if index < 0 || index >= len(actions) {
+		t.Fatalf("action %d outside test actions %v", index, actions)
+	}
+	label := actions[index]
+	pane, paneIndex := testActionLocation(t, m, label)
+	targetFocus := FocusCollectionActions
+	if pane == actionPaneDetail {
+		targetFocus = FocusDetailActions
+		if ComputeLayout(m.Width, m.Height).Detail.Empty() && !m.Detail {
+			next, _ := m.Update(actionKey(tea.KeyRight))
+			m = next.(Model)
+		}
+	}
+	for step := 0; step < 8 && m.Focus != targetFocus; step++ {
+		next, _ := m.Update(actionKey(tea.KeyTab))
+		m = next.(Model)
+	}
+	if m.Focus != targetFocus {
+		t.Fatalf("Tab did not reach %v actions for %q; focus=%s", pane, label, m.Focus)
+	}
+	for i := 0; i < paneIndex; i++ {
 		next, _ := m.Update(actionKey(tea.KeyRight))
 		m = next.(Model)
 	}
-	if m.ActionIndex != index {
-		t.Fatalf("right navigation selected %d, want %d", m.ActionIndex, index)
+	if m.ActionIndex != paneIndex {
+		t.Fatalf("right navigation selected %d, want %d for %q", m.ActionIndex, paneIndex, label)
 	}
 	next, cmd := m.Update(actionKey(tea.KeyEnter))
 	return next.(Model), cmd
@@ -47,6 +77,43 @@ func keyboardAction(t *testing.T, m Model, index int) (Model, tea.Cmd) {
 
 func mouseAction(t *testing.T, m Model, index int) (Model, tea.Cmd) {
 	t.Helper()
+	if m.Mode == ModeTable {
+		actions := testActions(m)
+		if index < 0 || index >= len(actions) {
+			t.Fatalf("action %d outside test actions %v", index, actions)
+		}
+		label := actions[index]
+		pane, paneIndex := testActionLocation(t, m, label)
+		if pane == actionPaneDetail && ComputeLayout(m.Width, m.Height).Detail.Empty() && !m.Detail {
+			currentRegions := m.hitRegions()
+			rows := currentRegions.Rows
+			visible := m.Cursor - m.visibleRowsLayout(currentRegions.Layout).Start
+			if visible < 0 || visible >= len(rows) {
+				t.Fatalf("detail action %q has no row to open", label)
+			}
+			next, _ := m.Update(click(rows[visible].X+1, rows[visible].Y))
+			m = next.(Model)
+		}
+		for attempt := 0; attempt < len(actions)+2; attempt++ {
+			regions := m.hitRegions().CollectionActions
+			if pane == actionPaneDetail {
+				regions = m.hitRegions().DetailActions
+			}
+			for visible, actual := range regions.Indexes {
+				if actual != paneIndex || visible >= len(regions.Buttons) {
+					continue
+				}
+				next, cmd := m.Update(click(regions.Buttons[visible].X, regions.Buttons[visible].Y))
+				return next.(Model), cmd
+			}
+			if regions.Next.Empty() {
+				t.Fatalf("action %q is not mouse reachable in %v pane: indexes=%v", label, pane, regions.Indexes)
+			}
+			next, _ := m.Update(click(regions.Next.X, regions.Next.Y))
+			m = next.(Model)
+		}
+		t.Fatalf("action %q never became mouse visible", label)
+	}
 	regions := m.hitRegions()
 	if index >= len(regions.Actions) {
 		t.Fatalf("action %d has no rendered hit region; actions=%v regions=%d", index, m.primaryActions(), len(regions.Actions))
@@ -56,6 +123,33 @@ func mouseAction(t *testing.T, m Model, index int) (Model, tea.Cmd) {
 	return got, cmd
 }
 
+func testActionLocation(t *testing.T, m Model, label string) (actionPane, int) {
+	t.Helper()
+	find := func(actions []string) int {
+		for i, action := range actions {
+			if action == label {
+				return i
+			}
+		}
+		return -1
+	}
+	collection, detail := find(m.collectionActions()), find(m.detailActions())
+	if m.ActionPane == actionPaneDetail && detail >= 0 {
+		return actionPaneDetail, detail
+	}
+	if m.ActionPane == actionPaneCollection && collection >= 0 {
+		return actionPaneCollection, collection
+	}
+	if collection >= 0 {
+		return actionPaneCollection, collection
+	}
+	if detail >= 0 {
+		return actionPaneDetail, detail
+	}
+	t.Fatalf("rendered action %q missing from collection=%v detail=%v", label, m.collectionActions(), m.detailActions())
+	return actionPaneNone, -1
+}
+
 func TestActionFocusTabLeftRightEnterAndEsc(t *testing.T) {
 	m := NewModel(nil, &fakeService{}, &fakeMigration{}, ViewLibrary, ActionNone)
 	m.Snapshot, m.Width, m.Height = testSnapshot(), 100, 20
@@ -63,7 +157,7 @@ func TestActionFocusTabLeftRightEnterAndEsc(t *testing.T) {
 
 	next, _ := m.Update(actionKey(tea.KeyRight))
 	m = next.(Model)
-	if m.ActionIndex != 1 || !strings.Contains(stripANSI(m.ViewString()), "{Add source}") {
+	if m.ActionIndex != 1 || !strings.Contains(stripANSI(m.ViewString()), "{More}") {
 		t.Fatalf("right action=%d or focus not rendered:\n%s", m.ActionIndex, m.ViewString())
 	}
 	next, _ = m.Update(actionKey(tea.KeyLeft))
@@ -73,7 +167,7 @@ func TestActionFocusTabLeftRightEnterAndEsc(t *testing.T) {
 	}
 	next, _ = m.Update(actionKey(tea.KeyTab))
 	m = next.(Model)
-	if m.Focus != FocusActions || m.ActionIndex != 1 {
+	if m.Focus != FocusDetail || m.ActionIndex != 0 {
 		t.Fatalf("Tab within actions focus=%s action=%d", m.Focus, m.ActionIndex)
 	}
 	next, _ = m.Update(actionKey(tea.KeyEsc))
@@ -103,17 +197,9 @@ func TestTabNeverEntersInvisibleDetailPane(t *testing.T) {
 	for _, width := range []int{80, 120} {
 		m := NewModel(nil, &fakeService{}, &fakeMigration{}, ViewLibrary, ActionNone)
 		m.Snapshot, m.Width, m.Height = testSnapshot(), width, 20
-		detailVisible := !ComputeLayout(width, m.Height).Detail.Empty()
 		next, _ := m.Update(actionKey(tea.KeyTab))
 		m = next.(Model)
-		if detailVisible {
-			if m.Focus != FocusDetail {
-				t.Fatalf("width=%d Tab focus=%s, want detail", width, m.Focus)
-			}
-			next, _ = m.Update(actionKey(tea.KeyTab))
-			m = next.(Model)
-		}
-		if m.Focus != FocusActions || m.ActionIndex != 0 || !strings.Contains(stripANSI(m.ViewString()), "{Open}") {
+		if m.Focus != FocusCollectionActions || m.ActionIndex != 0 || !strings.Contains(stripANSI(m.ViewString()), "{Add source}") {
 			t.Fatalf("width=%d Tab focus=%s action=%d:\n%s", width, m.Focus, m.ActionIndex, m.ViewString())
 		}
 		if strings.Contains(stripANSI(m.ViewString()), "> [ ] alpha") {
@@ -122,9 +208,6 @@ func TestTabNeverEntersInvisibleDetailPane(t *testing.T) {
 		next, _ = m.Update(actionKey(tea.KeyShiftTab))
 		m = next.(Model)
 		wantFocus := FocusList
-		if detailVisible {
-			wantFocus = FocusDetail
-		}
 		if m.Focus != wantFocus {
 			t.Fatalf("width=%d Shift-Tab focus=%s, want %s", width, m.Focus, wantFocus)
 		}
@@ -236,11 +319,24 @@ func TestRenderedActionEndToEndKeyboardMouseParity(t *testing.T) {
 
 func actionIndex(t *testing.T, m Model, label string) int {
 	t.Helper()
-	for i, action := range m.primaryActions() {
+	for i, action := range testActions(m) {
 		if action == label {
 			return i
 		}
 	}
-	t.Fatalf("rendered action %q missing from %v", label, m.primaryActions())
+	t.Fatalf("rendered action %q missing from %v", label, testActions(m))
 	return -1
+}
+
+func testActions(m Model) []string {
+	if m.Mode != ModeTable {
+		return m.primaryActions()
+	}
+	actions := append([]string(nil), m.collectionActions()...)
+	for _, action := range m.detailActions() {
+		if !slices.Contains(actions, action) {
+			actions = append(actions, action)
+		}
+	}
+	return actions
 }

@@ -43,20 +43,24 @@ func (m Model) renderFramedShell(layout Layout) string {
 		{X: layout.FooterPanel.Outer.X, Y: layout.FooterPanel.Outer.Y, Lines: renderPanel(layout.FooterPanel, "Shortcuts", false, []string{m.renderFooterBody(layout.FooterPanel.Body.Width)}, "", glyphs)},
 	}
 	if !layout.NavigationPanel.Outer.Empty() {
-		groups = append(groups, positionedLines{X: layout.NavigationPanel.Outer.X, Y: layout.NavigationPanel.Outer.Y, Lines: renderPanel(layout.NavigationPanel, "Navigation", false, m.renderNavigationBody(layout.NavigationPanel.Body.Width), "", glyphs)})
+		groups = append(groups, positionedLines{X: layout.NavigationPanel.Outer.X, Y: layout.NavigationPanel.Outer.Y, Lines: renderPanel(layout.NavigationPanel, "Navigation", m.Focus == FocusNavigation, m.renderNavigationBody(layout.NavigationPanel.Body.Width), "", glyphs)})
 	}
 	if m.hasOverlay() {
 		panel, lines := m.renderFramedOverlay(layout, glyphs)
 		groups = append(groups, positionedLines{X: panel.Outer.X, Y: panel.Outer.Y, Lines: lines})
 	} else {
 		collectionTitle, collectionBody := m.renderFramedCollection(layout)
-		collectionAction := ""
-		if layout.DetailPanel.Outer.Empty() {
-			collectionAction = m.renderActionBar(layout.CollectionPanel.Actions.Width)
+		collectionActions, detailActions := m.collectionActions(), m.detailActions()
+		if m.Mode != ModeTable {
+			collectionActions, detailActions = m.primaryActions(), nil
 		}
-		groups = append(groups, positionedLines{X: layout.CollectionPanel.Outer.X, Y: layout.CollectionPanel.Outer.Y, Lines: renderPanel(layout.CollectionPanel, collectionTitle, m.Focus == FocusList, collectionBody, collectionAction, glyphs)})
+		collectionAction := m.renderPaneActionBar(collectionActions, layout.CollectionPanel.Actions.Width, m.Focus == FocusCollectionActions)
+		if layout.DetailPanel.Outer.Empty() && (m.Detail || m.hasPinnedDetail()) {
+			collectionAction = m.renderPaneActionBar(detailActions, layout.CollectionPanel.Actions.Width, false)
+		}
+		groups = append(groups, positionedLines{X: layout.CollectionPanel.Outer.X, Y: layout.CollectionPanel.Outer.Y, Lines: renderPanel(layout.CollectionPanel, collectionTitle, m.Focus == FocusList || m.Focus == FocusCollectionActions, collectionBody, collectionAction, glyphs)})
 		if !layout.DetailPanel.Outer.Empty() {
-			groups = append(groups, positionedLines{X: layout.DetailPanel.Outer.X, Y: layout.DetailPanel.Outer.Y, Lines: renderPanel(layout.DetailPanel, m.detailTitle(), m.Focus == FocusDetail || m.Focus == FocusActions, m.renderFramedDetail(layout.DetailPanel.Body), m.renderActionBar(layout.DetailPanel.Actions.Width), glyphs)})
+			groups = append(groups, positionedLines{X: layout.DetailPanel.Outer.X, Y: layout.DetailPanel.Outer.Y, Lines: renderPanel(layout.DetailPanel, m.detailTitle(), m.Focus == FocusDetail || m.Focus == FocusDetailActions, m.renderFramedDetail(layout.DetailPanel.Body), m.renderPaneActionBar(detailActions, layout.DetailPanel.Actions.Width, m.Focus == FocusDetailActions), glyphs)})
 		}
 	}
 	return strings.Join(composePositioned(layout.Width, layout.Height, groups...), "\n")
@@ -69,7 +73,17 @@ func (m Model) renderLowHeightShell(layout Layout) string {
 		title, body = m.detailTitle(), m.renderFramedDetail(layout.CollectionPanel.Body)
 	}
 	panel := layout.CollectionPanel
-	panelLines := renderPanel(panel, title, true, body, m.renderActionBar(panel.Actions.Width), glyphs)
+	actions := m.collectionActions()
+	actionsFocused := m.Focus == FocusCollectionActions
+	if m.Detail || m.hasPinnedDetail() {
+		actions = m.detailActions()
+		actionsFocused = m.Focus == FocusDetailActions
+	}
+	if m.Mode != ModeTable {
+		actions = m.primaryActions()
+		actionsFocused = m.Focus == FocusActions
+	}
+	panelLines := renderPanel(panel, title, true, body, m.renderPaneActionBar(actions, panel.Actions.Width, actionsFocused), glyphs)
 	groups := []positionedLines{{X: panel.Outer.X, Y: panel.Outer.Y, Lines: panelLines}}
 	if m.hasOverlay() {
 		overlay, lines := m.renderFramedOverlay(layout, glyphs)
@@ -125,7 +139,7 @@ func (m Model) renderNavigationBody(width int) []string {
 	lines := make([]string, 0, layout.NavigationPanel.Body.Height)
 	previousY := layout.NavigationPanel.Body.Y - 1
 	mainIndex := 0
-	for _, item := range items {
+	for itemIndex, item := range items {
 		for previousY+1 < item.Rect.Y {
 			lines = append(lines, uiTheme.muted.Render("  "+item.Entry.Section))
 			previousY++
@@ -141,7 +155,9 @@ func (m Model) renderNavigationBody(width int) []string {
 			label = "· " + label
 		}
 		active := navigationEntryActive(m, item.Entry)
-		if active {
+		if m.Focus == FocusNavigation && itemIndex == m.NavigationIndex {
+			lines = append(lines, uiTheme.primaryAction.Render("{"+label+"}"))
+		} else if active {
 			lines = append(lines, uiTheme.focused(label))
 		} else {
 			lines = append(lines, uiTheme.navigation.Render("  "+label))
@@ -837,6 +853,10 @@ func (m Model) renderActionBar(width int) string {
 	return layoutActionBar(m.primaryActions(), m.Focus == FocusActions, m.ActionIndex, width).Text
 }
 
+func (m Model) renderPaneActionBar(actions []string, width int, focused bool) string {
+	return layoutActionBar(actions, focused, m.ActionIndex, width).Text
+}
+
 func (m Model) detailTitle() string {
 	if m.ActiveView == ViewOverview {
 		return "Attention"
@@ -954,6 +974,9 @@ func (m Model) primaryActions() []string {
 		return []string{"Confirm", "Cancel"}
 	}
 	if m.Mode == ModeMore {
+		if m.MorePane != actionPaneNone {
+			return m.moreActions(m.MorePane)
+		}
 		switch m.ActiveView {
 		case ViewLibrary:
 			actions := []string{"State filter", "Source filter", "Check updates"}
@@ -1126,7 +1149,7 @@ func (m Model) footer() string {
 	if m.Detail && m.Width < 60 {
 		return "Esc Back"
 	}
-	if m.Focus == FocusActions {
+	if m.Focus == FocusActions || m.Focus == FocusCollectionActions || m.Focus == FocusDetailActions {
 		actions := m.currentActions()
 		if len(actions) > 0 {
 			index := min(max(0, m.ActionIndex), len(actions)-1)

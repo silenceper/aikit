@@ -514,12 +514,16 @@ func TestWideLayoutShowsContextualDetailAndKeepsActionsReachable(t *testing.T) {
 		t.Fatalf("wide contextual detail missing:\n%s", got)
 	}
 	m, _ = apply(m, "tab")
-	if m.Focus != FocusDetail {
-		t.Fatalf("first Tab focus=%s, want detail", m.Focus)
+	if m.Focus != FocusCollectionActions {
+		t.Fatalf("first Tab focus=%s, want collection actions", m.Focus)
 	}
 	m, _ = apply(m, "tab")
-	if m.Focus != FocusActions {
-		t.Fatalf("second Tab focus=%s, want actions", m.Focus)
+	if m.Focus != FocusDetail {
+		t.Fatalf("second Tab focus=%s, want detail", m.Focus)
+	}
+	m, _ = apply(m, "tab")
+	if m.Focus != FocusDetailActions {
+		t.Fatalf("third Tab focus=%s, want detail actions", m.Focus)
 	}
 }
 

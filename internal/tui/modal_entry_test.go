@@ -134,7 +134,7 @@ func TestPresetSavePreviewEntersFreshConfirmModal(t *testing.T) {
 	m.Snapshot, m.Width, m.Height = testSnapshot(), 100, 22
 	m.Scope = Scope{Preset: "review", Level: "preset-skills"}
 	m.Selected["acme/alpha"] = true
-	m.Focus, m.ActionIndex, m.OverlayScroll = FocusActions, actionIndex(t, m, "Save"), 7
+	m.Focus, m.ActionPane, m.ActionIndex, m.OverlayScroll = FocusCollectionActions, actionPaneCollection, 0, 7
 	next, preview := m.Update(actionKey(tea.KeyEnter))
 	m = next.(Model)
 	if preview == nil {

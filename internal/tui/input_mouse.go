@@ -6,23 +6,34 @@ import (
 )
 
 type HitRegions struct {
-	Layout         Layout
-	Tabs           map[View]Rect
-	Navigation     []navigationEntryItem
-	Commands       []Rect
-	CommandIndexes []int
-	Rows           []Rect
-	Checkboxes     []Rect
-	Actions        []Rect
-	ActionIndexes  []int
-	ActionBar      Rect
-	Confirm        Rect
-	Cancel         Rect
-	Back           Rect
-	ActionPrev     Rect
-	ActionNext     Rect
-	actionPrev     int
-	actionNext     int
+	Layout            Layout
+	Tabs              map[View]Rect
+	Navigation        []navigationEntryItem
+	Commands          []Rect
+	CommandIndexes    []int
+	Rows              []Rect
+	Checkboxes        []Rect
+	Actions           []Rect
+	ActionIndexes     []int
+	ActionBar         Rect
+	Confirm           Rect
+	Cancel            Rect
+	Back              Rect
+	ActionPrev        Rect
+	ActionNext        Rect
+	actionPrev        int
+	actionNext        int
+	CollectionActions PaneActionRegions
+	DetailActions     PaneActionRegions
+}
+
+type PaneActionRegions struct {
+	Bar                      Rect
+	Previous                 Rect
+	Next                     Rect
+	Buttons                  []Rect
+	Indexes                  []int
+	PreviousIndex, NextIndex int
 }
 
 func (m Model) hitRegions() HitRegions {
@@ -38,7 +49,7 @@ func (m Model) hitRegions() HitRegions {
 	if layout.Narrow && !layout.Breadcrumb.Empty() {
 		regions.Back = Rect{X: layout.Breadcrumb.X, Y: layout.Breadcrumb.Y, Width: min(2, layout.Breadcrumb.Width), Height: 1}
 	}
-	if !m.Detail {
+	if m.Mode != ModeTable || !m.Detail {
 		rowGeometry := m.visibleRowsLayout(layout)
 		for _, rowRect := range rowGeometry.Rects {
 			regions.Rows = append(regions.Rows, rowRect)
@@ -85,34 +96,81 @@ func (m Model) hitRegions() HitRegions {
 			regions.Actions = append(regions.Actions, buttons...)
 			regions.ActionIndexes = append(regions.ActionIndexes, panel.ActionBar.ButtonIndexes...)
 		}
-	} else if layout.List.Height > 1 && len(m.primaryActions()) > 0 {
-		actions := m.primaryActions()
+	} else if layout.List.Height > 1 && m.Mode != ModeTable {
 		actionArea := layout.CollectionPanel.Actions
-		if !layout.DetailPanel.Actions.Empty() {
-			actionArea = layout.DetailPanel.Actions
-		}
 		if actionArea.Empty() {
 			actionArea = layout.List
-			if !layout.Detail.Empty() {
-				actionArea = layout.Detail
-			}
 			actionArea.Y = actionArea.Bottom() - 1
 			actionArea.Height = 1
 		}
-		actionX, actionY, actionRight := actionArea.X, actionArea.Y, actionArea.Right()
-		bar := layoutActionBar(actions, m.Focus == FocusActions, m.ActionIndex, actionRight-actionX)
-		regions.ActionBar = Rect{X: actionX, Y: actionY, Width: bar.Bar.Width, Height: bar.Bar.Height}
-		regions.ActionPrev = translateRect(bar.Previous, actionX, actionY)
-		regions.ActionNext = translateRect(bar.Next, actionX, actionY)
-		regions.actionPrev, regions.actionNext = bar.PreviousIndex, bar.NextIndex
-		for _, button := range bar.Buttons {
-			button.X += actionX
-			button.Y += actionY
-			regions.Actions = append(regions.Actions, button)
+		regions.CollectionActions = paneActionHitRegions(actionArea, m.primaryActions(), m.Focus == FocusActions, m.ActionIndex)
+		regions.Actions = append(regions.Actions, regions.CollectionActions.Buttons...)
+		regions.ActionIndexes = append(regions.ActionIndexes, regions.CollectionActions.Indexes...)
+		regions.ActionBar = regions.CollectionActions.Bar
+		regions.ActionPrev, regions.ActionNext = regions.CollectionActions.Previous, regions.CollectionActions.Next
+		regions.actionPrev, regions.actionNext = regions.CollectionActions.PreviousIndex, regions.CollectionActions.NextIndex
+	} else if layout.List.Height > 1 {
+		collectionArea, detailArea := layout.CollectionPanel.Actions, layout.DetailPanel.Actions
+		collectionActions, detailActions := m.collectionActions(), m.detailActions()
+		if detailArea.Empty() {
+			if m.Detail || m.hasPinnedDetail() {
+				detailArea, collectionArea = collectionArea, Rect{}
+			} else {
+				detailActions = nil
+			}
 		}
-		regions.ActionIndexes = append(regions.ActionIndexes, bar.ButtonIndexes...)
+		regions.CollectionActions = paneActionHitRegions(collectionArea, collectionActions, m.Focus == FocusCollectionActions, m.ActionIndex)
+		regions.DetailActions = paneActionHitRegions(detailArea, detailActions, m.Focus == FocusDetailActions, m.ActionIndex)
+		regions.populateLegacyActions(m.primaryActions(), collectionActions, detailActions)
 	}
 	return regions
+}
+
+func paneActionHitRegions(area Rect, actions []string, focused bool, selected int) PaneActionRegions {
+	result := PaneActionRegions{PreviousIndex: -1, NextIndex: -1}
+	if area.Empty() || len(actions) == 0 {
+		return result
+	}
+	bar := layoutActionBar(actions, focused, selected, area.Width)
+	result.Bar = Rect{X: area.X, Y: area.Y, Width: bar.Bar.Width, Height: bar.Bar.Height}
+	result.Previous = translateRect(bar.Previous, area.X, area.Y)
+	result.Next = translateRect(bar.Next, area.X, area.Y)
+	result.PreviousIndex, result.NextIndex = bar.PreviousIndex, bar.NextIndex
+	result.Indexes = append(result.Indexes, bar.ButtonIndexes...)
+	for _, button := range bar.Buttons {
+		result.Buttons = append(result.Buttons, translateRect(button, area.X, area.Y))
+	}
+	return result
+}
+
+func (regions *HitRegions) populateLegacyActions(actions, collectionActions, detailActions []string) {
+	for index, label := range actions {
+		if rect, ok := paneActionButton(detailActions, regions.DetailActions, label); ok {
+			regions.Actions = append(regions.Actions, rect)
+			regions.ActionIndexes = append(regions.ActionIndexes, index)
+			continue
+		}
+		if rect, ok := paneActionButton(collectionActions, regions.CollectionActions, label); ok {
+			regions.Actions = append(regions.Actions, rect)
+			regions.ActionIndexes = append(regions.ActionIndexes, index)
+		}
+	}
+	active := regions.DetailActions
+	if active.Bar.Empty() {
+		active = regions.CollectionActions
+	}
+	regions.ActionBar = active.Bar
+	regions.ActionPrev, regions.ActionNext = active.Previous, active.Next
+	regions.actionPrev, regions.actionNext = active.PreviousIndex, active.NextIndex
+}
+
+func paneActionButton(actions []string, regions PaneActionRegions, label string) (Rect, bool) {
+	for visible, index := range regions.Indexes {
+		if visible < len(regions.Buttons) && index < len(actions) && actions[index] == label {
+			return regions.Buttons[visible], true
+		}
+	}
+	return Rect{}, false
 }
 
 func translateRect(rect Rect, x, y int) Rect {
@@ -217,6 +275,14 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	if m.Mode == ModeTable && (msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown) {
+		if regions.CollectionActions.Bar.Contains(msg.X, msg.Y) {
+			return m.movePaneActionWithMouse(actionPaneCollection, regions.CollectionActions, msg)
+		}
+		if regions.DetailActions.Bar.Contains(msg.X, msg.Y) {
+			return m.movePaneActionWithMouse(actionPaneDetail, regions.DetailActions, msg)
+		}
+	}
 	if regions.ActionBar.Contains(msg.X, msg.Y) {
 		switch msg.Button {
 		case tea.MouseButtonWheelUp:
@@ -245,6 +311,14 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	if msg.Action != tea.MouseActionPress || msg.Button != tea.MouseButtonLeft {
 		return m, nil
+	}
+	if m.Mode == ModeTable {
+		if next, cmd, ok := m.clickPaneAction(actionPaneCollection, regions.CollectionActions, msg.X, msg.Y); ok {
+			return next, cmd
+		}
+		if next, cmd, ok := m.clickPaneAction(actionPaneDetail, regions.DetailActions, msg.X, msg.Y); ok {
+			return next, cmd
+		}
 	}
 	if regions.ActionPrev.Contains(msg.X, msg.Y) && regions.actionPrev >= 0 {
 		m.Focus, m.ActionIndex = FocusActions, regions.actionPrev
@@ -279,11 +353,18 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			if m.Mode == ModeScopePicker || m.Mode == ModePresetPicker {
 				return m.chooseHighlightedPicker(), nil
 			}
-			if m.ActiveView == ViewLibrary {
+			selectableRow := m.ActiveView == ViewLibrary || (m.ActiveView == ViewPresets && m.Scope.Level == "preset-skills")
+			if selectableRow {
+				current := m.rows()[m.Cursor]
+				if regions.Layout.Detail.Empty() && m.rowSelected(current) && len(m.detailActions()) > 0 {
+					m.Detail, m.Focus, m.ActionPane = true, FocusDetail, actionPaneDetail
+					return m, nil
+				}
 				return m.perform(uiToggle)
 			}
-			if m.ActiveView == ViewPresets && m.Scope.Level == "preset-skills" {
-				return m.perform(uiToggle)
+			if regions.Layout.Detail.Empty() && len(m.detailActions()) > 0 {
+				m.Detail, m.Focus, m.ActionPane = true, FocusDetail, actionPaneDetail
+				return m, nil
 			}
 			return m, nil
 		}
@@ -310,6 +391,56 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m, nil
+}
+
+func (m Model) clickPaneAction(pane actionPane, regions PaneActionRegions, x, y int) (tea.Model, tea.Cmd, bool) {
+	if regions.Previous.Contains(x, y) && regions.PreviousIndex >= 0 {
+		m.ActionPane, m.Focus, m.ActionIndex = pane, pane.focus(), regions.PreviousIndex
+		return m, nil, true
+	}
+	if regions.Next.Contains(x, y) && regions.NextIndex >= 0 {
+		m.ActionPane, m.Focus, m.ActionIndex = pane, pane.focus(), regions.NextIndex
+		return m, nil, true
+	}
+	for visible, rect := range regions.Buttons {
+		if !rect.Contains(x, y) || visible >= len(regions.Indexes) {
+			continue
+		}
+		m.ActionPane, m.Focus, m.ActionIndex = pane, pane.focus(), regions.Indexes[visible]
+		next, cmd := m.performPrimaryAction(m.ActionIndex)
+		return next, cmd, true
+	}
+	if regions.Bar.Contains(x, y) {
+		return m, nil, true
+	}
+	return m, nil, false
+}
+
+func (m Model) movePaneActionWithMouse(pane actionPane, regions PaneActionRegions, msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if msg.Button != tea.MouseButtonWheelUp && msg.Button != tea.MouseButtonWheelDown {
+		return m, nil
+	}
+	actions := m.collectionActions()
+	if pane == actionPaneDetail {
+		actions = m.detailActions()
+	}
+	if len(actions) == 0 {
+		return m, nil
+	}
+	delta := 1
+	if msg.Button == tea.MouseButtonWheelUp {
+		delta = -1
+	}
+	m.ActionPane, m.Focus = pane, pane.focus()
+	m.ActionIndex = min(max(0, m.ActionIndex+delta), len(actions)-1)
+	return m, nil
+}
+
+func (pane actionPane) focus() Focus {
+	if pane == actionPaneDetail {
+		return FocusDetailActions
+	}
+	return FocusCollectionActions
 }
 
 func (m Model) hasOverlay() bool {

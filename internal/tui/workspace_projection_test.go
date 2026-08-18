@@ -12,23 +12,7 @@ import (
 
 func mouseActionByLabel(t *testing.T, m Model, label string) (Model, tea.Cmd) {
 	t.Helper()
-	wanted := actionIndex(t, m, label)
-	for attempts := 0; attempts < len(m.currentActions())+2; attempts++ {
-		regions := m.hitRegions()
-		for visible, absolute := range regions.ActionIndexes {
-			if absolute == wanted {
-				next, cmd := m.Update(click(regions.Actions[visible].X, regions.Actions[visible].Y))
-				return next.(Model), cmd
-			}
-		}
-		if regions.ActionNext.Empty() {
-			t.Fatalf("action %q is not mouse reachable: indexes=%v", label, regions.ActionIndexes)
-		}
-		next, _ := m.Update(click(regions.ActionNext.X, regions.ActionNext.Y))
-		m = next.(Model)
-	}
-	t.Fatalf("action %q did not become visible", label)
-	return m, nil
+	return mouseAction(t, m, actionIndex(t, m, label))
 }
 
 func rowByID(t *testing.T, rows []row, id string) row {
@@ -226,8 +210,13 @@ func TestWorkspaceSelectSkillsKeyboardMouseNarrowParity(t *testing.T) {
 func TestGlobalAgentApplyPresetUsesExactAgentWithoutEncodedInput(t *testing.T) {
 	service := &fakeService{}
 	m := NewModel(nil, service, &fakeMigration{}, ViewWorkspaces, ActionNone)
-	m.Snapshot, m.Scope, m.Width, m.Height = testSnapshot(), Scope{Agent: "codex", Level: "agent-skills"}, 110, 30
-	m, _ = chooseVisibleAction(t, m, "More", false)
+	m.Snapshot, m.Scope, m.Width, m.Height = testSnapshot(), Scope{Level: "workspace-agents"}, 110, 30
+	for index, current := range m.rows() {
+		if current.ID == "codex" {
+			m.Cursor = index
+			break
+		}
+	}
 	m, cmd := chooseVisibleAction(t, m, "Apply preset", false)
 	if cmd != nil || m.Mode != ModePresetPicker {
 		t.Fatalf("agent preset picker mode=%s cmd=%v", m.Mode, cmd != nil)

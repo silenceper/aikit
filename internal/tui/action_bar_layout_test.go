@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
 func TestRenderedActionBarClickBoundariesAndWhitespace(t *testing.T) {
@@ -23,36 +22,41 @@ func TestRenderedActionBarClickBoundariesAndWhitespace(t *testing.T) {
 			}
 			plain := strings.Split(stripANSI(base.ViewString()), "\n")
 			regions := base.hitRegions()
-			y := regions.ActionBar.Y
-			if y < 0 || y >= len(plain) {
-				t.Fatalf("action row y=%d outside %d rendered lines", y, len(plain))
-			}
-			line := plain[y]
-			actions := base.primaryActions()
-			starts := make([]int, len(actions))
-			ends := make([]int, len(actions))
-			for i, label := range actions {
-				button := "[" + label + "]"
-				byteStart := strings.Index(line, button)
-				if byteStart < 0 {
-					t.Fatalf("rendered action %q missing from row %q", label, line)
+			panes := []struct {
+				actions []string
+				regions PaneActionRegions
+			}{{base.collectionActions(), regions.CollectionActions}, {base.detailActions(), regions.DetailActions}}
+			for _, pane := range panes {
+				if pane.regions.Bar.Empty() {
+					continue
 				}
-				starts[i] = lipgloss.Width(line[:byteStart])
-				ends[i] = starts[i] + lipgloss.Width(button) - 1
-				for _, x := range []int{starts[i], ends[i]} {
-					m := base
-					next, cmd := m.Update(click(x, y))
-					assertLibraryActionTriggered(t, label, x, y, next.(Model), cmd)
+				y := pane.regions.Bar.Y
+				if y < 0 || y >= len(plain) {
+					t.Fatalf("action row y=%d outside %d rendered lines", y, len(plain))
 				}
-			}
-
-			for i := 0; i+1 < len(actions); i++ {
-				for x := ends[i] + 1; x < starts[i+1]; x++ {
-					assertActionBarClickNoOp(t, base, x, y)
+				line := plain[y]
+				for visible, actionIndex := range pane.regions.Indexes {
+					label := pane.actions[actionIndex]
+					button := "[" + label + "]"
+					got := pane.regions.Buttons[visible]
+					start, end := got.X, got.Right()-1
+					if start < 0 || end >= len(line) || line[start:end+1] != button {
+						t.Fatalf("%q render/hit mismatch cells=%d..%d row=%q hit=%+v", label, start, end, line, got)
+					}
+					for _, x := range []int{start, end} {
+						next, cmd := base.Update(click(x, y))
+						assertLibraryActionTriggered(t, label, x, y, next.(Model), cmd)
+					}
 				}
-			}
-			if x := ends[len(ends)-1] + 1; x < width {
-				assertActionBarClickNoOp(t, base, x, y)
+				for x := pane.regions.Bar.X; x < pane.regions.Bar.Right(); x++ {
+					inside := false
+					for _, button := range pane.regions.Buttons {
+						inside = inside || button.Contains(x, y)
+					}
+					if !inside && !pane.regions.Previous.Contains(x, y) && !pane.regions.Next.Contains(x, y) {
+						assertActionBarClickNoOp(t, base, x, y)
+					}
+				}
 			}
 		})
 	}
@@ -160,7 +164,7 @@ func TestNarrowConfigurationActionViewportIsFullyMouseReachableFromDefault(t *te
 
 func TestNarrowCollectionActionViewportMouseWheelMovesVisibleWindow(t *testing.T) {
 	m := NewModel(nil, &fakeService{}, &fakeMigration{}, ViewLibrary, ActionNone)
-	m.Snapshot, m.Width, m.Height = testSnapshot(), 24, 20
+	m.Snapshot, m.Width, m.Height = testSnapshot(), 18, 20
 	regions := m.hitRegions()
 	if regions.ActionNext.Empty() {
 		t.Fatalf("narrow action bar has no Next control:\n%s", m.ViewString())
@@ -173,7 +177,7 @@ func TestNarrowCollectionActionViewportMouseWheelMovesVisibleWindow(t *testing.T
 	}
 	regions = m.hitRegions()
 	visible := false
-	for _, index := range regions.ActionIndexes {
+	for _, index := range regions.CollectionActions.Indexes {
 		visible = visible || index == m.ActionIndex
 	}
 	if !visible {

@@ -98,6 +98,12 @@ func presetListModel(service *fakeService) Model {
 
 func invokePresetMore(t *testing.T, m Model, label string, mouse bool) (Model, tea.Cmd) {
 	t.Helper()
+	if label == "Apply" {
+		if mouse {
+			return mouseAction(t, m, actionIndex(t, m, label))
+		}
+		return keyboardAction(t, m, actionIndex(t, m, label))
+	}
 	if mouse {
 		m, _ = mouseAction(t, m, actionIndex(t, m, "More"))
 		region := m.hitRegions().Actions[actionIndex(t, m, label)]

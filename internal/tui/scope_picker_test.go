@@ -161,7 +161,6 @@ func TestStructuredScopePickerPresetAndProjectApply(t *testing.T) {
 		service := &fakeService{}
 		m := NewModel(nil, service, &fakeMigration{}, ViewPresets, ActionNone)
 		m.Snapshot, m.Width, m.Height = testSnapshot(), 110, 30
-		m, _ = keyboardAction(t, m, actionIndex(t, m, "More"))
 		m, _ = chooseVisibleAction(t, m, "Apply", false)
 		if m.Mode != ModeScopePicker {
 			t.Fatalf("preset apply mode=%s prompt=%q", m.Mode, m.Input.Prompt)
@@ -206,7 +205,6 @@ func TestStructuredScopePickerCancelAndGlobalWorkspace(t *testing.T) {
 	service := &fakeService{}
 	m := NewModel(nil, service, &fakeMigration{}, ViewPresets, ActionNone)
 	m.Snapshot, m.Width, m.Height = testSnapshot(), 110, 30
-	m, _ = keyboardAction(t, m, actionIndex(t, m, "More"))
 	m, _ = chooseVisibleAction(t, m, "Apply", false)
 	next, cmd := m.Update(actionKey(tea.KeyEsc))
 	m = next.(Model)

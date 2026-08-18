@@ -73,9 +73,19 @@ func TestLibraryRowMouseClickTogglesSelectionAcrossLayouts(t *testing.T) {
 				clickY = row.Bottom() - 1
 			}
 			next, cmd = selected.Update(click(row.Right()-1, clickY))
-			deselected := next.(Model)
-			if cmd != nil || deselected.Selected[key] {
-				t.Fatalf("second row click did not deselect exact skill: selected=%v cmd=%v", deselected.Selected, cmd != nil)
+			got := next.(Model)
+			if ComputeLayout(width, selected.Height).Detail.Empty() {
+				if cmd != nil || !got.Detail || !got.Selected[key] {
+					t.Fatalf("second compact row click did not open selected skill detail: detail=%v selected=%v cmd=%v", got.Detail, got.Selected, cmd != nil)
+				}
+				next, _ = got.Update(actionKey(tea.KeyEsc))
+				got = next.(Model)
+				checkbox := got.hitRegions().Checkboxes[1]
+				next, cmd = got.Update(click(checkbox.X, checkbox.Y))
+				got = next.(Model)
+			}
+			if cmd != nil || got.Selected[key] {
+				t.Fatalf("second wide row click/compact checkbox did not deselect exact skill: selected=%v cmd=%v", got.Selected, cmd != nil)
 			}
 		})
 	}

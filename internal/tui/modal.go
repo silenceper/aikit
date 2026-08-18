@@ -69,7 +69,10 @@ func (m *Model) enterInput(input inputState) {
 
 func (m *Model) enterConfiguration() { m.enterModal(ModeConfiguration) }
 
-func (m *Model) enterMore() { m.enterModal(ModeMore) }
+func (m *Model) enterMore() {
+	m.MorePane = m.ActionPane
+	m.enterModal(ModeMore)
+}
 
 func (m *Model) enterErrorDetail(value string) {
 	m.enterTextDetail("Error details", value)
@@ -96,6 +99,20 @@ func (m Model) currentActions() []string {
 	case ModeConfirm, ModeInput, ModeConfiguration, ModeErrorDetail:
 		return m.overlayPanelActions()
 	default:
+		if m.Mode == ModeTable {
+			switch m.Focus {
+			case FocusCollectionActions:
+				return m.collectionActions()
+			case FocusDetailActions:
+				return m.detailActions()
+			}
+			switch m.ActionPane {
+			case actionPaneCollection:
+				return m.collectionActions()
+			case actionPaneDetail:
+				return m.detailActions()
+			}
+		}
 		return m.primaryActions()
 	}
 }

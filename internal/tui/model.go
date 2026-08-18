@@ -75,10 +75,18 @@ const (
 type Focus string
 
 const (
-	FocusList    Focus = "list"
-	FocusDetail  Focus = "detail"
-	FocusActions Focus = "actions"
+	FocusNavigation        Focus = "navigation"
+	FocusList              Focus = "list"
+	FocusCollectionActions Focus = "collection-actions"
+	FocusDetail            Focus = "detail"
+	FocusDetailActions     Focus = "detail-actions"
+	FocusActions           Focus = "overlay-actions"
 )
+
+type routePosition struct {
+	Cursor, Scroll int
+	ActiveKey      string
+}
 
 type LibraryStateFilter string
 
@@ -212,8 +220,11 @@ type Model struct {
 	Mode                Mode
 	Focus               Focus
 	ActionIndex         int
+	ActionPane          actionPane
+	MorePane            actionPane
 	CommandDraft        string
 	CommandIndex        int
+	NavigationIndex     int
 	Scope               Scope
 	Cursor              int
 	Scroll              int
@@ -238,6 +249,7 @@ type Model struct {
 	Inventory           InventoryState
 	Selected            map[string]bool
 	Ignored             map[string]bool
+	routePositions      map[string]routePosition
 	Config              app.ConfigurationDetail
 	ConfigValidation    app.ConfigurationValidation
 	SkillDetail         app.SkillDetail
@@ -301,6 +313,7 @@ func NewModel(ctx context.Context, service app.Service, migration app.MigrationS
 		ctx: ctx, service: service, migration: migration, action: initialAction,
 		ActiveView: initialView, Mode: ModeTable, Focus: FocusList, Scope: scope, Width: 80, Height: 24,
 		Status: "Loading local snapshot...", Selected: make(map[string]bool), Ignored: make(map[string]bool),
+		routePositions:     make(map[string]routePosition),
 		LibraryStateFilter: LibraryStateAll, LibrarySourceFilter: LibrarySourceAll,
 	}
 }

@@ -22,6 +22,12 @@ func projectWorkspaceModel(service *fakeService) Model {
 
 func invokeProjectAction(t *testing.T, m Model, label string, mouse bool) (Model, tea.Cmd) {
 	t.Helper()
+	if label == "Create project" {
+		if mouse {
+			return mouseAction(t, m, actionIndex(t, m, label))
+		}
+		return keyboardAction(t, m, actionIndex(t, m, label))
+	}
 	if mouse {
 		m, _ = mouseAction(t, m, actionIndex(t, m, "More"))
 	} else {

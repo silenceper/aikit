@@ -81,10 +81,59 @@ func (m Model) activateCommandEntry(entry navigationEntry) (tea.Model, tea.Cmd) 
 }
 
 func (m *Model) switchDestination(entry navigationEntry) {
+	m.saveRoutePosition()
 	m.switchView(entry.View)
 	if entry.Scope.Level != "" {
 		m.Scope = entry.Scope
 	}
+	m.restoreRoutePosition()
+	m.Focus, m.ActionPane, m.ActionIndex = FocusList, actionPaneNone, 0
+	m.syncNavigationIndex()
+}
+
+func (m *Model) saveRoutePosition() {
+	if m.routePositions == nil {
+		m.routePositions = make(map[string]routePosition)
+	}
+	key := m.routeKey()
+	if key == "" {
+		return
+	}
+	m.routePositions[key] = routePosition{Cursor: m.Cursor, Scroll: m.Scroll, ActiveKey: m.activeKey()}
+}
+
+func (m *Model) restoreRoutePosition() {
+	position, ok := m.routePositions[m.routeKey()]
+	if !ok {
+		m.Cursor, m.Scroll = 0, 0
+		return
+	}
+	m.Cursor, m.Scroll = position.Cursor, position.Scroll
+	if position.ActiveKey != "" {
+		m.restoreActiveKey(position.ActiveKey)
+	}
+	m.clampCursor()
+}
+
+func (m Model) routeKey() string {
+	if m.ActiveView == ViewWorkspaces {
+		return string(m.ActiveView) + ":" + workspaceRouteLevel(m.Scope.Level)
+	}
+	if m.ActiveView == "" {
+		return ""
+	}
+	return string(m.ActiveView)
+}
+
+func (m *Model) syncNavigationIndex() {
+	entries := layoutNavigationEntries(ComputeLayout(m.Width, m.Height), *m)
+	for index, item := range entries {
+		if navigationEntryActive(*m, item.Entry) {
+			m.NavigationIndex = index
+			return
+		}
+	}
+	m.NavigationIndex = 0
 }
 
 func navigationEntryActive(m Model, entry navigationEntry) bool {

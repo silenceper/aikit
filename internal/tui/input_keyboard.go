@@ -247,6 +247,45 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if key == "shift+tab" {
 		return m.reverseFocus()
 	}
+	if m.Focus == FocusNavigation {
+		entries := layoutNavigationEntries(ComputeLayout(m.Width, m.Height), m)
+		switch key {
+		case "up", "k", "left":
+			m.NavigationIndex = max(0, m.NavigationIndex-1)
+			return m, nil
+		case "down", "j", "right":
+			m.NavigationIndex = min(max(0, len(entries)-1), m.NavigationIndex+1)
+			return m, nil
+		case "enter":
+			if len(entries) > 0 {
+				return m.activateCommandEntry(entries[min(m.NavigationIndex, len(entries)-1)].Entry)
+			}
+			return m, nil
+		case "esc":
+			m.Focus = FocusList
+			return m, nil
+		}
+	}
+	if m.Focus == FocusCollectionActions || m.Focus == FocusDetailActions {
+		switch key {
+		case "left":
+			m.moveAction(-1)
+			return m, nil
+		case "right":
+			m.moveAction(1)
+			return m, nil
+		case "enter":
+			return m.performPrimaryAction(m.ActionIndex)
+		case "esc":
+			if m.Focus == FocusDetailActions {
+				m.Focus = FocusDetail
+			} else {
+				m.Focus = FocusList
+			}
+			m.ActionIndex = 0
+			return m, nil
+		}
+	}
 	if m.Focus == FocusActions {
 		switch key {
 		case "left":
@@ -259,16 +298,23 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.performPrimaryAction(m.ActionIndex)
 		case "esc":
 			m.Focus = FocusList
-			if m.Width < 60 {
+			if ComputeLayout(m.Width, m.Height).Detail.Empty() {
 				m.Detail = false
 			}
 			return m, nil
 		}
 	}
+	if m.Focus == FocusList && key == "right" && len(m.detailActions()) > 0 {
+		if ComputeLayout(m.Width, m.Height).Detail.Empty() {
+			m.Detail = true
+		}
+		m.Focus, m.ActionPane, m.ActionIndex = FocusDetail, actionPaneDetail, 0
+		return m, nil
+	}
 	if m.Focus == FocusDetail {
 		if key == "esc" {
 			m.Focus = FocusList
-			if m.Width < 60 {
+			if ComputeLayout(m.Width, m.Height).Detail.Empty() {
 				m.Detail = false
 			}
 			return m, nil
@@ -277,8 +323,8 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.Focus = FocusList
 			return m, nil
 		}
-		if key == "right" && len(m.primaryActions()) > 0 {
-			m.Focus, m.ActionIndex = FocusActions, 0
+		if key == "right" && len(m.detailActions()) > 0 {
+			m.Focus, m.ActionPane, m.ActionIndex = FocusDetailActions, actionPaneDetail, 0
 			return m, nil
 		}
 		switch key {
@@ -400,63 +446,72 @@ func (m Model) overlayPageSize() int {
 }
 
 func (m Model) advanceFocus() (tea.Model, tea.Cmd) {
-	switch m.Focus {
-	case FocusList:
-		if m.detailFocusVisible() {
-			m.Focus = FocusDetail
-		} else if len(m.primaryActions()) > 0 {
-			m.Focus, m.ActionIndex = FocusActions, 0
-		}
-		if ComputeLayout(m.Width, m.Height).Narrow && m.Focus == FocusDetail {
-			m.Detail = true
-		}
-	case FocusDetail:
-		if len(m.primaryActions()) == 0 {
-			m.Focus = FocusList
-			m.Detail = false
-		} else {
-			m.Focus, m.ActionIndex = FocusActions, 0
-		}
-	case FocusActions:
-		if m.ActionIndex+1 < len(m.primaryActions()) {
-			m.ActionIndex++
-		} else {
-			m.Focus, m.ActionIndex = FocusList, 0
-			if m.Width < 60 {
-				m.Detail = false
-			}
-		}
-	default:
-		m.Focus = FocusList
-	}
+	m.moveFocus(1)
 	return m, nil
 }
 
 func (m Model) reverseFocus() (tea.Model, tea.Cmd) {
-	switch m.Focus {
-	case FocusActions:
-		if m.ActionIndex > 0 {
-			m.ActionIndex--
-		} else if m.detailFocusVisible() {
-			m.Focus = FocusDetail
-		} else {
-			m.Focus = FocusList
-		}
-	case FocusDetail:
+	m.moveFocus(-1)
+	return m, nil
+}
+
+func (m *Model) moveFocus(delta int) {
+	order := m.visibleFocusOrder()
+	if len(order) == 0 {
 		m.Focus = FocusList
-		if m.Width < 60 {
-			m.Detail = false
-		}
-	case FocusList:
-		actions := m.primaryActions()
-		if len(actions) > 0 {
-			m.Focus, m.ActionIndex = FocusActions, len(actions)-1
-			if m.Width < 60 {
-				m.Detail = true
-			}
+		return
+	}
+	index := 0
+	for current, focus := range order {
+		if focus == m.Focus {
+			index = current
+			break
 		}
 	}
-	return m, nil
+	index = (index + delta + len(order)) % len(order)
+	m.setPaneFocus(order[index])
+}
+
+func (m Model) visibleFocusOrder() []Focus {
+	layout := ComputeLayout(m.Width, m.Height)
+	order := make([]Focus, 0, 5)
+	if !layout.NavigationPanel.Outer.Empty() {
+		order = append(order, FocusNavigation)
+	}
+	compactDetail := layout.DetailPanel.Outer.Empty() && (m.Detail || m.hasPinnedDetail())
+	if compactDetail {
+		order = append(order, FocusDetail)
+		if len(m.detailActions()) > 0 {
+			order = append(order, FocusDetailActions)
+		}
+		return order
+	}
+	order = append(order, FocusList)
+	if len(m.collectionActions()) > 0 {
+		order = append(order, FocusCollectionActions)
+	}
+	if !layout.DetailPanel.Outer.Empty() && len(m.rows()) > 0 {
+		order = append(order, FocusDetail)
+		if len(m.detailActions()) > 0 {
+			order = append(order, FocusDetailActions)
+		}
+	}
+	return order
+}
+
+func (m *Model) setPaneFocus(focus Focus) {
+	m.Focus, m.ActionIndex = focus, 0
+	switch focus {
+	case FocusNavigation:
+		m.ActionPane = actionPaneNone
+		m.syncNavigationIndex()
+	case FocusCollectionActions:
+		m.ActionPane = actionPaneCollection
+	case FocusDetailActions:
+		m.ActionPane = actionPaneDetail
+	default:
+		m.ActionPane = actionPaneNone
+	}
 }
 
 func (m Model) detailFocusVisible() bool {

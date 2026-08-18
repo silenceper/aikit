@@ -41,7 +41,7 @@ func TestLibraryDetailLoadsTypedContentAsynchronously(t *testing.T) {
 func TestSkillContentOpensBoundedOverlayAndRestoresLibraryDetail(t *testing.T) {
 	m := NewModel(context.Background(), &fakeService{}, &fakeMigration{}, ViewLibrary, ActionNone)
 	m.Snapshot, m.Width, m.Height = testSnapshot(), 80, 12
-	m.Detail, m.Focus, m.SkillDetail = true, FocusActions, largeSkillDetail()
+	m.Detail, m.Focus, m.ActionPane, m.SkillDetail = true, FocusDetailActions, actionPaneDetail, largeSkillDetail()
 	m.Cursor, m.Scroll, m.DetailScroll = 0, 0, 2
 	m.Status = "original library status"
 
@@ -81,7 +81,7 @@ func TestSkillContentOpensBoundedOverlayAndRestoresLibraryDetail(t *testing.T) {
 func TestSkillContentMouseUsesSameActionAsKeyboard(t *testing.T) {
 	base := NewModel(context.Background(), &fakeService{}, &fakeMigration{}, ViewLibrary, ActionNone)
 	base.Snapshot, base.Width, base.Height = testSnapshot(), 100, 20
-	base.Detail, base.Focus, base.SkillDetail = true, FocusActions, largeSkillDetail()
+	base.Detail, base.Focus, base.ActionPane, base.SkillDetail = true, FocusDetailActions, actionPaneDetail, largeSkillDetail()
 	regions := base.hitRegions()
 	if len(regions.Actions) == 0 {
 		t.Fatal("loaded detail has no mouse action")
@@ -97,7 +97,7 @@ func TestSkillContentMouseUsesSameActionAsKeyboard(t *testing.T) {
 func TestSkillContentMouseScrollAndCloseRestoresExactState(t *testing.T) {
 	base := NewModel(context.Background(), &fakeService{}, &fakeMigration{}, ViewLibrary, ActionNone)
 	base.Snapshot, base.Width, base.Height = testSnapshot(), 80, 12
-	base.Detail, base.Focus, base.SkillDetail = true, FocusActions, largeSkillDetail()
+	base.Detail, base.Focus, base.ActionPane, base.SkillDetail = true, FocusDetailActions, actionPaneDetail, largeSkillDetail()
 	base.ActionIndex, base.Cursor, base.Scroll, base.DetailScroll = 0, 0, 0, 2
 	base.Status = "ready"
 
@@ -123,7 +123,7 @@ func TestSkillContentMouseScrollAndCloseRestoresExactState(t *testing.T) {
 		t.Fatal("mouse close returned a command")
 	}
 	m = closed.(Model)
-	if m.Mode != ModeTable || m.Focus != FocusActions || m.ActionIndex != 0 || m.DetailScroll != 2 || m.Status != "ready" {
+	if m.Mode != ModeTable || m.Focus != FocusDetailActions || m.ActionIndex != 0 || m.DetailScroll != 2 || m.Status != "ready" {
 		t.Fatalf("mouse close did not restore state: mode=%s focus=%s action=%d detailScroll=%d status=%q", m.Mode, m.Focus, m.ActionIndex, m.DetailScroll, m.Status)
 	}
 }

@@ -31,11 +31,7 @@ func TestStatusRAndMouseRefreshUseSameForcedSnapshotRequest(t *testing.T) {
 		m.Snapshot, m.Width, m.Height = testSnapshot(), 100, 24
 		var cmd tea.Cmd
 		if mouse {
-			m, _ = mouseAction(t, m, actionIndex(t, m, "More"))
-			index := actionIndex(t, m, "Refresh")
-			region := m.hitRegions().Actions[index]
-			next, mouseCmd := m.Update(click(region.X, region.Y))
-			m, cmd = next.(Model), mouseCmd
+			m, cmd = mouseAction(t, m, actionIndex(t, m, "Refresh"))
 		} else {
 			next, keyCmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
 			m, cmd = next.(Model), keyCmd
@@ -208,7 +204,7 @@ func TestStatusRefreshRetryAndFullErrorDetailActions(t *testing.T) {
 	m.Snapshot.Status.Items[0].Kind = status.Missing
 	m.Err = "compare failed: left hash abcdef does not match right hash fedcba at /very/long/path/to/skill"
 	more, _ := keyboardAction(t, m, actionIndex(t, m, "More"))
-	for _, label := range []string{"Refresh", "Retry", "Error details"} {
+	for _, label := range []string{"Retry", "Error details"} {
 		if actionIndex(t, more, label) < 0 {
 			t.Fatal("unreachable")
 		}
@@ -249,11 +245,7 @@ func TestStatusRefreshRetryAndFullErrorDetailActions(t *testing.T) {
 		t.Fatalf("Retry apply request=%+v calls=%d", service.lastSync, service.syncCalls)
 	}
 
-	refreshMore, _ := mouseAction(t, m, actionIndex(t, m, "More"))
-	refreshIndex := actionIndex(t, refreshMore, "Refresh")
-	region := refreshMore.hitRegions().Actions[refreshIndex]
-	next, refresh := refreshMore.Update(click(region.X, region.Y))
-	refreshModel := next.(Model)
+	refreshModel, refresh := mouseAction(t, m, actionIndex(t, m, "Refresh"))
 	if refresh == nil || service.snapshotCalls != 0 || !refreshModel.Busy {
 		t.Fatalf("Refresh not deferred: cmd=%v calls=%d", refresh != nil, service.snapshotCalls)
 	}

@@ -23,10 +23,7 @@ func TestSkillsManagerParityRoutesAreVisibleAndStructured(t *testing.T) {
 	t.Run("preset apply uses a typed target picker", func(t *testing.T) {
 		m := NewModel(nil, &fakeService{}, &fakeMigration{}, ViewPresets, ActionNone)
 		m.Snapshot, m.Width, m.Height = testSnapshot(), 110, 30
-		m, _ = keyboardAction(t, m, actionIndex(t, m, "More"))
-		m.ActionIndex, m.Focus = actionIndex(t, m, "Apply"), FocusActions
-		next, cmd := m.Update(actionKey(tea.KeyEnter))
-		m = next.(Model)
+		m, cmd := keyboardAction(t, m, actionIndex(t, m, "Apply"))
 		if cmd != nil {
 			t.Fatalf("apply target selection unexpectedly started backend command")
 		}

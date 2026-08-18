@@ -7,7 +7,8 @@ import "github.com/silenceper/aikit/internal/app"
 type actionPane int
 
 const (
-	actionPaneCollection actionPane = iota
+	actionPaneNone actionPane = iota
+	actionPaneCollection
 	actionPaneDetail
 )
 
