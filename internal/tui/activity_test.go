@@ -1,10 +1,14 @@
 package tui
 
 import (
+	"context"
 	"strings"
 	"testing"
+	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/silenceper/aikit/internal/app"
 )
 
 func TestActivityKindsKeepDistinctSemanticMarkers(t *testing.T) {
@@ -68,5 +72,92 @@ func TestActivityRenderingIsDisplayCellBounded(t *testing.T) {
 		if cells := lipgloss.Width(got); cells > width {
 			t.Fatalf("width=%d rendered cells=%d: %q", width, cells, got)
 		}
+	}
+}
+
+func TestActivitySpinnerAndExpiryIgnoreStaleGenerations(t *testing.T) {
+	m := NewModel(context.Background(), &fakeService{}, &fakeMigration{}, ViewOverview, ActionNone)
+	m.Activity = Activity{Kind: ActivityReading, Label: "Scanning", Generation: 2}
+	m.activityGeneration = 2
+
+	next, follow := m.Update(activityTickMsg{Generation: 1})
+	m = next.(Model)
+	if m.Activity.Frame != 0 || follow != nil {
+		t.Fatalf("stale tick changed activity: %+v follow=%v", m.Activity, follow != nil)
+	}
+	next, _ = m.Update(activityTickMsg{Generation: 2})
+	m = next.(Model)
+	if m.Activity.Frame != 1 {
+		t.Fatalf("current tick frame=%d want=1", m.Activity.Frame)
+	}
+
+	m.Activity = Activity{Kind: ActivitySuccess, Label: "Added", Generation: 3}
+	m.activityGeneration = 3
+	next, _ = m.Update(activityExpireMsg{Generation: 2})
+	m = next.(Model)
+	if m.Activity.Kind != ActivitySuccess {
+		t.Fatalf("stale expiry cleared activity: %+v", m.Activity)
+	}
+	next, _ = m.Update(activityExpireMsg{Generation: 3})
+	m = next.(Model)
+	if m.Activity.Kind != ActivityIdle {
+		t.Fatalf("current expiry did not clear activity: %+v", m.Activity)
+	}
+}
+
+func TestActivityCommandEnvelopeDropsStaleTypedResult(t *testing.T) {
+	m := NewModel(context.Background(), &fakeService{}, &fakeMigration{}, ViewOverview, ActionNone)
+	m.Activity = Activity{Kind: ActivityReading, Label: "Newer work", Generation: 8}
+	m.activityGeneration = 8
+	wanted := testSnapshot()
+	wanted.Config.Library.Skills = wanted.Config.Library.Skills[:1]
+
+	next, cmd := m.Update(activityResultMsg{Generation: 7, Message: snapshotMsg{snapshot: wanted}})
+	m = next.(Model)
+	if cmd != nil || len(m.Snapshot.Config.Library.Skills) != 0 || m.Activity.Generation != 8 {
+		t.Fatalf("stale result mutated model: skills=%d activity=%+v", len(m.Snapshot.Config.Library.Skills), m.Activity)
+	}
+
+	next, _ = m.Update(activityResultMsg{Generation: 8, Message: snapshotMsg{snapshot: wanted}})
+	m = next.(Model)
+	if len(m.Snapshot.Config.Library.Skills) != 1 {
+		t.Fatalf("current typed result was not unwrapped: %+v", m.Snapshot.Config.Library.Skills)
+	}
+}
+
+func TestBeginActivityCommandEmitsTicksUntilTypedResult(t *testing.T) {
+	m := NewModel(context.Background(), &fakeService{}, &fakeMigration{}, ViewOverview, ActionNone)
+	release := make(chan struct{})
+	work := func() tea.Msg {
+		<-release
+		return configurationValidationMsg{result: app.ConfigurationValidation{Valid: true}}
+	}
+	cmd := m.beginActivity(ActivityReading, "Validating configuration", "", work)
+	if cmd == nil || !m.Busy || m.Activity.Kind != ActivityReading {
+		t.Fatalf("activity did not start: busy=%v activity=%+v", m.Busy, m.Activity)
+	}
+
+	started := time.Now()
+	message := cmd()
+	if time.Since(started) < activityTickInterval/2 {
+		t.Fatalf("slow command returned before spinner interval: %T", message)
+	}
+	tick, ok := message.(activityTickMsg)
+	if !ok || tick.Generation != m.Activity.Generation || tick.results == nil {
+		t.Fatalf("first message=%T %+v", message, message)
+	}
+
+	close(release)
+	next, follow := m.Update(tick)
+	m = next.(Model)
+	if follow == nil || m.Activity.Frame != 1 {
+		t.Fatalf("tick update frame=%d follow=%v", m.Activity.Frame, follow != nil)
+	}
+	result, ok := follow().(activityResultMsg)
+	if !ok {
+		t.Fatalf("follow message=%T", follow())
+	}
+	if _, ok := result.Message.(configurationValidationMsg); !ok {
+		t.Fatalf("typed result=%T", result.Message)
 	}
 }

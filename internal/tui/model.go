@@ -243,8 +243,10 @@ type Model struct {
 	Height              int
 	Status              string
 	Err                 string
+	Activity            Activity
 	Busy                bool
 	MutationBusy        bool
+	activityGeneration  uint64
 	Snapshot            app.Snapshot
 	Scan                app.ScanResult
 	Inventory           InventoryState
@@ -337,6 +339,25 @@ func (m Model) Init() tea.Cmd { return snapshotCmd(m.ctx, m.service) }
 
 func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := message.(type) {
+	case activityResultMsg:
+		if msg.Generation != m.activityGeneration {
+			return m, nil
+		}
+		return m.Update(msg.Message)
+	case activityTickMsg:
+		if msg.Generation != m.activityGeneration || (m.Activity.Kind != ActivityReading && m.Activity.Kind != ActivityNetwork) {
+			return m, nil
+		}
+		m.Activity.Frame = (m.Activity.Frame + 1) % len(activitySpinnerFrames)
+		if msg.results == nil {
+			return m, nil
+		}
+		return m, waitActivityResultCmd(msg.Generation, msg.results)
+	case activityExpireMsg:
+		if msg.Generation == m.activityGeneration && m.Activity.Kind == ActivitySuccess {
+			m.Activity = Activity{}
+		}
+		return m, nil
 	case tea.WindowSizeMsg:
 		m.Width, m.Height = max(0, msg.Width), max(0, msg.Height)
 		m.ensureVisible()

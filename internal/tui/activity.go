@@ -3,6 +3,9 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 type ActivityKind uint8
@@ -49,6 +52,67 @@ type Activity struct {
 }
 
 var activitySpinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+const (
+	activityTickInterval = 100 * time.Millisecond
+	activitySuccessTTL   = 3 * time.Second
+)
+
+type activityTickMsg struct {
+	Generation uint64
+	results    <-chan tea.Msg
+}
+
+type activityExpireMsg struct{ Generation uint64 }
+
+type activityResultMsg struct {
+	Generation uint64
+	Message    tea.Msg
+}
+
+func (m *Model) beginActivity(kind ActivityKind, label, item string, command tea.Cmd) tea.Cmd {
+	m.activityGeneration++
+	m.Activity = Activity{Kind: kind, Label: label, Item: item, Generation: m.activityGeneration}
+	switch kind {
+	case ActivityMutating:
+		m.Busy, m.MutationBusy = true, true
+	case ActivityReading, ActivityNetwork:
+		m.Busy = true
+	}
+	if command == nil {
+		return nil
+	}
+	generation := m.activityGeneration
+	results := make(chan tea.Msg, 1)
+	return func() tea.Msg {
+		go func() { results <- command() }()
+		return waitActivityResultCmd(generation, results)()
+	}
+}
+
+func waitActivityResultCmd(generation uint64, results <-chan tea.Msg) tea.Cmd {
+	return func() tea.Msg {
+		timer := time.NewTimer(activityTickInterval)
+		defer timer.Stop()
+		select {
+		case message := <-results:
+			return activityResultMsg{Generation: generation, Message: message}
+		case <-timer.C:
+			return activityTickMsg{Generation: generation, results: results}
+		}
+	}
+}
+
+func (m *Model) finishActivity(kind ActivityKind, label, item string, review ReviewTarget) tea.Cmd {
+	m.activityGeneration++
+	m.Activity = Activity{Kind: kind, Label: label, Item: item, Generation: m.activityGeneration, Review: review}
+	m.Busy, m.MutationBusy = false, false
+	if kind != ActivitySuccess {
+		return nil
+	}
+	generation := m.activityGeneration
+	return tea.Tick(activitySuccessTTL, func(time.Time) tea.Msg { return activityExpireMsg{Generation: generation} })
+}
 
 func renderActivity(activity Activity, width int, theme semanticTheme) string {
 	if width <= 0 || activity.Kind == ActivityIdle || strings.TrimSpace(activity.Label) == "" {
