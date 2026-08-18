@@ -96,6 +96,17 @@ func (m Model) toggleSelected() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	current := rows[m.Cursor]
+	if m.ActiveView == ViewOverview {
+		tasks := m.overviewDashboard().tasks(m.OverviewSection)
+		if m.Cursor >= len(tasks) || !tasks[m.Cursor].Selectable {
+			m.Status = "This task is for review only"
+			return m, nil
+		}
+		key := tasks[m.Cursor].SelectionKey
+		m.Selected[key] = !m.Selected[key]
+		m.Status = fmt.Sprintf("%d %s task(s) selected", m.overviewSelectionCount(m.OverviewSection), overviewSectionTitle(m.OverviewSection))
+		return m, nil
+	}
 	if m.Mode == ModeProjectAgents {
 		key := current.selectionKey()
 		m.Selected[key] = !m.Selected[key]
@@ -227,6 +238,23 @@ func (m Model) activate() (tea.Model, tea.Cmd) {
 	}
 	switch m.ActiveView {
 	case ViewOverview:
+		if m.OverviewSection == overviewUpdates {
+			task := m.overviewDashboard().Updates[m.Cursor]
+			if !task.Selectable {
+				return m.openAttention(current)
+			}
+			if !m.Selected[task.SelectionKey] {
+				m.Selected[task.SelectionKey] = true
+			}
+			return m.beginOverviewUpdatePreview()
+		}
+		if m.OverviewSection == overviewLocal {
+			task := m.overviewDashboard().Local[m.Cursor]
+			if task.Selectable {
+				m.Selected[task.SelectionKey] = true
+				return m.beginOverviewLocalPreview()
+			}
+		}
 		return m.openAttention(current)
 	case ViewLibrary:
 		m.Detail, m.DetailScroll, m.pendingDetailID, m.Status = true, 0, current.ID, "Loading skill detail..."

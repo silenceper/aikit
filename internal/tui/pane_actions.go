@@ -26,6 +26,11 @@ func (m Model) paneActions() paneActionSet {
 
 func (m Model) collectionActions() []string {
 	switch m.ActiveView {
+	case ViewOverview:
+		if m.OverviewSection == overviewQuick {
+			return []string{"Add skill", "Add project", "Create preset"}
+		}
+		return m.overviewSectionActions(m.OverviewSection)
 	case ViewLibrary:
 		return []string{"Add source", "More"}
 	case ViewWorkspaces:

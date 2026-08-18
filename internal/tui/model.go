@@ -520,7 +520,13 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				m.UpdateFailures = append(m.UpdateFailures, item)
 			}
 		}
-		m.openUpdates()
+		if m.ActiveView == ViewOverview {
+			m.Mode, m.OverviewSection, m.Focus = ModeTable, overviewUpdates, FocusList
+			m.Cursor, m.Scroll = 0, 0
+			m.reconcileOverviewSelection()
+		} else {
+			m.openUpdates()
+		}
 		if problems := len(m.UpdateWarnings) + len(m.UpdateFailures); problems > 0 {
 			m.Status = fmt.Sprintf("Update check completed with %d problem(s); review details", problems)
 		} else {
@@ -821,6 +827,10 @@ func (m *Model) clampCursor() {
 }
 
 func (m *Model) ensureVisible() {
+	if m.ActiveView == ViewOverview && m.Mode == ModeTable {
+		m.ensureOverviewVisible()
+		return
+	}
 	m.clampCursor()
 	m.Scroll = m.visibleRowsLayout(ComputeLayout(m.Width, m.Height)).Start
 }

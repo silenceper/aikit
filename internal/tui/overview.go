@@ -1,8 +1,11 @@
 package tui
 
 import (
+	"encoding/base64"
+	"fmt"
 	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/silenceper/aikit/internal/app"
 	"github.com/silenceper/aikit/internal/updatecheck"
 	"github.com/silenceper/aikit/pkg/config"
@@ -86,15 +89,22 @@ func (m Model) overviewUpdateTasks() []overviewTask {
 		} else if !selectable {
 			detail = firstNonEmpty(detail, "Update token incomplete")
 		}
-		tasks = append(tasks, overviewTask{
+		task := overviewTask{
 			Key: "overview:update:" + result.SkillID, SelectionKey: "overview:update:" + result.SkillID,
 			Name: skillName(m.Snapshot.Config.Library.Skills, result.SkillID), State: state, Detail: detail,
 			SkillID: result.SkillID, Current: result.Current, Remote: result.Remote, Selectable: selectable, Severity: severity,
 			DestinationMode: ModeUpdates, DestinationKey: result.SkillID,
-		})
+		}
+		if result.State == updatecheck.StateCheckFailed {
+			task.DestinationMode = ""
+			task.DestinationView = ViewStatus
+			task.DestinationKey = "status:update-failure:" + result.SkillID
+		}
+		tasks = append(tasks, task)
 	}
 	for _, warning := range uniqueStrings(m.Snapshot.Updates.Warnings) {
-		tasks = append(tasks, overviewTask{Key: "overview:update-warning:" + warning, Name: "Update check warning", State: "Update check failed", Detail: warning, Severity: rowSeverityError, DestinationView: ViewStatus})
+		encoded := base64.RawURLEncoding.EncodeToString([]byte(warning))
+		tasks = append(tasks, overviewTask{Key: "overview:update-warning:" + encoded, Name: "Update check warning", State: "Update check failed", Detail: warning, Severity: rowSeverityError, DestinationView: ViewStatus, DestinationKey: "status:update-warning:" + encoded})
 	}
 	return tasks
 }
@@ -140,6 +150,121 @@ func (m Model) overviewHealthTasks() []overviewTask {
 		})
 	}
 	return tasks
+}
+
+func (m Model) overviewRows() []row {
+	tasks := m.overviewDashboard().tasks(m.OverviewSection)
+	rows := make([]row, 0, len(tasks))
+	for _, task := range tasks {
+		rows = append(rows, row{
+			Key: task.Key, ID: task.SkillID, Name: task.Name, Origin: task.Origin, Target: task.Target,
+			State: task.State, Action: humanAction(task.Action), Detail: task.Detail, Severity: task.Severity,
+			DestinationView: task.DestinationView, DestinationMode: task.DestinationMode,
+			DestinationKey: task.DestinationKey, DestinationAction: task.DestinationAction,
+		})
+	}
+	return rows
+}
+
+func (m Model) overviewUpdateBatchRequest() (app.BatchRequest, error) {
+	request := app.BatchRequest{Operation: app.BatchUpdate, Expected: make(map[string]app.ExpectedUpdate)}
+	for _, task := range m.overviewDashboard().Updates {
+		if !m.Selected[task.SelectionKey] {
+			continue
+		}
+		if !task.Selectable {
+			return app.BatchRequest{}, fmt.Errorf("update %q is no longer selectable", task.SkillID)
+		}
+		skill, ok := overviewSkill(m.Snapshot.Config, task.SkillID)
+		if !ok || skill.Ref == nil || skill.Ref.Kind != "branch" || skill.Ref.Value == "" || skill.Resolved != task.Current || task.Remote == "" {
+			return app.BatchRequest{}, fmt.Errorf("update %q has an incomplete or stale confirmation token", task.SkillID)
+		}
+		request.SkillIDs = append(request.SkillIDs, task.SkillID)
+		request.Expected[task.SkillID] = app.ExpectedUpdate{Ref: &config.Ref{Kind: skill.Ref.Kind, Value: skill.Ref.Value}, Resolved: task.Current, Remote: task.Remote}
+	}
+	if len(request.SkillIDs) == 0 {
+		return app.BatchRequest{}, fmt.Errorf("select at least one verified update")
+	}
+	sortStrings(request.SkillIDs)
+	return request, nil
+}
+
+func (m Model) beginOverviewUpdatePreview() (tea.Model, tea.Cmd) {
+	request, err := m.overviewUpdateBatchRequest()
+	if err != nil {
+		m.Err, m.Status = err.Error(), "Update selection is not ready"
+		return m, nil
+	}
+	m.pendingBatch = request
+	m.confirm, m.Busy, m.Status = ActionBatch, true, "Building exact atomic update preview..."
+	return m, batchPreviewCmd(m.ctx, m.service, request)
+}
+
+func (m Model) overviewLocalRequest() (app.ScanRequest, error) {
+	request := app.ScanRequest{}
+	hasImport, hasAdopt := false, false
+	for _, task := range m.overviewDashboard().Local {
+		if !m.Selected[task.SelectionKey] {
+			continue
+		}
+		if !task.Selectable {
+			return app.ScanRequest{}, fmt.Errorf("local task %q is for review only", task.Key)
+		}
+		switch task.Action {
+		case app.ScanActionImport:
+			hasImport = true
+		case app.ScanActionAdopt, app.ScanActionLinkExisting:
+			hasAdopt = true
+		default:
+			return app.ScanRequest{}, fmt.Errorf("local task %q has no executable action", task.Key)
+		}
+		request.Selectors = append(request.Selectors, task.Selector)
+		request.Targets = append(request.Targets, task.Target)
+	}
+	if len(request.Selectors) == 0 {
+		return app.ScanRequest{}, fmt.Errorf("select at least one local skill")
+	}
+	if hasImport && hasAdopt {
+		return app.ScanRequest{}, fmt.Errorf("import and adopt tasks require separate confirmations")
+	}
+	request.Adopt = hasAdopt
+	sortStrings(request.Targets)
+	return request, nil
+}
+
+func (m Model) beginOverviewLocalPreview() (tea.Model, tea.Cmd) {
+	request, err := m.overviewLocalRequest()
+	if err != nil {
+		m.Err, m.Status = err.Error(), "Local selection is not ready"
+		return m, nil
+	}
+	m.prepareConfirmReturn()
+	m.pendingScan = request
+	preview := request
+	preview.DryRun = true
+	m.Busy, m.Status = true, "Building exact local skill preview..."
+	return m, migrationPreviewCmd(m.ctx, m.migration, preview)
+}
+
+func (m Model) overviewLocalSelectionAction() string {
+	hasImport, hasAdopt := false, false
+	for _, task := range m.overviewDashboard().Local {
+		if !m.Selected[task.SelectionKey] {
+			continue
+		}
+		if task.Action == app.ScanActionImport {
+			hasImport = true
+		} else if task.Action == app.ScanActionAdopt || task.Action == app.ScanActionLinkExisting {
+			hasAdopt = true
+		}
+	}
+	if hasImport && !hasAdopt {
+		return "Import selected"
+	}
+	if hasAdopt && !hasImport {
+		return "Adopt selected"
+	}
+	return "Apply selected"
 }
 
 func overviewLocalExecutable(item app.ScanItem, state app.ScanState) bool {
@@ -202,4 +327,47 @@ func (m *Model) ensureOverviewVisible() {
 	m.Cursor = min(max(0, m.Cursor), len(tasks)-1)
 	geometry := m.overviewLayout(ComputeLayout(m.Width, m.Height))
 	m.Scroll = geometry.Rows[m.OverviewSection].Start
+}
+
+func previousOverviewSection(section overviewSectionID) overviewSectionID {
+	switch section {
+	case overviewUpdates:
+		return overviewQuick
+	case overviewLocal:
+		return overviewUpdates
+	case overviewHealth:
+		return overviewLocal
+	default:
+		return overviewHealth
+	}
+}
+
+func nextOverviewSection(section overviewSectionID) overviewSectionID {
+	switch section {
+	case overviewQuick:
+		return overviewUpdates
+	case overviewUpdates:
+		return overviewLocal
+	case overviewLocal:
+		return overviewHealth
+	default:
+		return overviewQuick
+	}
+}
+
+func (m *Model) reconcileOverviewSelection() {
+	valid := make(map[string]bool)
+	for _, section := range []overviewSectionID{overviewUpdates, overviewLocal} {
+		for _, task := range m.overviewDashboard().tasks(section) {
+			if task.Selectable {
+				valid[task.SelectionKey] = true
+			}
+		}
+	}
+	for key := range m.Selected {
+		if strings.HasPrefix(key, "overview:") && !valid[key] {
+			delete(m.Selected, key)
+		}
+	}
+	m.ensureOverviewVisible()
 }

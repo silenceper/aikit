@@ -138,7 +138,8 @@ func TestOverviewAttentionRenderAndHitShareGeometry(t *testing.T) {
 
 func TestOverviewKeyboardScrollUsesSharedRowCapacity(t *testing.T) {
 	m := NewModel(context.Background(), &fakeService{}, &fakeMigration{}, ViewOverview, ActionNone)
-	m.Snapshot, m.Width, m.Height = testSnapshot(), 80, 12
+	m.Snapshot, m.Width, m.Height = testSnapshot(), 80, 28
+	m.OverviewSection = overviewLocal
 	m.Snapshot.Status.Items = nil
 	for i := 0; i < 12; i++ {
 		m.Inventory.Items = append(m.Inventory.Items, app.ScanItem{Key: fmt.Sprintf("item-%02d", i), State: app.ScanStateUnmanaged, Skill: config.Skill{Name: fmt.Sprintf("item-%02d", i)}})
@@ -147,7 +148,7 @@ func TestOverviewKeyboardScrollUsesSharedRowCapacity(t *testing.T) {
 		next, _ := m.perform(uiMoveDown)
 		m = next.(Model)
 	}
-	geometry := m.visibleRowsLayout(ComputeLayout(m.Width, m.Height))
+	geometry := m.overviewLayout(ComputeLayout(m.Width, m.Height)).Rows[overviewLocal]
 	if m.Scroll != geometry.Start || m.Scroll == 0 {
 		t.Fatalf("overview scroll=%d shared start=%d cursor=%d", m.Scroll, geometry.Start, m.Cursor)
 	}

@@ -101,7 +101,7 @@ func TestVisualStateMatrixStaysBoundedAndKeepsLandmarks(t *testing.T) {
 					got := m.ViewString()
 					landmark := state.landmark
 					if height == 8 && (state.name == "warning" || state.name == "error") {
-						landmark = "Attention"
+						landmark = "Task dashboard"
 					}
 					if state.name == "input" && width < 60 {
 						landmark = "[Apply]"

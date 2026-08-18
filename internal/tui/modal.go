@@ -95,6 +95,12 @@ func (m *Model) enterTextDetail(title, value string) {
 // currentActions is the shared keyboard/mouse dispatcher registry. Modal
 // action bars take precedence over the collection actions behind them.
 func (m Model) currentActions() []string {
+	if m.ActiveView == ViewOverview && m.Mode == ModeTable && m.Focus == FocusCollectionActions {
+		if m.OverviewSection == overviewQuick {
+			return []string{"Add skill", "Add project", "Create preset"}
+		}
+		return m.overviewSectionActions(m.OverviewSection)
+	}
 	switch m.Mode {
 	case ModeConfirm, ModeInput, ModeConfiguration, ModeErrorDetail:
 		return m.overlayPanelActions()

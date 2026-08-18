@@ -266,6 +266,16 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
+	if m.ActiveView == ViewOverview && m.Mode == ModeTable && m.Focus == FocusList {
+		switch key {
+		case "left":
+			m.switchOverviewSection(previousOverviewSection(m.OverviewSection))
+			return m, nil
+		case "right":
+			m.switchOverviewSection(nextOverviewSection(m.OverviewSection))
+			return m, nil
+		}
+	}
 	if m.Focus == FocusCollectionActions || m.Focus == FocusDetailActions {
 		switch key {
 		case "left":

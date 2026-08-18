@@ -69,7 +69,7 @@ func (m Model) rows() []row {
 	var rows []row
 	switch m.ActiveView {
 	case ViewOverview:
-		rows = m.attentionRows()
+		rows = m.overviewRows()
 	case ViewLibrary:
 		for _, skill := range m.Snapshot.Config.Library.Skills {
 			state, severity := updatePresentation(m.Snapshot.Updates, skill.ID)

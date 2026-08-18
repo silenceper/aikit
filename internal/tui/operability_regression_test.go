@@ -19,6 +19,7 @@ func TestOverviewAttentionOpenRoutesToExactDestination(t *testing.T) {
 	t.Run("status item", func(t *testing.T) {
 		m := loadedModel(t, &fakeService{snapshot: testSnapshot()}, &fakeMigration{})
 		m.switchView(ViewOverview)
+		m.OverviewSection = overviewHealth
 		moveCursorToPrefix(t, &m, "attention:status:item:")
 		wanted := strings.TrimPrefix(m.rows()[m.Cursor].Key, "attention:")
 
@@ -36,10 +37,11 @@ func TestOverviewAttentionOpenRoutesToExactDestination(t *testing.T) {
 		m := loadedModel(t, &fakeService{snapshot: testSnapshot()}, &fakeMigration{})
 		m.Inventory.Items = []app.ScanItem{{
 			Key: "inventory-one", Origin: "g/codex", Target: "/work/.codex/skills/one",
-			Skill: config.Skill{ID: "local/one", Name: "one"}, State: app.ScanStateUnmanaged, Action: app.ScanActionAdopt,
+			Skill: config.Skill{ID: "local/one", Name: "one"}, State: app.ScanStateNameConflict, Action: app.ScanActionConflict,
 		}}
 		m.switchView(ViewOverview)
-		moveCursorToPrefix(t, &m, "attention:inventory:")
+		m.OverviewSection = overviewLocal
+		moveCursorToPrefix(t, &m, "overview:local:")
 
 		m, _ = apply(m, "enter")
 
@@ -51,21 +53,6 @@ func TestOverviewAttentionOpenRoutesToExactDestination(t *testing.T) {
 		}
 	})
 
-	t.Run("available update", func(t *testing.T) {
-		m := loadedModel(t, &fakeService{snapshot: testSnapshot()}, &fakeMigration{})
-		m.switchView(ViewOverview)
-		moveCursorToPrefix(t, &m, "attention:update:")
-
-		m, _ = apply(m, "enter")
-
-		if m.Mode != ModeUpdates {
-			t.Fatalf("open update attention = mode %s, want %s", m.Mode, ModeUpdates)
-		}
-		if got := m.rows()[m.Cursor].selectionKey(); got != "acme/alpha" {
-			t.Fatalf("focused update row = %q, want acme/alpha", got)
-		}
-	})
-
 	for _, tt := range []struct {
 		name      string
 		prefix    string
@@ -73,13 +60,13 @@ func TestOverviewAttentionOpenRoutesToExactDestination(t *testing.T) {
 		configure func(*Model)
 	}{
 		{
-			name: "update failure", prefix: "attention:update-failure:", wantedKey: "status:update-failure:acme/alpha",
+			name: "update failure", prefix: "overview:update:acme/alpha", wantedKey: "status:update-failure:acme/alpha",
 			configure: func(m *Model) {
 				m.Snapshot.Updates.Results = []updatecheck.Result{{SkillID: "acme/alpha", State: updatecheck.StateCheckFailed, Error: "offline"}}
 			},
 		},
 		{
-			name: "update warning", prefix: "attention:update-warning:",
+			name: "update warning", prefix: "overview:update-warning:",
 			configure: func(m *Model) {
 				m.Snapshot.Updates.Results = nil
 				m.Snapshot.Updates.Warnings = []string{"cache unreadable"}
@@ -98,6 +85,11 @@ func TestOverviewAttentionOpenRoutesToExactDestination(t *testing.T) {
 			m := loadedModel(t, &fakeService{snapshot: testSnapshot()}, &fakeMigration{})
 			tt.configure(&m)
 			m.switchView(ViewOverview)
+			if strings.HasPrefix(tt.prefix, "overview:update") {
+				m.OverviewSection = overviewUpdates
+			} else {
+				m.OverviewSection = overviewHealth
+			}
 			moveCursorToPrefix(t, &m, tt.prefix)
 			destination := m.rows()[m.Cursor].DestinationKey
 			m, _ = apply(m, "enter")
@@ -120,6 +112,7 @@ func TestOverviewAttentionOpenRoutesToExactDestination(t *testing.T) {
 		service.snapshot.Config.PendingOperations = []config.PendingOperation{operation}
 		m := NewModel(nil, service, &fakeMigration{}, ViewOverview, ActionNone)
 		m.Snapshot = service.snapshot
+		m.OverviewSection = overviewHealth
 		moveCursorToPrefix(t, &m, "attention:recovery:")
 		next, preview := apply(m, "enter")
 		m = next
@@ -472,8 +465,8 @@ func TestResponsiveMetricsRangeAndNavigationStayLegible(t *testing.T) {
 		t.Fatalf("24-column footer=%q", footer)
 	}
 	overview.Height = 8
-	if got := stripANSI(overview.ViewString()); !strings.Contains(got, "Attention") || !strings.Contains(got, "loose") {
-		t.Fatalf("24x8 overview lost the actionable row:\n%s", got)
+	if got := stripANSI(overview.ViewString()); !strings.Contains(got, "Task dashboard") || !strings.Contains(got, "alpha") {
+		t.Fatalf("24x8 overview lost the active task section:\n%s", got)
 	}
 }
 

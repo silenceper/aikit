@@ -6,30 +6,31 @@ import (
 )
 
 type HitRegions struct {
-	Layout             Layout
-	Tabs               map[View]Rect
-	Navigation         []navigationEntryItem
-	Commands           []Rect
-	CommandIndexes     []int
-	Rows               []Rect
-	Checkboxes         []Rect
-	Actions            []Rect
-	ActionIndexes      []int
-	ActionBar          Rect
-	Confirm            Rect
-	Cancel             Rect
-	Back               Rect
-	ActionPrev         Rect
-	ActionNext         Rect
-	actionPrev         int
-	actionNext         int
-	CollectionActions  PaneActionRegions
-	DetailActions      PaneActionRegions
-	OverviewSections   map[overviewSectionID]Rect
-	OverviewRows       map[overviewSectionID][]Rect
-	OverviewCheckboxes map[overviewSectionID][]Rect
-	OverviewActions    map[overviewSectionID]PaneActionRegions
-	OverviewQuick      PaneActionRegions
+	Layout                  Layout
+	Tabs                    map[View]Rect
+	Navigation              []navigationEntryItem
+	Commands                []Rect
+	CommandIndexes          []int
+	Rows                    []Rect
+	Checkboxes              []Rect
+	Actions                 []Rect
+	ActionIndexes           []int
+	ActionBar               Rect
+	Confirm                 Rect
+	Cancel                  Rect
+	Back                    Rect
+	ActionPrev              Rect
+	ActionNext              Rect
+	actionPrev              int
+	actionNext              int
+	CollectionActions       PaneActionRegions
+	DetailActions           PaneActionRegions
+	OverviewSections        map[overviewSectionID]Rect
+	OverviewRows            map[overviewSectionID][]Rect
+	OverviewCheckboxes      map[overviewSectionID][]Rect
+	OverviewCheckboxIndexes map[overviewSectionID][]int
+	OverviewActions         map[overviewSectionID]PaneActionRegions
+	OverviewQuick           PaneActionRegions
 }
 
 type PaneActionRegions struct {
@@ -46,7 +47,7 @@ func (m Model) hitRegions() HitRegions {
 	regions := HitRegions{
 		Layout: layout, Tabs: make(map[View]Rect), actionPrev: -1, actionNext: -1,
 		OverviewSections: make(map[overviewSectionID]Rect), OverviewRows: make(map[overviewSectionID][]Rect),
-		OverviewCheckboxes: make(map[overviewSectionID][]Rect), OverviewActions: make(map[overviewSectionID]PaneActionRegions),
+		OverviewCheckboxes: make(map[overviewSectionID][]Rect), OverviewCheckboxIndexes: make(map[overviewSectionID][]int), OverviewActions: make(map[overviewSectionID]PaneActionRegions),
 	}
 	if layout.TooShort {
 		return regions
@@ -74,6 +75,7 @@ func (m Model) hitRegions() HitRegions {
 				index := geometry.Rows[section].Start + visible
 				if index < len(tasks) && tasks[index].Selectable {
 					regions.OverviewCheckboxes[section] = append(regions.OverviewCheckboxes[section], Rect{X: rect.X, Y: rect.Y, Width: min(3, rect.Width), Height: rect.Height})
+					regions.OverviewCheckboxIndexes[section] = append(regions.OverviewCheckboxIndexes[section], index)
 				}
 			}
 			regions.OverviewActions[section] = paneActionHitRegions(panel.Actions, m.overviewSectionActions(section), section == geometry.Active && m.Focus == FocusCollectionActions, m.ActionIndex)
@@ -460,6 +462,24 @@ func (m Model) updateOverviewMouse(msg tea.MouseMsg, regions HitRegions) (tea.Mo
 	}
 	geometry := m.overviewLayout(regions.Layout)
 	for _, section := range []overviewSectionID{overviewUpdates, overviewLocal, overviewHealth} {
+		actions := regions.OverviewActions[section]
+		for visible, rect := range actions.Buttons {
+			if !rect.Contains(msg.X, msg.Y) || visible >= len(actions.Indexes) {
+				continue
+			}
+			m.switchOverviewSection(section)
+			m.Focus, m.ActionIndex = FocusCollectionActions, actions.Indexes[visible]
+			return m.performPrimaryAction(m.ActionIndex)
+		}
+		for visible, rect := range regions.OverviewCheckboxes[section] {
+			if !rect.Contains(msg.X, msg.Y) || visible >= len(regions.OverviewCheckboxIndexes[section]) {
+				continue
+			}
+			m.switchOverviewSection(section)
+			m.Cursor = regions.OverviewCheckboxIndexes[section][visible]
+			m.Focus = FocusList
+			return m.toggleSelected()
+		}
 		rows := regions.OverviewRows[section]
 		for visible, rect := range rows {
 			if !rect.Contains(msg.X, msg.Y) {
@@ -547,6 +567,8 @@ func (m Model) performPrimaryAction(index int) (tea.Model, tea.Cmd) {
 		return m.applyPicker()
 	}
 	switch actions[index] {
+	case "Add project":
+		return m.perform(uiCreateProject)
 	case "Validate":
 		m.Busy, m.Status = true, "Validating configuration without changes..."
 		return m, validateConfigurationCmd(m.ctx, m.service)
@@ -600,6 +622,19 @@ func (m Model) performPrimaryAction(index int) (tea.Model, tea.Cmd) {
 	case "Check updates":
 		m.Busy, m.Status = true, "Checking remote updates..."
 		return m, updateCheckCmd(m.ctx, m.service)
+	case "Import selected", "Adopt selected", "Apply selected":
+		if m.ActiveView == ViewOverview {
+			return m.beginOverviewLocalPreview()
+		}
+	case "Review all":
+		if m.ActiveView == ViewOverview {
+			if m.OverviewSection == overviewLocal {
+				m.switchView(ViewMigration)
+			} else {
+				m.switchView(ViewStatus)
+			}
+			return m, nil
+		}
 	case "Change ref":
 		if len(m.selectedLibraryIDs()) != 1 {
 			m.Err = "change ref requires exactly one selected library skill"
@@ -609,6 +644,9 @@ func (m Model) performPrimaryAction(index int) (tea.Model, tea.Cmd) {
 		m.Status = "Enter the explicit replacement ref"
 		return m, nil
 	case "Enable selected", "Disable selected", "Update selected", "Remove selected":
+		if m.ActiveView == ViewOverview && actions[index] == "Update selected" {
+			return m.beginOverviewUpdatePreview()
+		}
 		operation := app.BatchEnable
 		switch actions[index] {
 		case "Disable selected":
@@ -675,6 +713,9 @@ func (m Model) performPrimaryAction(index int) (tea.Model, tea.Cmd) {
 		m.Status = "Enter an existing project directory; agents will be detected automatically"
 		return m, nil
 	case "Add skill":
+		if m.ActiveView == ViewOverview {
+			return m.perform(uiAddSource)
+		}
 		if m.ActiveView != ViewWorkspaces || m.Scope.Level != "workspace-projects" {
 			return m, nil
 		}

@@ -193,7 +193,7 @@ func (m Model) overviewSectionActions(section overviewSectionID) []string {
 	case overviewLocal:
 		actions := []string{"Review all"}
 		if m.overviewSelectionCount(overviewLocal) > 0 {
-			actions = append(actions, "Import selected")
+			actions = append(actions, m.overviewLocalSelectionAction())
 		}
 		return actions
 	case overviewHealth:
@@ -317,7 +317,7 @@ func (m Model) renderNavigationBody(width int) []string {
 func (m Model) renderFramedCollection(layout Layout) (string, []string) {
 	panel := layout.CollectionPanel
 	if m.ActiveView == ViewOverview && m.Mode == ModeTable {
-		return m.collectionTitle(), m.renderOverview(panel.Body.Width, panel.Body.Height)
+		return "Task dashboard · " + overviewSectionTitle(m.OverviewSection), m.renderOverviewLowHeight(panel.Body.Width, panel.Body.Height)
 	}
 	if panel.Outer.Empty() {
 		return m.collectionTitle(), nil
@@ -349,6 +349,21 @@ func (m Model) renderFramedCollection(layout Layout) (string, []string) {
 		}
 	}
 	return rangeTitle(m.collectionTitle(), geometry.Start, geometry.End, len(rows)), lines
+}
+
+func (m Model) renderOverviewLowHeight(width, height int) []string {
+	if height <= 0 {
+		return nil
+	}
+	lines := []string{clipPlain(fmt.Sprintf("Skills %d · Issues %d", len(m.Snapshot.Config.Library.Skills), m.attentionCounts().status), width)}
+	tasks := m.overviewDashboard().tasks(m.OverviewSection)
+	for index := 0; index < len(tasks) && len(lines) < height; index++ {
+		lines = append(lines, m.renderOverviewTask(tasks[index], index == m.Cursor, width))
+	}
+	if len(tasks) == 0 && len(lines) < height {
+		lines = append(lines, overviewEmptyState(m.OverviewSection, m))
+	}
+	return lines[:min(len(lines), height)]
 }
 
 func (m Model) renderFramedDetail(area Rect) []string {

@@ -101,8 +101,9 @@ func TestStartupIncrementalMergePreservesIdentitySelectionAndScroll(t *testing.T
 	}
 }
 
-func TestOverviewIncrementalHigherSeverityPreservesSelectedViewportAnchor(t *testing.T) {
+func TestOverviewIncrementalLocalMergePreservesSelectedViewportAnchor(t *testing.T) {
 	m := NewModel(context.Background(), &fakeService{}, &startupMigration{}, ViewOverview, ActionNone)
+	m.OverviewSection = overviewLocal
 	m.Snapshot = testSnapshot()
 	m.Snapshot.Status.Items = nil
 	m.Width, m.Height = 80, 16
