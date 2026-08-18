@@ -23,13 +23,15 @@ The model gains one structured activity value with these fields:
 - label: a concise user-facing phase such as `Checking updates`;
 - current and total: optional real progress counters;
 - item: an optional current skill, project, or root label;
-- reviewable: whether Enter can open typed result/error detail; and
+- review target: an optional typed detail kind plus stable item/operation key;
 - generation: an identity used to ignore stale timer and progress messages.
 
-Existing `Busy` and `MutationBusy` remain authoritative safety gates during the
-transition. Rendering must never infer a user-facing phase from those booleans.
-Commands set an explicit activity when they start and replace it with a typed
-success, warning, or error when they finish.
+Existing `MutationBusy` remains the authoritative mutation safety gate.
+Existing `Busy` remains a command-in-flight and duplicate-submission guard, but
+it is no longer a blanket keyboard and mouse gate. Rendering must never infer a
+user-facing phase from either boolean. Commands set an explicit activity when
+they start and replace it with a typed success, warning, or error when they
+finish.
 
 Progress is shown only when the backend already provides truthful current and
 total values. Unknown progress uses a spinner and phase label; the TUI never
@@ -41,22 +43,40 @@ Read-only work includes local inventory, detail loading, configuration
 validation/reload, comparison, previews, and update checks. While read-only
 work is active:
 
-- duplicate submission of that same action is blocked;
-- navigation, scrolling, help, and already-loaded detail remain usable;
+- all action submission is blocked, including starting a different preview or
+  network request;
+- view navigation, section/list/detail scrolling, loaded detail toggle,
+  filtering, help, status focus, and normal cancellation remain usable;
 - `Ctrl+Q` still exits normally; and
 - stale asynchronous results remain guarded by the existing generation or
   request identity rules.
+
+The input router classifies semantic UI actions as browsing or submitting.
+Keyboard and mouse call the same classifier. This avoids maintaining a fragile
+list of individual keys in separate handlers.
 
 Mutating work includes confirmed config, library, link, preset, project,
 recovery, sync, update, import, and adopt operations. While mutating work is
 active, existing keyboard and mouse mutation gates remain in force. The status
 explicitly says which mutation is running instead of displaying `busy`.
 
-Successful activity is visible for approximately three seconds and then
+Successful activity is visible for exactly three seconds and then
 returns to the ordinary contextual hint. Warning and error results persist
-until the user opens the result, dismisses the detail, or starts another
-operation. Reviewable warning/error activity accepts Enter and routes to the
-existing typed result/error view; it does not invent a second error surface.
+until the user opens the result, explicitly dismisses it, or starts another
+operation.
+
+A reviewable activity carries a `ReviewTarget` containing a closed detail kind
+(`full-error`, `batch-result`, `operation-result`, `recovery-result`,
+`status-item`, `update-check`, or `inventory-issue`) and the stable key or
+operation ID required by that detail. It never stores an arbitrary callback.
+Review activation uses only this target and the already-loaded typed model.
+
+The status bar becomes a conditional `FocusStatus` target when a review target
+exists. It does not steal focus on completion. `Tab` can reach it, mouse click
+focuses it, and Enter opens the exact typed result while `FocusStatus` is
+active. Ordinary Enter continues to operate on the active row or action. Before
+status focus, the hint says `Tab or click to review`; while focused it says
+`Enter to review`.
 
 ## Status-bar layout
 
@@ -94,8 +114,8 @@ Examples:
 ⠋ Checking updates · 12/33
 ● Applying preset · 2/5
 ✓ Added 3 skills
-! Completed with 2 issues · Enter to review
-× Update failed · Enter for details
+! Completed with 2 issues · Tab or click to review
+× Update failed · Tab or click for details
 ```
 
 The adaptive light/dark theme supplies the concrete colors. Reduced-color and
@@ -113,6 +133,12 @@ Inventory events update real root progress. Other commands without progress
 events remain indeterminate. Completion creates a new generation and schedules
 a success-expiry message. Expiry clears only the same success generation, so a
 late timer cannot erase a newer warning, failure, or operation.
+
+Opening a warning/error review acknowledges and clears the activity banner;
+closing the typed detail does not recreate it. The authoritative issue remains
+available in its existing Overview, Status, batch, recovery, or error detail
+surface. Explicit dismissal clears only the banner and never deletes typed
+result data.
 
 The activity is a display state, not a second source of truth for business
 results. Typed `Snapshot`, `Result`, `BatchResult`, `RecoveryResult`, warnings,
@@ -140,11 +166,12 @@ Implementation must prove:
 3. `NO_COLOR` and reduced modes retain unambiguous markers;
 4. known progress displays exact current/total and unknown progress displays
    no fake percentage;
-5. read-only activity permits navigation, scrolling, help, and normal quit
-   while rejecting duplicate submission;
+5. read-only activity permits navigation, scrolling, filtering, help, status
+   focus, cancellation, and normal quit while rejecting every new submission;
 6. mutating activity retains the existing keyboard and mouse safety gate;
 7. success expires only if its generation is still current;
-8. warning/error persists and Enter opens the existing typed detail;
+8. warning/error persists; Tab/click focuses the status target, and Enter then
+   opens only the exact typed detail identified by `ReviewTarget`;
 9. stale spinner, timer, inventory, and command messages cannot overwrite a
    newer activity;
 10. status and shortcut content stay within 24, 38, 80, and 120 columns with
