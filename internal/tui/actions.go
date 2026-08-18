@@ -878,21 +878,7 @@ func (m Model) libraryBatchRequest(operation app.BatchOperation) (app.BatchReque
 	case app.BatchEnable, app.BatchDisable:
 		return app.BatchRequest{}, fmt.Errorf("enable or disable requires an explicit binding scope")
 	case app.BatchUpdate:
-		request.SkillIDs = ids
-		request.Expected = make(map[string]app.ExpectedUpdate, len(ids))
-		for _, skillID := range ids {
-			skill, ok := snapshotSkill(m.Snapshot.Config, skillID)
-			if !ok || skill.Source == "" || skill.Ref == nil || skill.Ref.Kind != "branch" || skill.Ref.Value == "" {
-				return app.BatchRequest{}, fmt.Errorf("skill %q has no updateable source ref", skillID)
-			}
-			checked, ok := snapshotUpdate(m.Snapshot, skillID)
-			if !ok || checked.State != updatecheck.StateUpdateAvailable || checked.Current == "" || checked.Remote == "" || checked.Current != skill.Resolved {
-				return app.BatchRequest{}, fmt.Errorf("skill %q does not have a complete current update-available result", skillID)
-			}
-			request.Expected[skillID] = app.ExpectedUpdate{
-				Ref: &config.Ref{Kind: skill.Ref.Kind, Value: skill.Ref.Value}, Resolved: checked.Current, Remote: checked.Remote,
-			}
-		}
+		return m.libraryUpdateBatchRequest(ids)
 	case app.BatchRemove:
 		request.SkillIDs = ids
 	default:

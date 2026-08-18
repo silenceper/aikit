@@ -17,6 +17,8 @@ func selectedLibraryModel(service *fakeService) Model {
 	m.Snapshot, m.Width, m.Height = testSnapshot(), 100, 22
 	m.Selected["library:acme/alpha"] = true
 	m.Selected["library:acme/beta"] = true
+	m.Snapshot.Config.Library.Skills[0].Source = "https://example.test/acme/repo.git"
+	m.Snapshot.Config.Library.Skills[1].Source = "https://example.test/acme/repo.git"
 	m.Snapshot.Config.Library.Skills[0].Ref = &config.Ref{Kind: "branch", Value: "main"}
 	m.Snapshot.Config.Library.Skills[1].Ref = &config.Ref{Kind: "branch", Value: "main"}
 	m.Snapshot.Updates.Results = append(m.Snapshot.Updates.Results, updatecheck.Result{
