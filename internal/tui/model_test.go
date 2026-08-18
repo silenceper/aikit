@@ -516,14 +516,19 @@ func TestStatusAdoptPreviewsOnlySelectedTarget(t *testing.T) {
 	}
 }
 
-func TestBusyRejectsKeysExceptCtrlC(t *testing.T) {
+func TestBusyRejectsSubmissionsButAllowsBrowsing(t *testing.T) {
 	base := loadedModel(t, &fakeService{snapshot: testSnapshot()}, &fakeMigration{})
 	base.Busy = true
-	for _, input := range []string{"enter", "space", "u", "S", "s", "1", "/", "esc"} {
+	base.Activity = Activity{Kind: ActivityReading, Label: "Loading"}
+	for _, input := range []string{"enter", "space", "u", "S", "s", "r"} {
 		next, cmd := apply(base, input)
 		if cmd != nil || next.ActiveView != base.ActiveView || next.Mode != base.Mode || next.Cursor != base.Cursor {
 			t.Fatalf("busy model accepted %q: next=%+v cmd=%v", input, next, cmd != nil)
 		}
+	}
+	next, cmd := apply(base, "1")
+	if cmd != nil || next.ActiveView != ViewOverview {
+		t.Fatalf("busy model blocked browsing: view=%s cmd=%v", next.ActiveView, cmd != nil)
 	}
 	_, quit := apply(base, "ctrl+c")
 	if quit == nil {

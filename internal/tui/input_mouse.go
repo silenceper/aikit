@@ -225,10 +225,13 @@ func translateRect(rect Rect, x, y int) Rect {
 }
 
 func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	if m.MutationBusy || m.Busy {
+	if m.MutationBusy {
 		return m, nil
 	}
 	regions := m.hitRegions()
+	if m.readingActivityActive() {
+		return m.updateReadingMouse(msg, regions)
+	}
 	if m.hasOverlay() {
 		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft && m.Mode == ModeCommand {
 			entries := m.commandEntries()
@@ -434,6 +437,59 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if !regions.Layout.Detail.Empty() && regions.Layout.Detail.Contains(msg.X, msg.Y) {
 		m.Focus = FocusDetail
 		return m, nil
+	}
+	return m, nil
+}
+
+func (m Model) updateReadingMouse(msg tea.MouseMsg, regions HitRegions) (tea.Model, tea.Cmd) {
+	if m.hasOverlay() {
+		if msg.Button == tea.MouseButtonWheelUp {
+			m.moveOverlayScroll(-1)
+		} else if msg.Button == tea.MouseButtonWheelDown {
+			m.moveOverlayScroll(1)
+		}
+		return m, nil
+	}
+	if msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown {
+		if m.Detail && regions.Layout.Main.Contains(msg.X, msg.Y) {
+			m.Focus = FocusDetail
+			if msg.Button == tea.MouseButtonWheelUp {
+				m.moveDetailScroll(-1)
+			} else {
+				m.moveDetailScroll(1)
+			}
+			return m, nil
+		}
+		if regions.Layout.List.Contains(msg.X, msg.Y) {
+			if msg.Button == tea.MouseButtonWheelUp {
+				return m.perform(uiMoveUp)
+			}
+			return m.perform(uiMoveDown)
+		}
+		return m, nil
+	}
+	if msg.Action != tea.MouseActionPress || msg.Button != tea.MouseButtonLeft {
+		return m, nil
+	}
+	if regions.Back.Contains(msg.X, msg.Y) {
+		return m.perform(uiBack)
+	}
+	for _, item := range regions.Navigation {
+		if item.Rect.Contains(msg.X, msg.Y) && item.Entry.Kind == navigationView {
+			return m.activateCommandEntry(item.Entry)
+		}
+	}
+	start := m.visibleRowsLayout(regions.Layout).Start
+	for visible, rect := range regions.Rows {
+		if rect.Contains(msg.X, msg.Y) {
+			m.Cursor = start + visible
+			m.Focus, m.ActionIndex = FocusList, 0
+			m.ensureVisible()
+			return m, nil
+		}
+	}
+	if (m.Detail && regions.Layout.Main.Contains(msg.X, msg.Y)) || (!regions.Layout.Detail.Empty() && regions.Layout.Detail.Contains(msg.X, msg.Y)) {
+		m.Focus = FocusDetail
 	}
 	return m, nil
 }

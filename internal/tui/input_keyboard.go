@@ -25,8 +25,8 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.Status = "Press Ctrl+Q to quit"
 		return m, nil
 	}
-	if m.Busy {
-		return m, nil
+	if m.readingActivityActive() {
+		return m.updateReadingKey(msg)
 	}
 	if m.Help {
 		if key == "esc" || key == "?" {
@@ -416,6 +416,127 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "esc":
 		return m.perform(uiCancel)
+	}
+	return m, nil
+}
+
+func (m Model) updateReadingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+	if m.Help {
+		switch key {
+		case "esc", "?":
+			return m.perform(uiCancel)
+		case "up", "k":
+			m.moveOverlayScroll(-1)
+		case "down", "j":
+			m.moveOverlayScroll(1)
+		case "pgup":
+			m.moveOverlayScroll(-m.overlayPageSize())
+		case "pgdown":
+			m.moveOverlayScroll(m.overlayPageSize())
+		}
+		return m, nil
+	}
+	if m.Mode == ModeFilter {
+		switch key {
+		case "esc":
+			m.cancelFilterDraft()
+		case "enter":
+			m.applyFilterDraft()
+		case "backspace":
+			chars := []rune(m.FilterDraft)
+			if len(chars) > 0 {
+				m.FilterDraft = string(chars[:len(chars)-1])
+			}
+		default:
+			if msg.Type == tea.KeyRunes {
+				m.FilterDraft += string(msg.Runes)
+			}
+		}
+		m.Cursor, m.Scroll = 0, 0
+		m.clampCursor()
+		return m, nil
+	}
+	if m.hasOverlay() {
+		switch key {
+		case "esc":
+			return m.perform(uiCancel)
+		case "up", "k":
+			m.moveOverlayScroll(-1)
+		case "down", "j":
+			m.moveOverlayScroll(1)
+		case "pgup":
+			m.moveOverlayScroll(-m.overlayPageSize())
+		case "pgdown":
+			m.moveOverlayScroll(m.overlayPageSize())
+		}
+		return m, nil
+	}
+	if view, ok := viewKey(key); ok {
+		m.switchView(view)
+		return m, nil
+	}
+	switch key {
+	case "tab":
+		return m.advanceFocus()
+	case "shift+tab":
+		return m.reverseFocus()
+	case "?":
+		m.Help = true
+		return m, nil
+	case "/":
+		m.beginFilter()
+		return m, nil
+	case "esc":
+		return m.perform(uiCancel)
+	}
+	if m.Focus == FocusNavigation {
+		entries := layoutNavigationEntries(ComputeLayout(m.Width, m.Height), m)
+		switch key {
+		case "up", "k", "left":
+			m.NavigationIndex = max(0, m.NavigationIndex-1)
+		case "down", "j", "right":
+			m.NavigationIndex = min(max(0, len(entries)-1), m.NavigationIndex+1)
+		case "enter":
+			if len(entries) > 0 {
+				entry := entries[min(m.NavigationIndex, len(entries)-1)].Entry
+				if entry.Kind == navigationView {
+					return m.activateCommandEntry(entry)
+				}
+			}
+		}
+		return m, nil
+	}
+	if m.Focus == FocusDetail {
+		switch key {
+		case "down", "j":
+			m.moveDetailScroll(1)
+		case "up", "k":
+			m.moveDetailScroll(-1)
+		case "pgdown":
+			m.moveDetailScroll(m.detailPageSize())
+		case "pgup":
+			m.moveDetailScroll(-m.detailPageSize())
+		case "left":
+			m.Focus = FocusList
+		}
+		return m, nil
+	}
+	switch key {
+	case "down", "j":
+		return m.perform(uiMoveDown)
+	case "up", "k":
+		return m.perform(uiMoveUp)
+	case "left":
+		if m.ActiveView == ViewOverview {
+			m.switchOverviewSection(previousOverviewSection(m.OverviewSection))
+		}
+	case "right":
+		if m.ActiveView == ViewOverview {
+			m.switchOverviewSection(nextOverviewSection(m.OverviewSection))
+		} else if len(m.detailActions()) > 0 {
+			m.Detail, m.Focus = true, FocusDetail
+		}
 	}
 	return m, nil
 }

@@ -30,7 +30,7 @@ const (
 )
 
 func (m Model) perform(action uiAction) (tea.Model, tea.Cmd) {
-	if m.MutationBusy || m.Busy {
+	if m.MutationBusy || (m.Busy && !activityAllowsAction(action)) {
 		return m, nil
 	}
 	switch action {

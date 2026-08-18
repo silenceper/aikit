@@ -173,3 +173,16 @@ func activityShortPhase(activity Activity) string {
 		return ""
 	}
 }
+
+func (m Model) readingActivityActive() bool {
+	return m.Busy && !m.MutationBusy
+}
+
+func activityAllowsAction(action uiAction) bool {
+	switch action {
+	case uiMoveUp, uiMoveDown, uiCancel, uiBack:
+		return true
+	default:
+		return false
+	}
+}
