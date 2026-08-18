@@ -278,6 +278,7 @@ git commit -m "feat(tui): add reviewable activity focus"
 - Modify: `internal/tui/actions.go`
 - Modify: `internal/tui/input_mouse.go`
 - Modify: `internal/tui/input_keyboard.go`
+- Modify: `internal/tui/navigation.go`
 - Modify: `internal/tui/overview.go`
 - Modify: `internal/tui/workspace_actions.go`
 - Modify: `internal/tui/scope_picker.go`
@@ -293,6 +294,9 @@ real progress where available, success/warning/error result, review target, and
 no stale overwrite. Assert partial results are warning rather than success.
 Assert a mutation success/warning followed by its automatic snapshot and
 inventory refresh retains the terminal activity for its full lifetime.
+Also cover configuration reload -> offline snapshot and startup snapshot ->
+automatic recovery preview, proving each chained continuation uses or
+deliberately replaces the correct generation rather than escaping the envelope.
 
 - [ ] **Step 2: Run RED test**
 
@@ -334,7 +338,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add internal/tui/model.go internal/tui/actions.go internal/tui/input_mouse.go internal/tui/input_keyboard.go internal/tui/overview.go internal/tui/workspace_actions.go internal/tui/scope_picker.go internal/tui/activity_integration_test.go
+git add internal/tui/model.go internal/tui/actions.go internal/tui/input_mouse.go internal/tui/input_keyboard.go internal/tui/navigation.go internal/tui/overview.go internal/tui/workspace_actions.go internal/tui/scope_picker.go internal/tui/activity_integration_test.go
 git commit -m "feat(tui): report asynchronous activity lifecycle"
 ```
 
