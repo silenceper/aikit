@@ -236,7 +236,7 @@ func TestOneLineCollectionsKeepContextInLiveDetail(t *testing.T) {
 		secondary string
 	}{
 		{"library", ViewLibrary, nil, "alpha", "example.test"},
-		{"workspaces", ViewWorkspaces, nil, "Global", "All agents"},
+		{"workspaces", ViewWorkspaces, nil, "aikit", "/work/aikit"},
 		{"presets", ViewPresets, nil, "review", "1 skill"},
 		{"migration", ViewMigration, func(m *Model) { m.Inventory.Items = testInventoryItems() }, "one", "Adopt"},
 		{"status", ViewStatus, nil, "loose", "/work/.codex"},

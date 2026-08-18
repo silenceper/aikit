@@ -505,10 +505,8 @@ func viewKey(key string) (View, bool) {
 	case "2":
 		return ViewLibrary, true
 	case "3":
-		return ViewWorkspaces, true
-	case "4":
 		return ViewPresets, true
-	case "5":
+	case "4":
 		return ViewStatus, true
 	default:
 		return "", false

@@ -53,19 +53,7 @@ func TestSkillsManagerParityRoutesAreVisibleAndStructured(t *testing.T) {
 
 	t.Run("global workspace is an operable skill collection", func(t *testing.T) {
 		m := NewModel(nil, &fakeService{}, &fakeMigration{}, ViewWorkspaces, ActionNone)
-		m.Snapshot, m.Width, m.Height = testSnapshot(), 110, 30
-		rows := m.rows()
-		for index := range rows {
-			if rows[index].ID == "global" {
-				m.Cursor = index
-				break
-			}
-		}
-		next, cmd := m.perform(uiActivate)
-		m = next.(Model)
-		if cmd != nil || m.Scope.Level != "workspace-global" || m.Detail {
-			t.Fatalf("global activation scope=%+v detail=%v cmd=%v", m.Scope, m.Detail, cmd != nil)
-		}
+		m.Snapshot, m.Scope, m.Width, m.Height = testSnapshot(), Scope{Level: "workspace-global"}, 110, 30
 		if len(m.rows()) != len(m.Snapshot.Config.Library.Skills) {
 			t.Fatalf("global workspace rows=%d, want %d library skills", len(m.rows()), len(m.Snapshot.Config.Library.Skills))
 		}

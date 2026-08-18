@@ -14,7 +14,7 @@ func TestNavigationShowsDirectNumberShortcuts(t *testing.T) {
 	m.Width, m.Height = 100, 24
 
 	view := stripANSI(m.ViewString())
-	for _, want := range []string{"1 Overview", "2 Library", "3 Workspaces", "4 Presets", "5 Status", "Tools", "Migration", "Configuration"} {
+	for _, want := range []string{"1 Overview", "2 Library", "3 Presets", "4 Status", "Workspaces", "Global", "Agents", "Projects", "Tools", "Migration", "Configuration"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("navigation hides shortcut %q:\n%s", want, view)
 		}
@@ -77,8 +77,9 @@ func TestFocusedEmptyStateActionIsNamedInFooter(t *testing.T) {
 func TestWorkspaceAgentSummaryDescribesSupportedAgents(t *testing.T) {
 	m := loadedModel(t, &fakeService{snapshot: testSnapshot()}, &fakeMigration{})
 	m.switchView(ViewWorkspaces)
+	m.Scope.Level = "workspace-agents"
 	rows := m.rows()
-	if len(rows) < 2 || rows[1].Name != "Agents" || rows[1].State != "5 supported" {
+	if len(rows) != 5 || rows[0].Name == "" || rows[0].State == "" {
 		t.Fatalf("workspace agent summary = %+v", rows)
 	}
 }
@@ -110,12 +111,12 @@ func TestWorkspaceAgentExposesPresetWithoutMore(t *testing.T) {
 		})
 	}
 
-	// Keep a real KeyMsg in this audit so the shortcut assertions cannot be
-	// satisfied by render-only labels disconnected from input routing.
+	// Keep a real KeyMsg in this audit so shortcut labels cannot drift from
+	// input routing after removing the Workspaces landing page.
 	m := loadedModel(t, &fakeService{snapshot: testSnapshot()}, &fakeMigration{})
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
-	if next.(Model).ActiveView != ViewWorkspaces {
-		t.Fatal("rendered 3 shortcut does not open Workspaces")
+	if next.(Model).ActiveView != ViewPresets {
+		t.Fatal("rendered 3 shortcut does not open Presets")
 	}
 }
 

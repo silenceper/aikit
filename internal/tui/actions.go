@@ -66,6 +66,7 @@ func (m Model) perform(action uiAction) (tea.Model, tea.Cmd) {
 		m.Status = "Enter a local path or remote Git source"
 	case uiCreateProject:
 		m.switchView(ViewWorkspaces)
+		m.Scope.Level = "workspace-projects"
 		m.enterInput(inputState{Kind: inputProjectCreate, Prompt: "Project directory"})
 		m.Status = "Enter the project directory"
 	case uiCreatePreset:
@@ -776,8 +777,10 @@ func (m *Model) back() {
 		m.Scope = Scope{Level: "workspace-agents"}
 	case "project-targets":
 		m.Scope = Scope{Level: "workspace-projects"}
+	case "workspace-global", "workspace-agents", "workspace-projects":
+		return
 	default:
-		m.Scope = Scope{}
+		return
 	}
 	m.Cursor, m.Scroll = 0, 0
 	m.Detail = false

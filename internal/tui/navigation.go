@@ -20,6 +20,7 @@ type navigationEntry struct {
 	Section string
 	Kind    navigationKind
 	View    View
+	Scope   Scope
 	Action  uiAction
 }
 
@@ -27,9 +28,11 @@ func navigationEntries(m Model) []navigationEntry {
 	entries := []navigationEntry{
 		{Key: "overview", Label: "Overview", Section: "Main", Kind: navigationView, View: ViewOverview},
 		{Key: "library", Label: "Library", Section: "Main", Kind: navigationView, View: ViewLibrary},
-		{Key: "workspaces", Label: "Workspaces", Section: "Main", Kind: navigationView, View: ViewWorkspaces},
 		{Key: "presets", Label: "Presets", Section: "Main", Kind: navigationView, View: ViewPresets},
 		{Key: "status", Label: "Status", Section: "Main", Kind: navigationView, View: ViewStatus},
+		{Key: "global", Label: "Global", Section: "Workspaces", Kind: navigationView, View: ViewWorkspaces, Scope: Scope{Level: "workspace-global"}},
+		{Key: "agents", Label: "Agents", Section: "Workspaces", Kind: navigationView, View: ViewWorkspaces, Scope: Scope{Level: "workspace-agents"}},
+		{Key: "projects", Label: "Projects", Section: "Workspaces", Kind: navigationView, View: ViewWorkspaces, Scope: Scope{Level: "workspace-projects"}},
 		{Key: "migration", Label: "Migration", Section: "Tools", Kind: navigationView, View: ViewMigration},
 		{Key: "configuration", Label: "Configuration", Section: "Tools", Kind: navigationConfiguration},
 		{Key: "add-source", Label: "Add source", Section: "Actions", Kind: navigationAction, Action: uiAddSource},
@@ -64,7 +67,7 @@ func (m *Model) enterCommandPalette() {
 func (m Model) activateCommandEntry(entry navigationEntry) (tea.Model, tea.Cmd) {
 	switch entry.Kind {
 	case navigationView:
-		m.switchView(entry.View)
+		m.switchDestination(entry)
 		return m, nil
 	case navigationConfiguration:
 		m.enterConfiguration()
@@ -74,5 +77,35 @@ func (m Model) activateCommandEntry(entry navigationEntry) (tea.Model, tea.Cmd) 
 		return m.perform(entry.Action)
 	default:
 		return m, nil
+	}
+}
+
+func (m *Model) switchDestination(entry navigationEntry) {
+	m.switchView(entry.View)
+	if entry.Scope.Level != "" {
+		m.Scope = entry.Scope
+	}
+}
+
+func navigationEntryActive(m Model, entry navigationEntry) bool {
+	if entry.Kind != navigationView || entry.View != m.ActiveView {
+		return false
+	}
+	if entry.View != ViewWorkspaces {
+		return true
+	}
+	return entry.Scope.Level == workspaceRouteLevel(m.Scope.Level)
+}
+
+func workspaceRouteLevel(level string) string {
+	switch level {
+	case "workspace-global":
+		return "workspace-global"
+	case "workspace-agents", "agent-skills":
+		return "workspace-agents"
+	case "workspace-projects", "project-targets", "project-skills":
+		return "workspace-projects"
+	default:
+		return "workspace-projects"
 	}
 }

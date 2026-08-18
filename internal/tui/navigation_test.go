@@ -3,22 +3,115 @@ package tui
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestPermanentNavigationAndToolsAreSeparated(t *testing.T) {
-	want := []View{ViewOverview, ViewLibrary, ViewWorkspaces, ViewPresets, ViewStatus}
+	want := []View{ViewOverview, ViewLibrary, ViewPresets, ViewStatus}
 	if !reflect.DeepEqual(topViews, want) {
 		t.Fatalf("topViews=%v want=%v", topViews, want)
 	}
 	entries := navigationEntries(Model{})
-	if got := entryLabels(entries[:7]); !reflect.DeepEqual(got, []string{"Overview", "Library", "Workspaces", "Presets", "Status", "Migration", "Configuration"}) {
+	if got := entryLabels(entries[:9]); !reflect.DeepEqual(got, []string{"Overview", "Library", "Presets", "Status", "Global", "Agents", "Projects", "Migration", "Configuration"}) {
 		t.Fatalf("entries=%v", got)
 	}
-	if entries[5].Section != "Tools" || entries[6].Section != "Tools" {
+	for _, index := range []int{4, 5, 6} {
+		if entries[index].Section != "Workspaces" || entries[index].Scope.Level == "" {
+			t.Fatalf("workspace entry not direct: %+v", entries[index])
+		}
+	}
+	if entries[7].Section != "Tools" || entries[8].Section != "Tools" {
 		t.Fatalf("tools not separated: %+v", entries)
+	}
+}
+
+func TestWorkspaceDirectRoutesKeyboardMouseAndAliases(t *testing.T) {
+	service := &fakeService{}
+	want := map[string]string{
+		"Global":   "workspace-global",
+		"Agents":   "workspace-agents",
+		"Projects": "workspace-projects",
+	}
+	for label, scope := range want {
+		t.Run(label, func(t *testing.T) {
+			m := NewModel(context.Background(), service, &fakeMigration{}, ViewOverview, ActionNone)
+			m.Snapshot, m.Width, m.Height = testSnapshot(), 120, 24
+			var entry navigationEntry
+			for _, candidate := range navigationEntries(m) {
+				if candidate.Label == label {
+					entry = candidate
+					break
+				}
+			}
+			next, cmd := m.activateCommandEntry(entry)
+			got := next.(Model)
+			if cmd != nil || got.ActiveView != ViewWorkspaces || got.Scope.Level != scope {
+				t.Fatalf("palette route view=%s scope=%s cmd=%v", got.ActiveView, got.Scope.Level, cmd != nil)
+			}
+
+			regions := m.hitRegions()
+			var rect Rect
+			for _, item := range regions.Navigation {
+				if item.Entry.Label == label {
+					rect = item.Rect
+				}
+			}
+			if rect.Empty() {
+				t.Fatalf("mouse region missing for %s", label)
+			}
+			next, cmd = m.Update(click(rect.X, rect.Y))
+			got = next.(Model)
+			if cmd != nil || got.ActiveView != ViewWorkspaces || got.Scope.Level != scope {
+				t.Fatalf("mouse route view=%s scope=%s cmd=%v", got.ActiveView, got.Scope.Level, cmd != nil)
+			}
+		})
+	}
+
+	agents := NewModel(context.Background(), service, &fakeMigration{}, ViewAgents, ActionNone)
+	projects := NewModel(context.Background(), service, &fakeMigration{}, ViewProjects, ActionNone)
+	if agents.Scope.Level != "workspace-agents" || projects.Scope.Level != "workspace-projects" {
+		t.Fatalf("aliases agents=%s projects=%s", agents.Scope.Level, projects.Scope.Level)
+	}
+}
+
+func TestNavigationGroupHeadingsAreVisibleAndNotClickable(t *testing.T) {
+	m := NewModel(context.Background(), &fakeService{}, &fakeMigration{}, ViewOverview, ActionNone)
+	m.Snapshot, m.Width, m.Height = testSnapshot(), 120, 24
+	view := stripANSI(m.ViewString())
+	for _, heading := range []string{"Workspaces", "Tools"} {
+		if !strings.Contains(view, heading) {
+			t.Fatalf("heading %q missing:\n%s", heading, view)
+		}
+	}
+	for _, item := range m.hitRegions().Navigation {
+		if item.Entry.Label == "Workspaces" || item.Entry.Label == "Tools" {
+			t.Fatalf("heading unexpectedly clickable: %+v", item)
+		}
+	}
+}
+
+func TestWorkspaceLandingNormalizesToProjects(t *testing.T) {
+	m := NewModel(context.Background(), &fakeService{}, &fakeMigration{}, ViewWorkspaces, ActionNone)
+	if m.Scope.Level != "workspace-projects" {
+		t.Fatalf("legacy workspace scope=%q", m.Scope.Level)
+	}
+	for _, current := range m.rows() {
+		if current.ID == "global" || current.ID == "agents" || current.ID == "projects" {
+			t.Fatalf("legacy landing row remains: %+v", current)
+		}
+	}
+}
+
+func TestNumericNavigationMatchesMainEntries(t *testing.T) {
+	want := []View{ViewOverview, ViewLibrary, ViewPresets, ViewStatus}
+	for index, view := range want {
+		got, ok := viewKey(string(rune('1' + index)))
+		if !ok || got != view {
+			t.Fatalf("key %d view=%s ok=%v want=%s", index+1, got, ok, view)
+		}
 	}
 }
 

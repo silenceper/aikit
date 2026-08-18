@@ -127,12 +127,12 @@ func (m Model) renderNavigationBody(width int) []string {
 	mainIndex := 0
 	for _, item := range items {
 		for previousY+1 < item.Rect.Y {
-			lines = append(lines, uiTheme.muted.Render("  Tools"))
+			lines = append(lines, uiTheme.muted.Render("  "+item.Entry.Section))
 			previousY++
 		}
 		label := item.Entry.Label
 		if item.Entry.Kind == navigationView {
-			label = m.navigationLabel(navigationItem{View: item.Entry.View, Label: item.Entry.Label, Active: item.Entry.View == m.ActiveView})
+			label = m.navigationLabel(navigationItem{View: item.Entry.View, Label: item.Entry.Label, Active: navigationEntryActive(m, item.Entry)})
 		}
 		if item.Entry.Section == "Main" {
 			mainIndex++
@@ -140,7 +140,7 @@ func (m Model) renderNavigationBody(width int) []string {
 		} else {
 			label = "· " + label
 		}
-		active := item.Entry.Kind == navigationView && item.Entry.View == m.ActiveView
+		active := navigationEntryActive(m, item.Entry)
 		if active {
 			lines = append(lines, uiTheme.focused(label))
 		} else {

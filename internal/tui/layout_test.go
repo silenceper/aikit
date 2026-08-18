@@ -43,8 +43,8 @@ func TestLayoutNavigationUsesResponsiveLabelsAndRects(t *testing.T) {
 		count int
 		label string
 	}{
-		{120, len(topViews), "Workspaces"},
-		{80, len(topViews), "Workspaces"},
+		{120, len(topViews), "Presets"},
+		{80, len(topViews), "Presets"},
 		{59, 1, "Library"},
 	} {
 		layout := ComputeLayout(tt.width, 20)

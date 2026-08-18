@@ -351,7 +351,7 @@ func TestModelViewKeysNavigationFilterHelpAndDetail(t *testing.T) {
 	service := &fakeService{snapshot: testSnapshot()}
 	m := loadedModel(t, service, &fakeMigration{})
 
-	for input, want := range map[string]View{"1": ViewOverview, "2": ViewLibrary, "3": ViewWorkspaces, "4": ViewPresets, "5": ViewStatus} {
+	for input, want := range map[string]View{"1": ViewOverview, "2": ViewLibrary, "3": ViewPresets, "4": ViewStatus} {
 		m, _ = apply(m, input)
 		if m.ActiveView != want {
 			t.Fatalf("key %s selected %s, want %s", input, m.ActiveView, want)
@@ -394,14 +394,8 @@ func TestModelViewKeysNavigationFilterHelpAndDetail(t *testing.T) {
 func TestAgentsProjectsAndPresetsEnterSubViews(t *testing.T) {
 	m := loadedModel(t, &fakeService{snapshot: testSnapshot()}, &fakeMigration{})
 
-	m, _ = apply(m, "3")
-	for i, row := range m.rows() {
-		if row.ID == "agents" {
-			m.Cursor = i
-			break
-		}
-	}
-	m, _ = apply(m, "enter")
+	m.switchView(ViewWorkspaces)
+	m.Scope.Level = "workspace-agents"
 	for i, row := range m.rows() {
 		if row.ID == "codex" {
 			m.Cursor = i
@@ -413,14 +407,8 @@ func TestAgentsProjectsAndPresetsEnterSubViews(t *testing.T) {
 		t.Fatalf("agent subview = %#v cursor=%d active=%q rows=%#v", m.Scope, m.Cursor, m.rows()[m.Cursor].ID, m.rows())
 	}
 	m, _ = apply(m, "esc")
-	m, _ = apply(m, "3")
-	for i, row := range m.rows() {
-		if row.ID == "projects" {
-			m.Cursor = i
-			break
-		}
-	}
-	m, _ = apply(m, "enter")
+	m.switchView(ViewWorkspaces)
+	m.Scope.Level = "workspace-projects"
 	m, _ = apply(m, "enter")
 	foundCommon := false
 	for _, row := range m.rows() {
@@ -430,7 +418,7 @@ func TestAgentsProjectsAndPresetsEnterSubViews(t *testing.T) {
 		t.Fatalf("project subview = %#v rows=%#v", m.Scope, m.rows())
 	}
 	m, _ = apply(m, "esc")
-	m, _ = apply(m, "4")
+	m, _ = apply(m, "3")
 	m, _ = apply(m, "enter")
 	if m.Scope.Preset != "review" || len(m.rows()) != 2 {
 		t.Fatalf("preset subview = %#v rows=%#v", m.Scope, m.rows())
@@ -516,7 +504,7 @@ func TestStatusAdoptPreviewsOnlySelectedTarget(t *testing.T) {
 	target := "/work/.codex/skills/loose"
 	migration := &fakeMigration{result: app.ScanResult{Items: []app.ScanItem{{Origin: "p/aikit/codex", Target: target, Skill: config.Skill{ID: "local/loose", Name: "loose"}}}}}
 	m := loadedModel(t, &fakeService{snapshot: testSnapshot()}, migration)
-	m, _ = apply(m, "5")
+	m, _ = apply(m, "4")
 	m, cmd := apply(m, "A")
 	if cmd == nil || migration.scanCalls != 0 {
 		t.Fatal("status adopt preview must be deferred")
@@ -600,14 +588,8 @@ func TestLibraryDeleteAndProjectRemoveRequireConfirmation(t *testing.T) {
 
 	service.snapshotCalls = 0
 	m = loadedModel(t, service, &fakeMigration{})
-	m, _ = apply(m, "3")
-	for i, row := range m.rows() {
-		if row.ID == "projects" {
-			m.Cursor = i
-			break
-		}
-	}
-	m, _ = apply(m, "enter")
+	m.switchView(ViewWorkspaces)
+	m.Scope.Level = "workspace-projects"
 	m, preview = apply(m, "x")
 	if preview == nil || service.projectRemovePreviewCalls != 0 {
 		t.Fatal("project remove preview was not deferred")
@@ -630,7 +612,7 @@ func TestLibraryDeleteAndProjectRemoveRequireConfirmation(t *testing.T) {
 func TestPresetMemberSpaceStagesWithoutMutation(t *testing.T) {
 	service := &fakeService{snapshot: testSnapshot()}
 	m := loadedModel(t, service, &fakeMigration{})
-	m, _ = apply(m, "4")
+	m, _ = apply(m, "3")
 	m, _ = apply(m, "enter")
 	rows := m.rows()
 	if len(rows) != 2 {

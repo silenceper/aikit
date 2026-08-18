@@ -27,7 +27,7 @@ const (
 	ViewProjects View = "projects"
 )
 
-var topViews = []View{ViewOverview, ViewLibrary, ViewWorkspaces, ViewPresets, ViewStatus}
+var topViews = []View{ViewOverview, ViewLibrary, ViewPresets, ViewStatus}
 
 type Action string
 
@@ -291,6 +291,8 @@ func NewModel(ctx context.Context, service app.Service, migration app.MigrationS
 		initialView, scope.Level = ViewWorkspaces, "workspace-agents"
 	case ViewProjects:
 		initialView, scope.Level = ViewWorkspaces, "workspace-projects"
+	case ViewWorkspaces:
+		scope.Level = "workspace-projects"
 	}
 	if !validView(initialView) {
 		initialView = ViewOverview
@@ -304,7 +306,7 @@ func NewModel(ctx context.Context, service app.Service, migration app.MigrationS
 }
 
 func validView(view View) bool {
-	if view == ViewMigration {
+	if view == ViewMigration || view == ViewWorkspaces {
 		return true
 	}
 	for _, current := range topViews {
@@ -761,6 +763,9 @@ func (m *Model) switchView(view View) {
 	m.ActiveView, m.Mode = view, ModeTable
 	m.Focus, m.ActionIndex = FocusList, 0
 	m.Scope = Scope{}
+	if view == ViewWorkspaces {
+		m.Scope.Level = "workspace-projects"
+	}
 	m.Cursor, m.Scroll = 0, 0
 	m.Filter, m.FilterDraft = "", ""
 	m.Detail, m.Help = false, false

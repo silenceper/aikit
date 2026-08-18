@@ -318,11 +318,7 @@ func (m Model) workspaceRows() []row {
 	if m.Scope.Level == "workspace-projects" {
 		return m.projectRows()
 	}
-	return []row{
-		{Key: "workspace:global", ID: "global", Name: "Global", State: "All agents"},
-		{Key: "workspace:agents", ID: "agents", Name: "Agents", State: fmt.Sprintf("%d supported", len(agent.Names()))},
-		{Key: "workspace:projects", ID: "projects", Name: "Projects", State: fmt.Sprintf("%d registered", len(m.Snapshot.Config.Projects))},
-	}
+	return m.projectRows()
 }
 
 func (m Model) projectRows() []row {

@@ -216,8 +216,7 @@ func TestStructuredScopePickerCancelAndGlobalWorkspace(t *testing.T) {
 
 	global := NewModel(nil, service, &fakeMigration{}, ViewWorkspaces, ActionNone)
 	global.Snapshot, global.Width, global.Height = testSnapshot(), 110, 30
-	next, cmd = global.Update(actionKey(tea.KeyEnter))
-	global = next.(Model)
+	global.Scope = Scope{Level: "workspace-global"}
 	if cmd != nil || global.Scope.Level != "workspace-global" || global.Detail || len(global.rows()) != len(global.Snapshot.Config.Library.Skills) {
 		t.Fatalf("global workspace scope=%+v detail=%v rows=%d cmd=%v", global.Scope, global.Detail, len(global.rows()), cmd != nil)
 	}
