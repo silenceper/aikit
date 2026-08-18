@@ -61,7 +61,7 @@ func (m Model) hitRegions() HitRegions {
 	}
 	regions.Navigation = layoutNavigationEntries(layout, m)
 	if activity := m.displayedActivity(); activity.Kind != ActivityIdle && !layout.FooterPanel.Body.Empty() {
-		text := renderActivity(activity, layout.FooterPanel.Body.Width, uiTheme)
+		text := m.renderFooterActivity(activity, layout.FooterPanel.Body.Width)
 		regions.ActivityStatus = Rect{X: layout.FooterPanel.Body.X, Y: layout.FooterPanel.Body.Y, Width: min(layout.FooterPanel.Body.Width, lipgloss.Width(text)), Height: 1}
 	}
 	if layout.Narrow && !layout.Breadcrumb.Empty() {
@@ -358,6 +358,10 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m.perform(uiMoveDown)
 	}
 	if msg.Action != tea.MouseActionPress || msg.Button != tea.MouseButtonLeft {
+		return m, nil
+	}
+	if regions.ActivityStatus.Contains(msg.X, msg.Y) && !m.displayedActivity().Review.Empty() {
+		m.Focus = FocusStatus
 		return m, nil
 	}
 	if m.Mode == ModeTable {

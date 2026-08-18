@@ -81,6 +81,7 @@ const (
 	FocusDetail            Focus = "detail"
 	FocusDetailActions     Focus = "detail-actions"
 	FocusActions           Focus = "overlay-actions"
+	FocusStatus            Focus = "activity-status"
 )
 
 type routePosition struct {

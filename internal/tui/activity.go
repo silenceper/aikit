@@ -2,10 +2,12 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/silenceper/aikit/internal/app"
 )
 
 type ActivityKind uint8
@@ -185,4 +187,108 @@ func activityAllowsAction(action uiAction) bool {
 	default:
 		return false
 	}
+}
+
+func (m Model) openActivityReview() (tea.Model, tea.Cmd) {
+	target := m.displayedActivity().Review
+	if target.Empty() {
+		return m, nil
+	}
+	title, lines := "Activity details", m.activityReviewLines(target)
+	switch target.Kind {
+	case ReviewFullError:
+		title = "Error details"
+	case ReviewBatchResult:
+		title = "Batch result"
+	case ReviewOperationResult:
+		title = "Operation result"
+	case ReviewRecoveryResult:
+		title = "Recovery result"
+	case ReviewStatusItem:
+		title = "Status issue"
+	case ReviewUpdateCheck:
+		title = "Update check"
+	case ReviewInventoryIssue:
+		title = "Inventory issue"
+	}
+	if len(lines) == 0 {
+		lines = []string{firstNonEmpty(m.Err, m.Status, "No additional details")}
+	}
+	m.enterTextDetail(title, strings.Join(lines, "\n"))
+	return m, nil
+}
+
+func (m Model) activityReviewLines(target ReviewTarget) []string {
+	switch target.Kind {
+	case ReviewFullError:
+		return []string{firstNonEmpty(m.Err, m.FullError)}
+	case ReviewBatchResult:
+		lines := make([]string, 0, len(m.BatchResult.Items)+len(m.BatchResult.Issues))
+		for _, item := range m.BatchResult.Items {
+			state := "Attempted"
+			if item.Changed && m.BatchResult.Changed {
+				state = "Changed"
+			}
+			if item.Issue != nil {
+				state = "Issue: " + firstNonEmpty(item.Issue.Message, errorText(item.Issue.Err))
+			}
+			lines = append(lines, firstNonEmpty(item.Item, "item")+": "+state)
+		}
+		for _, issue := range m.BatchResult.Issues {
+			lines = append(lines, strings.Join(nonEmptyStrings(issue.Item, issue.Path, issue.Message, errorText(issue.Err)), " · "))
+		}
+		return lines
+	case ReviewOperationResult:
+		return m.detailLines()
+	case ReviewRecoveryResult:
+		lines := make([]string, 0, len(m.RecoveryResult.Completed)+len(m.RecoveryResult.Issues))
+		for _, id := range m.RecoveryResult.Completed {
+			lines = append(lines, "Completed: "+id)
+		}
+		for _, issue := range m.RecoveryResult.Issues {
+			lines = append(lines, strings.Join(nonEmptyStrings(issue.Operation, issue.Path, issue.Message, errorText(issue.Err)), " · "))
+		}
+		return lines
+	case ReviewStatusItem:
+		for _, item := range m.Snapshot.Status.Items {
+			if statusItemKey(item) == target.Key {
+				return []string{item.Message}
+			}
+		}
+	case ReviewUpdateCheck:
+		for _, item := range m.UpdateFailures {
+			if item.SkillID == target.Key {
+				return []string{item.SkillID + ": " + item.Error}
+			}
+		}
+		return append([]string(nil), m.UpdateWarnings...)
+	case ReviewInventoryIssue:
+		for _, issue := range m.Inventory.Issues {
+			if inventoryIssueKey(issue) == target.Key {
+				return []string{strings.Join(nonEmptyStrings(issue.Origin, issue.Path, issue.Message), " · ")}
+			}
+		}
+	}
+	return nil
+}
+
+func errorText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
+func nonEmptyStrings(values ...string) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" && !slices.Contains(result, value) {
+			result = append(result, value)
+		}
+	}
+	return result
+}
+
+func inventoryIssueKey(issue app.ScanIssue) string {
+	return issue.Origin + "\x00" + issue.Path + "\x00" + issue.Message
 }

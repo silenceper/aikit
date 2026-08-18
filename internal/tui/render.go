@@ -1277,7 +1277,7 @@ func (m Model) workspacePresetAction() string {
 
 func (m Model) renderStatus(width int) string {
 	if m.Activity.Kind != ActivityIdle {
-		return renderActivity(m.Activity, width, uiTheme)
+		return m.renderFooterActivity(m.Activity, width)
 	}
 	if m.Err != "" {
 		return clip(errorStyle.Render("Error: "+m.Err), width)
@@ -1286,9 +1286,17 @@ func (m Model) renderStatus(width int) string {
 		return clip(errorStyle.Render("Issue: "+m.Inventory.Issues[0].Message), width)
 	}
 	if m.Inventory.Loading {
-		return renderActivity(m.displayedActivity(), width, uiTheme)
+		return m.renderFooterActivity(m.displayedActivity(), width)
 	}
 	return clip(mutedStyle.Render(m.Status), width)
+}
+
+func (m Model) renderFooterActivity(activity Activity, width int) string {
+	if m.Focus != FocusStatus {
+		return renderActivity(activity, width, uiTheme)
+	}
+	plain := stripANSI(renderActivity(activity, max(0, width-2), uiTheme))
+	return uiTheme.focused(clipPlain("› "+plain, width))
 }
 
 func joinActivityAndShortcuts(status, shortcut string, width int) string {

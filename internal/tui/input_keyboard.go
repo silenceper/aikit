@@ -266,6 +266,15 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
+	if m.Focus == FocusStatus {
+		switch key {
+		case "enter":
+			return m.openActivityReview()
+		case "esc":
+			m.Focus = FocusList
+			return m, nil
+		}
+	}
 	if m.ActiveView == ViewOverview && m.Mode == ModeTable && m.Focus == FocusList {
 		switch key {
 		case "left":
@@ -609,6 +618,9 @@ func (m Model) visibleFocusOrder() []Focus {
 	if !layout.NavigationPanel.Outer.Empty() {
 		order = append(order, FocusNavigation)
 	}
+	if !m.displayedActivity().Review.Empty() {
+		order = append(order, FocusStatus)
+	}
 	compactDetail := layout.DetailPanel.Outer.Empty() && (m.Detail || m.hasPinnedDetail())
 	if compactDetail {
 		order = append(order, FocusDetail)
@@ -636,6 +648,8 @@ func (m *Model) setPaneFocus(focus Focus) {
 	case FocusNavigation:
 		m.ActionPane = actionPaneNone
 		m.syncNavigationIndex()
+	case FocusStatus:
+		m.ActionPane = actionPaneNone
 	case FocusCollectionActions:
 		m.ActionPane = actionPaneCollection
 	case FocusDetailActions:

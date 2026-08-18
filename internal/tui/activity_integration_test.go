@@ -2,9 +2,11 @@ package tui
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/silenceper/aikit/internal/app"
 )
 
 func readingActivityModel() Model {
@@ -98,5 +100,56 @@ func TestMutatingActivityStillStrictlyLocksBrowsing(t *testing.T) {
 	mouse := nextModel.(Model)
 	if mouseCmd != nil || mouse.Cursor != m.Cursor {
 		t.Fatalf("mutation gate allowed mouse browsing: cursor=%d cmd=%v", mouse.Cursor, mouseCmd != nil)
+	}
+}
+
+func TestReviewableActivityIsAConditionalKeyboardFocusTarget(t *testing.T) {
+	m := readingActivityModel()
+	m.Busy = false
+	m.Activity = Activity{Kind: ActivityWarning, Label: "Batch completed with issues", Review: ReviewTarget{Kind: ReviewBatchResult, Key: "batch:9"}}
+	m.BatchResult = app.BatchResult{Issues: []app.OperationIssue{{Item: "acme/alpha", Path: "/tmp/alpha", Message: "permission denied"}}}
+
+	found := false
+	for range 10 {
+		next, _ := apply(m, "tab")
+		m = next
+		if m.Focus == FocusStatus {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("reviewable activity was not reachable with Tab")
+	}
+	next, cmd := apply(m, "enter")
+	if cmd != nil || next.Mode != ModeErrorDetail || !strings.Contains(next.FullError, "acme/alpha") || !strings.Contains(next.FullError, "permission denied") {
+		t.Fatalf("status review did not open exact typed batch result: mode=%s detail=%q cmd=%v", next.Mode, next.FullError, cmd != nil)
+	}
+
+	m.Activity.Review = ReviewTarget{}
+	for _, focus := range m.visibleFocusOrder() {
+		if focus == FocusStatus {
+			t.Fatal("non-reviewable activity exposed status focus")
+		}
+	}
+}
+
+func TestReviewableActivityMouseFocusThenEnterMatchesKeyboard(t *testing.T) {
+	m := readingActivityModel()
+	m.Busy = false
+	m.Err = "remote update check failed: timeout"
+	m.Activity = Activity{Kind: ActivityError, Label: "Update check failed", Review: ReviewTarget{Kind: ReviewFullError, Key: "update:4"}}
+	regions := m.hitRegions()
+	if regions.ActivityStatus.Empty() {
+		t.Fatal("missing activity status hit target")
+	}
+	clickedModel, cmd := m.updateMouse(tea.MouseMsg{X: regions.ActivityStatus.X, Y: regions.ActivityStatus.Y, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+	clicked := clickedModel.(Model)
+	if cmd != nil || clicked.Focus != FocusStatus || clicked.Mode != ModeTable {
+		t.Fatalf("activity click should focus without opening: focus=%s mode=%s cmd=%v", clicked.Focus, clicked.Mode, cmd != nil)
+	}
+	opened, _ := apply(clicked, "enter")
+	if opened.Mode != ModeErrorDetail || opened.FullError != m.Err {
+		t.Fatalf("mouse-focused review mismatch: mode=%s detail=%q", opened.Mode, opened.FullError)
 	}
 }
