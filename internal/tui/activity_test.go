@@ -161,3 +161,40 @@ func TestBeginActivityCommandEmitsTicksUntilTypedResult(t *testing.T) {
 		t.Fatalf("typed result=%T", result.Message)
 	}
 }
+
+func TestActivityRenderReplacesVisibleBusyState(t *testing.T) {
+	m := NewModel(context.Background(), &fakeService{}, &fakeMigration{}, ViewOverview, ActionNone)
+	m.Snapshot = testSnapshot()
+	m.Busy = true
+	m.Activity = Activity{Kind: ActivityNetwork, Label: "Checking updates", Current: 12, Total: 33, Generation: 1}
+	for _, width := range []int{24, 38, 80, 120} {
+		m.Width, m.Height = width, 20
+		view := m.ViewString()
+		plain := strings.ToLower(stripANSI(view))
+		if strings.Contains(plain, "busy") || !strings.Contains(plain, "checking updates") {
+			t.Fatalf("width=%d activity not rendered semantically:\n%s", width, stripANSI(view))
+		}
+		for index, line := range strings.Split(view, "\n") {
+			if cells := lipgloss.Width(line); cells > width {
+				t.Fatalf("width=%d line=%d cells=%d: %q", width, index, cells, line)
+			}
+		}
+	}
+}
+
+func TestActivityFooterHitGeometryMatchesRenderedStatus(t *testing.T) {
+	m := NewModel(context.Background(), &fakeService{}, &fakeMigration{}, ViewOverview, ActionNone)
+	m.Snapshot, m.Width, m.Height = testSnapshot(), 80, 20
+	m.Activity = Activity{
+		Kind: ActivityWarning, Label: "Completed with issues", Generation: 9,
+		Review: ReviewTarget{Kind: ReviewBatchResult, Key: "9"},
+	}
+	regions := m.hitRegions()
+	if regions.ActivityStatus.Empty() || !regions.Layout.FooterPanel.Body.Contains(regions.ActivityStatus.X, regions.ActivityStatus.Y) {
+		t.Fatalf("activity hit rect=%+v footer=%+v", regions.ActivityStatus, regions.Layout.FooterPanel.Body)
+	}
+	line := stripANSI(strings.Split(m.ViewString(), "\n")[regions.ActivityStatus.Y])
+	if !strings.Contains(line, "! Completed with issues") {
+		t.Fatalf("activity row mismatch y=%d line=%q", regions.ActivityStatus.Y, line)
+	}
+}

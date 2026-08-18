@@ -245,7 +245,7 @@ func (m Model) renderLowHeightShell(layout Layout) string {
 		lines[0] = clip(m.renderAppBar(layout.Width), layout.Width)
 	}
 	if len(lines) > 1 {
-		lines[len(lines)-1] = clip(m.footer(), layout.Width)
+		lines[len(lines)-1] = m.renderFooterBody(layout.Width)
 	}
 	return strings.Join(lines, "\n")
 }
@@ -263,14 +263,14 @@ func (m Model) renderAppContext(width int) string {
 	}
 	if m.Inventory.Loading {
 		value += " · scanning"
-	} else if m.Busy || m.MutationBusy {
-		value += " · busy"
+	} else if phase := activityShortPhase(m.displayedActivity()); phase != "" {
+		value += " · " + phase
 	}
 	return clip(value, width)
 }
 
 func (m Model) renderFooterBody(width int) string {
-	status := stripANSI(m.renderStatus(width))
+	status := m.renderStatus(width)
 	shortcut := m.footer()
 	if strings.TrimSpace(status) == "" {
 		return clip(shortcut, width)
@@ -279,9 +279,9 @@ func (m Model) renderFooterBody(width int) string {
 		if m.Detail || m.Scope.Level != "" || m.Mode != ModeTable {
 			return clip(shortcut, width)
 		}
-		return clip(status+" │ Ctrl+Q Quit", width)
+		return joinActivityAndShortcuts(status, "Ctrl+Q Quit", width)
 	}
-	return clip(status+" │ "+shortcut, width)
+	return joinActivityAndShortcuts(status, shortcut, width)
 }
 
 func (m Model) renderNavigationBody(width int) []string {
@@ -439,10 +439,8 @@ func (m Model) renderAppBar(width int) string {
 		context = "‹ " + context
 	}
 	bar := uiTheme.appTitle.Render("aikit") + uiTheme.muted.Render("  ·  "+context)
-	if m.Inventory.Loading {
-		bar += uiTheme.muted.Render("  ·  scanning")
-	} else if m.Busy || m.MutationBusy {
-		bar += uiTheme.warning.Render("  ·  busy")
+	if phase := activityShortPhase(m.displayedActivity()); phase != "" {
+		bar += uiTheme.muted.Render("  ·  " + phase)
 	}
 	return clip(bar, width)
 }
@@ -1278,6 +1276,9 @@ func (m Model) workspacePresetAction() string {
 }
 
 func (m Model) renderStatus(width int) string {
+	if m.Activity.Kind != ActivityIdle {
+		return renderActivity(m.Activity, width, uiTheme)
+	}
 	if m.Err != "" {
 		return clip(errorStyle.Render("Error: "+m.Err), width)
 	}
@@ -1285,12 +1286,28 @@ func (m Model) renderStatus(width int) string {
 		return clip(errorStyle.Render("Issue: "+m.Inventory.Issues[0].Message), width)
 	}
 	if m.Inventory.Loading {
-		if m.Inventory.Total == 0 {
-			return clip(mutedStyle.Render("Scanning local inventory..."), width)
-		}
-		return clip(mutedStyle.Render(fmt.Sprintf("Scanning local inventory %d/%d", m.Inventory.Completed, m.Inventory.Total)), width)
+		return renderActivity(m.displayedActivity(), width, uiTheme)
 	}
 	return clip(mutedStyle.Render(m.Status), width)
+}
+
+func joinActivityAndShortcuts(status, shortcut string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if strings.TrimSpace(stripANSI(status)) == "" {
+		return clip(shortcut, width)
+	}
+	statusWidth := lipgloss.Width(status)
+	if statusWidth >= width || strings.TrimSpace(shortcut) == "" {
+		return status
+	}
+	separator := " │ "
+	remaining := width - statusWidth - lipgloss.Width(separator)
+	if remaining <= 0 {
+		return status
+	}
+	return status + separator + clipPlain(shortcut, remaining)
 }
 
 func (m Model) footer() string {

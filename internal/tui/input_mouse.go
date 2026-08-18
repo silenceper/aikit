@@ -2,6 +2,7 @@ package tui
 
 import (
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/silenceper/aikit/internal/app"
 )
 
@@ -33,6 +34,7 @@ type HitRegions struct {
 	OverviewQuick           PaneActionRegions
 	OverviewPrevious        Rect
 	OverviewNext            Rect
+	ActivityStatus          Rect
 }
 
 type PaneActionRegions struct {
@@ -58,6 +60,10 @@ func (m Model) hitRegions() HitRegions {
 		regions.Tabs[item.View] = item.Rect
 	}
 	regions.Navigation = layoutNavigationEntries(layout, m)
+	if activity := m.displayedActivity(); activity.Kind != ActivityIdle && !layout.FooterPanel.Body.Empty() {
+		text := renderActivity(activity, layout.FooterPanel.Body.Width, uiTheme)
+		regions.ActivityStatus = Rect{X: layout.FooterPanel.Body.X, Y: layout.FooterPanel.Body.Y, Width: min(layout.FooterPanel.Body.Width, lipgloss.Width(text)), Height: 1}
+	}
 	if layout.Narrow && !layout.Breadcrumb.Empty() {
 		regions.Back = Rect{X: layout.Breadcrumb.X, Y: layout.Breadcrumb.Y, Width: min(2, layout.Breadcrumb.Width), Height: 1}
 	}

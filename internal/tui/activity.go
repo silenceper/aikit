@@ -141,5 +141,35 @@ func renderActivity(activity Activity, width int, theme semanticTheme) string {
 	if !activity.Review.Empty() {
 		parts = append(parts, "Tab or click to review")
 	}
-	return clip(theme.activity(activity.Kind, strings.Join(parts, " · ")), width)
+	plain := strings.Join(parts, " · ")
+	if width > 0 {
+		plain = clipPlain(plain, width)
+	}
+	return theme.activity(activity.Kind, plain)
+}
+
+func (m Model) displayedActivity() Activity {
+	if m.Activity.Kind != ActivityIdle {
+		return m.Activity
+	}
+	if m.Inventory.Loading {
+		return Activity{Kind: ActivityReading, Label: "Scanning local inventory", Current: m.Inventory.Completed, Total: m.Inventory.Total}
+	}
+	return Activity{}
+}
+
+func activityShortPhase(activity Activity) string {
+	switch activity.Kind {
+	case ActivityNetwork:
+		return "checking"
+	case ActivityMutating:
+		return "applying"
+	case ActivityReading:
+		if strings.Contains(strings.ToLower(activity.Label), "scan") {
+			return "scanning"
+		}
+		return "loading"
+	default:
+		return ""
+	}
 }
