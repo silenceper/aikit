@@ -10,7 +10,7 @@ Replace the blocking Configuration modal with a normal read-only tool page. User
 - The left navigation remains rendered, focused, clickable, and keyboard reachable while Configuration is active.
 - Configuration owns the main collection/detail area just like the other top-level destinations.
 - `Esc` follows normal page navigation. It closes an actual child detail first, then returns focus/back normally; it does not dismiss an invisible modal layer.
-- `Ctrl+X` remains the only application quit chord.
+- `Ctrl+Q` remains the normal application quit chord; emergency `Ctrl+C` behavior is unchanged.
 
 ## Page content
 
@@ -19,7 +19,7 @@ The page shows a concise configuration summary:
 - config file path;
 - library directory;
 - cache directory;
-- last validation state and message, when available.
+- validation state (`Not validated`, `Valid`, or `Invalid`) and the last validation message, when available.
 
 The page action bar exposes only the existing read-only operations:
 
@@ -34,6 +34,7 @@ The page action bar exposes only the existing read-only operations:
 - Add a dedicated normal-page representation for Configuration rather than using `ModeConfiguration` as an overlay mode.
 - Navigation activation loads `ConfigurationDetail` asynchronously while preserving normal page routing.
 - `hasOverlay` must return false for the Configuration page.
+- Keep a TUI-local validation display state containing `Attempted`, `Valid`, and `Message`. A successful or failed validation command updates this state; unrelated status/activity updates do not erase it. Leaving and returning to Configuration preserves it for the lifetime of the TUI session.
 - Confirm, Input, Error detail, Help, Command, More, and other genuine transient surfaces remain overlays and continue to capture input.
 - Configuration actions use the existing typed `app.Service` methods and do not mutate configuration.
 
@@ -49,7 +50,8 @@ The page action bar exposes only the existing read-only operations:
 - `Tab`, arrow keys, and `Enter` can reach and execute every page action.
 - Mouse clicks use the same action registry and geometry as keyboard activation.
 - Clicking another navigation destination while Configuration is open switches immediately; no explicit close is required.
-- Busy read operations block duplicate action submission but do not turn Configuration into a modal or prevent navigation after the operation completes.
+- Busy Configuration reads block duplicate Configuration action submission, but navigation remains keyboard- and mouse-operable while load, validation, or reload is in flight.
+- Navigating away does not submit another Configuration action. A late Configuration result may update cached Configuration state and activity history, but must not switch the active route back to Configuration.
 
 ## Error handling
 
@@ -61,11 +63,13 @@ The page action bar exposes only the existing read-only operations:
 
 1. Opening Configuration yields a normal page and `hasOverlay()` is false.
 2. With Configuration active, mouse and keyboard can switch to Library, Presets, Global, Agents, Projects, and Overview.
-3. Validate, Reload, and Show paths remain keyboard/mouse equivalent and single-submit while busy.
-4. Show paths closes back to Configuration; Configuration itself requires no Close action.
-5. Wide, compact, narrow, and low-height rendering stays within bounds and preserves action reachability.
-6. Existing modal capture tests continue to pass for real overlays.
-7. Full TUI, repository, race, vet, native, Windows, Linux, and E2E verification passes.
+3. During Configuration load, Validate, and Reload, keyboard and mouse can navigate away; late results do not change the active route.
+4. Validate, Reload, and Show paths remain keyboard/mouse equivalent and single-submit while busy.
+5. Validation initially renders `Not validated`; success renders `Valid`; failure renders `Invalid` plus its message; leaving and returning preserves the result.
+6. Show paths closes back to Configuration; Configuration itself requires no Close action.
+7. Wide, compact, narrow, and low-height rendering stays within bounds and preserves action reachability.
+8. Existing modal capture tests continue to pass for real overlays.
+9. Full TUI, repository, race, vet, native, Windows, Linux, and E2E verification passes.
 
 ## Non-goals
 
