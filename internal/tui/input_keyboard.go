@@ -498,6 +498,11 @@ func (m Model) updateReadingKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "esc":
 		return m.perform(uiCancel)
+	case "r":
+		if m.Inventory.Loading {
+			m.cancelInventory()
+			return m.perform(uiRefresh)
+		}
 	}
 	if m.Focus == FocusNavigation {
 		entries := layoutNavigationEntries(ComputeLayout(m.Width, m.Height), m)

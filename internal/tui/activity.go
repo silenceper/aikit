@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/silenceper/aikit/internal/app"
+	"github.com/silenceper/aikit/internal/updatecheck"
 )
 
 type ActivityKind uint8
@@ -114,6 +115,135 @@ func (m *Model) finishActivity(kind ActivityKind, label, item string, review Rev
 	}
 	generation := m.activityGeneration
 	return tea.Tick(activitySuccessTTL, func(time.Time) tea.Msg { return activityExpireMsg{Generation: generation} })
+}
+
+func (m *Model) beginTransitionActivity(command tea.Cmd) tea.Cmd {
+	if command == nil || (!m.Busy && !m.MutationBusy) {
+		return command
+	}
+	kind := ActivityReading
+	if m.MutationBusy {
+		kind = ActivityMutating
+	} else {
+		status := strings.ToLower(m.Status)
+		if strings.Contains(status, "remote") || strings.Contains(status, "network") || strings.Contains(status, "update check") || strings.Contains(status, "refreshing status") {
+			kind = ActivityNetwork
+		}
+	}
+	label := strings.TrimSpace(strings.TrimSuffix(m.Status, "..."))
+	if label == "" {
+		label = "Working"
+	}
+	return m.beginActivity(kind, label, "", command)
+}
+
+func (m Model) finishActivityResult(message tea.Msg) (ActivityKind, string, ReviewTarget) {
+	kind, review := ActivitySuccess, ReviewTarget{}
+	label := firstNonEmpty(strings.TrimSpace(strings.TrimSuffix(m.Status, "...")), "Completed")
+	err := activityMessageError(message)
+	if err != nil {
+		kind, review = ActivityError, ReviewTarget{Kind: ReviewFullError, Key: fmt.Sprintf("generation:%d", m.activityGeneration)}
+		label = firstNonEmpty(strings.TrimSpace(m.Status), "Operation failed")
+	}
+	switch msg := message.(type) {
+	case snapshotMsg:
+		failures := 0
+		for _, result := range msg.snapshot.Updates.Results {
+			if result.State == updatecheck.StateCheckFailed {
+				failures++
+			}
+		}
+		if msg.err == nil && len(msg.snapshot.Updates.Warnings)+failures > 0 {
+			kind, review = ActivityWarning, ReviewTarget{Kind: ReviewUpdateCheck, Key: fmt.Sprintf("generation:%d", m.activityGeneration)}
+		}
+	case scanMsg:
+		if msg.err == nil && (len(msg.result.Issues) > 0 || len(msg.result.Warnings) > 0 || msg.result.Exit == app.ExitPartial) {
+			kind = ActivityWarning
+			if len(msg.result.Issues) > 0 {
+				review = ReviewTarget{Kind: ReviewInventoryIssue, Key: inventoryIssueKey(msg.result.Issues[0])}
+			} else {
+				review = ReviewTarget{Kind: ReviewFullError, Key: fmt.Sprintf("generation:%d", m.activityGeneration)}
+			}
+		}
+	case updateCheckMsg:
+		if msg.err != nil || len(msg.result.Updates.Warnings) > 0 || len(m.UpdateFailures) > 0 {
+			kind, review = ActivityWarning, ReviewTarget{Kind: ReviewUpdateCheck, Key: fmt.Sprintf("generation:%d", m.activityGeneration)}
+			if msg.err != nil {
+				kind = ActivityError
+			}
+		}
+	case batchOperationMsg:
+		if msg.err != nil || len(msg.result.Issues) > 0 || msg.result.Exit == app.ExitPartial {
+			kind, review = ActivityWarning, ReviewTarget{Kind: ReviewBatchResult, Key: fmt.Sprintf("generation:%d", m.activityGeneration)}
+			if msg.err != nil && !msg.result.Changed {
+				kind = ActivityError
+			}
+		}
+	case projectOperationMsg:
+		if msg.err != nil || msg.result.Exit == app.ExitPartial || len(msg.result.Plan.Issues)+len(msg.result.Link.Failures)+len(msg.result.Link.Issues) > 0 {
+			kind, review = ActivityWarning, ReviewTarget{Kind: ReviewOperationResult, Key: fmt.Sprintf("generation:%d", m.activityGeneration)}
+			if msg.err != nil {
+				kind = ActivityError
+			}
+		}
+	case recoveryOperationMsg:
+		if msg.err != nil || len(msg.result.Issues) > 0 {
+			kind, review = ActivityWarning, ReviewTarget{Kind: ReviewRecoveryResult, Key: fmt.Sprintf("generation:%d", m.activityGeneration)}
+			if msg.err != nil {
+				kind = ActivityError
+			}
+		}
+	case operationMsg:
+		if msg.err == nil && (msg.result.Exit == app.ExitPartial || len(msg.result.Warnings)+len(msg.result.Plan.Issues)+len(msg.result.Link.Failures)+len(msg.result.Link.Issues) > 0) {
+			kind, review = ActivityWarning, ReviewTarget{Kind: ReviewOperationResult, Key: fmt.Sprintf("generation:%d", m.activityGeneration)}
+		}
+	}
+	return kind, label, review
+}
+
+func activityMessageError(message tea.Msg) error {
+	switch msg := message.(type) {
+	case snapshotMsg:
+		return msg.err
+	case scanMsg:
+		return msg.err
+	case skillDetailMsg:
+		return msg.err
+	case mutationPreviewMsg:
+		return msg.err
+	case batchPreviewMsg:
+		return msg.err
+	case syncPreviewMsg:
+		return msg.err
+	case addPreviewMsg:
+		return msg.err
+	case compareMsg:
+		return msg.err
+	case updateCheckMsg:
+		return msg.err
+	case configurationMsg:
+		return msg.err
+	case configurationValidationMsg:
+		return msg.err
+	case configurationReloadMsg:
+		return msg.err
+	case projectPreviewMsg:
+		return msg.err
+	case projectRegistrationPreviewMsg:
+		return msg.err
+	case projectOperationMsg:
+		return msg.err
+	case recoveryPreviewMsg:
+		return msg.err
+	case recoveryOperationMsg:
+		return msg.err
+	case operationMsg:
+		return msg.err
+	case batchOperationMsg:
+		return msg.err
+	default:
+		return nil
+	}
 }
 
 func renderActivity(activity Activity, width int, theme semanticTheme) string {

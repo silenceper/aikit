@@ -7,6 +7,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/silenceper/aikit/internal/app"
+	"github.com/silenceper/aikit/internal/updatecheck"
+	"github.com/silenceper/aikit/pkg/config"
 )
 
 func readingActivityModel() Model {
@@ -151,5 +153,101 @@ func TestReviewableActivityMouseFocusThenEnterMatchesKeyboard(t *testing.T) {
 	opened, _ := apply(clicked, "enter")
 	if opened.Mode != ModeErrorDetail || opened.FullError != m.Err {
 		t.Fatalf("mouse-focused review mismatch: mode=%s detail=%q", opened.Mode, opened.FullError)
+	}
+}
+
+func TestAsyncEntryPointsStartSemanticActivitiesAndReturnTypedEnvelopes(t *testing.T) {
+	service := &fakeService{snapshot: testSnapshot()}
+	m := NewModel(context.Background(), service, &fakeMigration{}, ViewStatus, ActionNone)
+	m.Snapshot = testSnapshot()
+	m.switchView(ViewStatus)
+	m, cmd := apply(m, "r")
+	if cmd == nil || m.Activity.Kind != ActivityNetwork || !m.Busy || m.MutationBusy {
+		t.Fatalf("refresh activity=%+v busy=%v mutation=%v cmd=%v", m.Activity, m.Busy, m.MutationBusy, cmd != nil)
+	}
+	message := cmd()
+	result, ok := message.(activityResultMsg)
+	if !ok {
+		t.Fatalf("refresh returned %T, want activityResultMsg", message)
+	}
+	if _, ok := result.Message.(snapshotMsg); !ok {
+		t.Fatalf("refresh payload=%T, want snapshotMsg", result.Message)
+	}
+
+	m = NewModel(context.Background(), service, &fakeMigration{}, ViewLibrary, ActionNone)
+	m.Snapshot = testSnapshot()
+	m.enterConfirm(ActionSync)
+	m.pendingSync = app.SyncRequest{}
+	m, cmd = apply(m, "enter")
+	if cmd == nil || m.Activity.Kind != ActivityMutating || !m.MutationBusy {
+		t.Fatalf("mutation activity=%+v mutation=%v cmd=%v", m.Activity, m.MutationBusy, cmd != nil)
+	}
+}
+
+func TestActivityResultChoosesTruthfulTerminalStateAndReview(t *testing.T) {
+	m := readingActivityModel()
+	m.activityGeneration = 4
+	m.Activity.Generation = 4
+
+	nextModel, expiry := m.Update(activityResultMsg{Generation: 4, Message: updateCheckMsg{result: app.Result{Updates: updatecheck.CheckReport{Warnings: []string{"remote unavailable"}}}}})
+	next := nextModel.(Model)
+	if next.Activity.Kind != ActivityWarning || next.Activity.Review.Kind != ReviewUpdateCheck || expiry != nil {
+		t.Fatalf("warning terminal=%+v expiry=%v", next.Activity, expiry != nil)
+	}
+
+	m = readingActivityModel()
+	m.activityGeneration = 8
+	m.Activity.Generation = 8
+	m.pendingDetailID = "acme/alpha"
+	nextModel, _ = m.Update(activityResultMsg{Generation: 8, Message: skillDetailMsg{skillID: "acme/alpha", err: context.DeadlineExceeded}})
+	next = nextModel.(Model)
+	if next.Activity.Kind != ActivityError || next.Activity.Review.Kind != ReviewFullError || !strings.Contains(next.Activity.Label, "failed") {
+		t.Fatalf("error terminal=%+v", next.Activity)
+	}
+
+	m = readingActivityModel()
+	m.activityGeneration = 12
+	m.Activity.Generation = 12
+	nextModel, expiry = m.Update(activityResultMsg{Generation: 12, Message: configurationValidationMsg{result: app.ConfigurationValidation{Valid: true}}})
+	next = nextModel.(Model)
+	if next.Activity.Kind != ActivitySuccess || expiry == nil {
+		t.Fatalf("success terminal=%+v expiry=%v", next.Activity, expiry != nil)
+	}
+}
+
+func TestConfigurationReloadChainsIntoOfflineSnapshotActivity(t *testing.T) {
+	service := &fakeService{snapshot: testSnapshot(), configuration: app.ConfigurationDetail{Config: "/tmp/config.yaml"}}
+	m := NewModel(context.Background(), service, &fakeMigration{}, ViewOverview, ActionNone)
+	m.enterConfiguration()
+	m.ActionIndex = 1 // Reload
+	nextModel, command := m.Update(actionKey(tea.KeyEnter))
+	next := nextModel.(Model)
+	if command == nil || next.Activity.Kind != ActivityReading {
+		t.Fatalf("reload did not start reading activity: activity=%+v cmd=%v", next.Activity, command != nil)
+	}
+	message := command()
+	nextModel, chained := next.Update(message)
+	next = nextModel.(Model)
+	if chained == nil || next.Activity.Kind != ActivityReading || !strings.Contains(next.Activity.Label, "offline snapshot") {
+		t.Fatalf("reload chain activity=%+v chained=%v", next.Activity, chained != nil)
+	}
+	payload, ok := chained().(activityResultMsg)
+	if !ok {
+		t.Fatalf("reload snapshot payload=%T", chained())
+	}
+	if _, ok := payload.Message.(snapshotMsg); !ok {
+		t.Fatalf("reload chain payload=%T", payload.Message)
+	}
+}
+
+func TestStartupPendingRecoveryPreviewGetsSemanticActivity(t *testing.T) {
+	snapshot := testSnapshot()
+	snapshot.Config.PendingOperations = append(snapshot.Config.PendingOperations, config.PendingOperation{ID: "op-1"})
+	service := &fakeService{snapshot: snapshot}
+	m := NewModel(context.Background(), service, &fakeMigration{}, ViewOverview, ActionNone)
+	nextModel, command := m.Update(m.Init()())
+	next := nextModel.(Model)
+	if command == nil || next.Activity.Kind != ActivityReading || !strings.Contains(next.Activity.Label, "recovery preview") {
+		t.Fatalf("startup recovery activity=%+v cmd=%v", next.Activity, command != nil)
 	}
 }

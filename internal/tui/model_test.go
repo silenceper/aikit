@@ -318,7 +318,12 @@ func loadedModel(t *testing.T, service *fakeService, migration *fakeMigration) M
 		t.Fatal("Init blocked on Snapshot; backend call must be deferred to tea.Cmd")
 	}
 	updated, _ := m.Update(cmd())
-	return updated.(Model)
+	result := updated.(Model)
+	result.cancelInventory()
+	result.Inventory.Loading = false
+	result.Busy, result.MutationBusy = false, false
+	result.Activity = Activity{}
+	return result
 }
 
 func key(value string) tea.KeyMsg {

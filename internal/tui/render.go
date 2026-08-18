@@ -1288,6 +1288,9 @@ func (m Model) renderStatus(width int) string {
 	if m.Inventory.Loading {
 		return m.renderFooterActivity(m.displayedActivity(), width)
 	}
+	if strings.HasPrefix(m.Status, "Loading local snapshot") {
+		return renderActivity(Activity{Kind: ActivityReading, Label: "Loading local snapshot"}, width, uiTheme)
+	}
 	return clip(mutedStyle.Render(m.Status), width)
 }
 

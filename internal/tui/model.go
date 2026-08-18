@@ -344,7 +344,20 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Generation != m.activityGeneration {
 			return m, nil
 		}
-		return m.Update(msg.Message)
+		nextModel, command := m.Update(msg.Message)
+		next := nextModel.(Model)
+		if command != nil && (next.Inventory.Loading || next.activityGeneration != msg.Generation) {
+			return next, command
+		}
+		if command != nil && (next.Busy || next.MutationBusy) {
+			return next, next.beginTransitionActivity(command)
+		}
+		kind, label, review := next.finishActivityResult(msg.Message)
+		expiry := next.finishActivity(kind, label, "", review)
+		if command != nil {
+			return next, command
+		}
+		return next, expiry
 	case activityTickMsg:
 		if msg.Generation != m.activityGeneration || (m.Activity.Kind != ActivityReading && m.Activity.Kind != ActivityNetwork) {
 			return m, nil
@@ -391,7 +404,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.pendingRecovery = app.RecoveryRequest{OperationIDs: ids}
 			m.Busy, m.Status = true, "Building recovery preview..."
-			return m, recoveryPreviewCmd(m.ctx, m.service, m.pendingRecovery)
+			return m, m.beginTransitionActivity(recoveryPreviewCmd(m.ctx, m.service, m.pendingRecovery))
 		}
 		if m.pendingProjectOpen != "" {
 			if _, ok := findProject(msg.snapshot.Config.Projects, m.pendingProjectOpen); ok {
@@ -420,7 +433,11 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.event.Done {
 			m.Inventory.Loading, m.Inventory.Complete = false, true
 			m.Status = fmt.Sprintf("Inventory complete: %d roots", m.Inventory.Completed)
-			return m, nil
+			if len(m.Inventory.Issues) > 0 {
+				key := inventoryIssueKey(m.Inventory.Issues[0])
+				return m, m.finishActivity(ActivityWarning, fmt.Sprintf("Inventory completed with %d issue(s)", len(m.Inventory.Issues)), m.Inventory.Issues[0].Message, ReviewTarget{Kind: ReviewInventoryIssue, Key: key})
+			}
+			return m, m.finishActivity(ActivitySuccess, m.Status, "", ReviewTarget{})
 		}
 		return m, waitInventoryCmd(m.inventoryEvents)
 	case scanMsg:
@@ -730,9 +747,16 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, snapshotCmd(m.ctx, m.service)
 	case tea.KeyMsg:
-		return m.updateKey(msg)
+		nextModel, command := m.updateKey(msg)
+		next := nextModel.(Model)
+		if msg.String() == "ctrl+c" || msg.String() == "ctrl+q" {
+			return next, command
+		}
+		return next, next.beginTransitionActivity(command)
 	case tea.MouseMsg:
-		return m.updateMouse(msg)
+		nextModel, command := m.updateMouse(msg)
+		next := nextModel.(Model)
+		return next, next.beginTransitionActivity(command)
 	}
 	return m, nil
 }
@@ -758,6 +782,9 @@ func (m Model) startInventory() (tea.Model, tea.Cmd) {
 	m.inventoryCancel = cancel
 	m.inventoryEvents = m.migration.Inventory(ctx, app.InventoryRequest{Generation: m.Inventory.Generation, AllProjects: true})
 	m.Status = "Scanning local skills..."
+	m.Busy = true
+	m.activityGeneration++
+	m.Activity = Activity{Kind: ActivityReading, Label: "Scanning local skills", Generation: m.activityGeneration}
 	return m, waitInventoryCmd(m.inventoryEvents)
 }
 
@@ -888,6 +915,10 @@ func (m *Model) cancelInventory() {
 	if m.inventoryCancel != nil {
 		m.inventoryCancel()
 		m.inventoryCancel = nil
+	}
+	if m.Inventory.Loading {
+		m.Inventory.Loading = false
+		m.Busy = false
 	}
 }
 
