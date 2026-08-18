@@ -30,10 +30,17 @@ height or moves the list and detail panes. The count is informational and is not
 a separate focus target.
 
 Keyboard mnemonic letters are integrated into the English action words instead
-of being rendered as separate `E`, `D`, `U`, or `X` blocks. Color-capable themes
+of being rendered as separate shortcut blocks. The mnemonics are `E`, `D`, `U`,
+`R`, and `C` for Enable, Disable, Update, Remove, and Clear. Color-capable themes
 highlight the mnemonic character. Reduced-color and `NO_COLOR` modes use
 underline and the existing focus marker, so discoverability never depends on
 color alone. The complete displayed label remains one mouse hit target.
+
+In Library table mode with a non-empty selection and no overlay, input, filter,
+or other modal state active, these mnemonic keys immediately dispatch the same
+typed action used by focused Enter and mouse click. They take precedence over
+ordinary row shortcuts only in that state. A disabled mnemonic performs zero
+backend calls and reports the same exact disabled reason as focused activation.
 
 Space and the Library checkbox use the same selection operation. Selection is
 identified by the stable skill ID rather than the visible row index. Filtering,
@@ -82,10 +89,13 @@ preview is shown before a single atomic `app.Batch` request is submitted.
 
 ### Update
 
-Update is enabled only when every selected skill has a supported remote source,
-a branch ref, and a complete checked update record whose current value matches
-the ledger resolved value and whose remote value is non-empty. Hidden selected
-skills participate in this validation.
+Update is enabled only when every selected skill has a non-local supported Git
+source, a non-empty branch ref, and an exact checked record for the same skill
+ID whose typed state is `update-available`, whose current value equals the
+ledger `Resolved`, and whose remote value is non-empty. Hidden selected skills
+participate in this validation. The request copies that record's current,
+remote, and ref into `Expected`; any missing or mismatched field disables the
+whole action before `PreviewBatch` is called.
 
 The confirmation shows the complete batch and uses the existing exact expected
 tokens. Confirmation submits one atomic batch update. If any selected skill is
@@ -94,11 +104,13 @@ skill and reason; no partial subset is silently chosen.
 
 ### Remove
 
-Remove aggregates the existing typed remove previews for every selected skill.
-The confirmation shows references, affected scopes, planned paths, warnings,
-conflicts, and issues. If any selected skill is referenced, the first
-confirmation leads to the existing second Force confirmation. Only the final
-confirmation submits one atomic batch remove request.
+Remove makes exactly one `PreviewBatch` call with `Operation: BatchRemove`, the
+complete stable selected skill-ID set, and `Force: false`. It does not fan out
+per-skill `PreviewRemove` requests. The confirmation renders the returned typed
+`BatchPreview`, including references, affected scopes, planned paths, warnings,
+conflicts, and issues. If the preview requires Force, the first confirmation
+leads to the existing second Force confirmation. Only the final confirmation
+submits exactly one atomic `Batch` request with `Force: true`.
 
 ### Clear
 
@@ -180,10 +192,10 @@ Implementation must prove:
    exact reason in the activity/status line;
 7. Enable and Disable require an exact scope and submit one atomic batch only
    after typed preview and confirmation;
-8. Update rejects the complete selection if any visible or hidden item lacks a
-   valid exact update token;
-9. Remove aggregates typed previews and requires the second Force confirmation
-   when any reference exists;
+8. Update rejects the complete selection before preview if any visible or
+   hidden item lacks a matching typed `update-available` record or exact token;
+9. Remove makes one complete-set `PreviewBatch` call, no per-item preview calls,
+   and requires the second Force confirmation when any reference exists;
 10. cancel paths perform zero mutations, successful completion clears selection,
     and failure or partial failure retains it;
 11. Esc closes overlay/detail first, then clears Library selection, then performs
