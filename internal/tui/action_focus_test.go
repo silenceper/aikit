@@ -177,13 +177,13 @@ func TestActionFocusTabLeftRightEnterAndEsc(t *testing.T) {
 	}
 }
 
-func TestConfigurationOverlayRendersActualKeyboardFocus(t *testing.T) {
+func TestConfigurationPageRendersActualKeyboardFocus(t *testing.T) {
 	service := &fakeService{}
 	m := configurationModel(service)
 	m.Width, m.Height = 80, 16
 	next, cmd := m.Update(actionKey(tea.KeyRight))
 	m = next.(Model)
-	if cmd != nil || m.Focus != FocusActions || m.ActionIndex != 1 || !strings.Contains(stripANSI(m.ViewString()), "{Reload}") {
+	if cmd != nil || m.Focus != FocusCollectionActions || m.ActionIndex != 1 || !strings.Contains(stripANSI(m.ViewString()), "{Reload}") {
 		t.Fatalf("configuration focus=%s action=%d cmd=%v:\n%s", m.Focus, m.ActionIndex, cmd != nil, m.ViewString())
 	}
 	next, cmd = m.Update(actionKey(tea.KeyEnter))

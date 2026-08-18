@@ -67,8 +67,6 @@ func (m *Model) enterInput(input inputState) {
 	m.enterModal(ModeInput)
 }
 
-func (m *Model) enterConfiguration() { m.enterModal(ModeConfiguration) }
-
 func (m *Model) enterMore() {
 	m.MorePane = m.ActionPane
 	m.enterModal(ModeMore)
@@ -102,7 +100,7 @@ func (m Model) currentActions() []string {
 		return m.overviewSectionActions(m.OverviewSection)
 	}
 	switch m.Mode {
-	case ModeConfirm, ModeInput, ModeConfiguration, ModeErrorDetail:
+	case ModeConfirm, ModeInput, ModeErrorDetail:
 		return m.overlayPanelActions()
 	default:
 		if m.Mode == ModeTable {

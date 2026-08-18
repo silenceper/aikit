@@ -384,10 +384,6 @@ func (m Model) cancel() (tea.Model, tea.Cmd) {
 		m.Help = false
 		return m, nil
 	}
-	if m.Mode == ModeConfiguration {
-		m.Mode = ModeTable
-		return m, nil
-	}
 	if m.Mode == ModeInput {
 		m.Mode = ModeTable
 		m.Input = inputState{}

@@ -63,7 +63,7 @@ func TestRenderedActionBarClickBoundariesAndWhitespace(t *testing.T) {
 }
 
 func TestNarrowConfigurationActionViewportKeepsEveryFocusedActionReachable(t *testing.T) {
-	for wanted, label := range []string{"Validate", "Reload", "Show paths", "Close"} {
+	for wanted, label := range []string{"Validate", "Reload", "Show paths"} {
 		m := configurationModel(&fakeService{})
 		m.Width, m.Height, m.ActionIndex = 24, 12, wanted
 		plain := stripANSI(m.ViewString())
@@ -72,16 +72,16 @@ func TestNarrowConfigurationActionViewportKeepsEveryFocusedActionReachable(t *te
 		}
 		regions := m.hitRegions()
 		visible := -1
-		for i, actionIndex := range regions.ActionIndexes {
+		for i, actionIndex := range regions.CollectionActions.Indexes {
 			if actionIndex == wanted {
 				visible = i
 				break
 			}
 		}
 		if visible < 0 {
-			t.Fatalf("focused action %d missing hit region: indexes=%v", wanted, regions.ActionIndexes)
+			t.Fatalf("focused action %d missing hit region: indexes=%v", wanted, regions.CollectionActions.Indexes)
 		}
-		next, cmd := m.Update(click(regions.Actions[visible].X, regions.Actions[visible].Y))
+		next, cmd := m.Update(click(regions.CollectionActions.Buttons[visible].X, regions.CollectionActions.Buttons[visible].Y))
 		got := next.(Model)
 		switch label {
 		case "Validate", "Reload":
@@ -92,16 +92,12 @@ func TestNarrowConfigurationActionViewportKeepsEveryFocusedActionReachable(t *te
 			if cmd != nil || got.Mode != ModeErrorDetail {
 				t.Fatalf("Show path mode=%s cmd=%v", got.Mode, cmd != nil)
 			}
-		case "Close":
-			if cmd != nil || got.Mode != ModeTable {
-				t.Fatalf("Close mode=%s cmd=%v", got.Mode, cmd != nil)
-			}
 		}
 	}
 }
 
 func TestNarrowConfigurationActionViewportIsFullyMouseReachableFromDefault(t *testing.T) {
-	for _, label := range []string{"Validate", "Reload", "Show paths", "Close"} {
+	for _, label := range []string{"Validate", "Reload", "Show paths"} {
 		t.Run(label, func(t *testing.T) {
 			m := configurationModel(&fakeService{})
 			m.Width, m.Height = 24, 12
@@ -109,13 +105,13 @@ func TestNarrowConfigurationActionViewportIsFullyMouseReachableFromDefault(t *te
 				t.Fatalf("default action index=%d, want 0", m.ActionIndex)
 			}
 			wanted := actionIndex(t, m, label)
-			for steps := 0; steps < len(m.primaryActions()); steps++ {
+			for steps := 0; steps < len(m.collectionActions()); steps++ {
 				regions := m.hitRegions()
-				for visible, index := range regions.ActionIndexes {
+				for visible, index := range regions.CollectionActions.Indexes {
 					if index != wanted {
 						continue
 					}
-					next, cmd := m.Update(click(regions.Actions[visible].X, regions.Actions[visible].Y))
+					next, cmd := m.Update(click(regions.CollectionActions.Buttons[visible].X, regions.CollectionActions.Buttons[visible].Y))
 					got := next.(Model)
 					switch label {
 					case "Validate", "Reload":
@@ -126,15 +122,11 @@ func TestNarrowConfigurationActionViewportIsFullyMouseReachableFromDefault(t *te
 						if cmd != nil || got.Mode != ModeErrorDetail {
 							t.Fatalf("Show path mode=%s cmd=%v", got.Mode, cmd != nil)
 						}
-					case "Close":
-						if cmd != nil || got.Mode != ModeTable {
-							t.Fatalf("Close mode=%s cmd=%v", got.Mode, cmd != nil)
-						}
 					}
 					return
 				}
 				if regions.ActionNext.Empty() || !strings.Contains(stripANSI(m.ViewString()), ">") {
-					t.Fatalf("%s unavailable from action viewport: indexes=%v\n%s", label, regions.ActionIndexes, m.ViewString())
+					t.Fatalf("%s unavailable from action viewport: indexes=%v\n%s", label, regions.CollectionActions.Indexes, m.ViewString())
 				}
 				next, cmd := m.Update(click(regions.ActionNext.X, regions.ActionNext.Y))
 				if cmd != nil {
@@ -194,11 +186,11 @@ func TestPagedActionBarSeparatorOutsideAndBusyClicksAreNoOp(t *testing.T) {
 	m := configurationModel(&fakeService{})
 	m.Width, m.Height = 24, 12
 	regions := m.hitRegions()
-	if len(regions.Actions) == 0 || regions.ActionNext.Empty() {
-		t.Fatalf("paged controls unavailable: actions=%d next=%+v", len(regions.Actions), regions.ActionNext)
+	if len(regions.CollectionActions.Buttons) == 0 || regions.ActionNext.Empty() {
+		t.Fatalf("paged controls unavailable: actions=%d next=%+v", len(regions.CollectionActions.Buttons), regions.ActionNext)
 	}
 	for _, point := range []struct{ x, y int }{
-		{regions.Actions[0].Right(), regions.ActionBar.Y},
+		{regions.CollectionActions.Buttons[0].Right(), regions.ActionBar.Y},
 		{regions.ActionBar.Right(), regions.ActionBar.Y},
 		{regions.ActionBar.X, regions.ActionBar.Y - 1},
 	} {

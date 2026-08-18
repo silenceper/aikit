@@ -48,7 +48,6 @@ func TestOverlayMouseCapturesUnderlyingTabsRowsAndActions(t *testing.T) {
 		setup func(*Model)
 	}{
 		{"help", func(m *Model) { m.Help = true }},
-		{"configuration", func(m *Model) { m.Mode = ModeConfiguration }},
 		{"filter", func(m *Model) { m.Mode, m.filterParent = ModeFilter, ModeTable }},
 	}
 	for _, tt := range tests {

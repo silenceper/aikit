@@ -89,7 +89,7 @@ func TestVisualStateMatrixStaysBoundedAndKeepsLandmarks(t *testing.T) {
 		{"confirm", "[Confirm]", func(m *Model) { m.Mode, m.Preview.Summary = ModeConfirm, "Review exact plan" }},
 		{"input", "Enter Apply", func(m *Model) { m.Mode, m.Input = ModeInput, inputState{Prompt: "Source"} }},
 		{"more", "More actions", func(m *Model) { m.ActiveView, m.Mode = ViewStatus, ModeMore }},
-		{"configuration", "[Validate]", func(m *Model) { m.Mode = ModeConfiguration }},
+		{"configuration", "Validate", func(m *Model) { m.ActiveView, m.Focus = ViewConfiguration, FocusCollectionActions }},
 	}
 	for _, width := range []int{120, 96, 95, 80, 60, 59, 38, 24} {
 		for _, height := range []int{8, 12, 16, 30} {

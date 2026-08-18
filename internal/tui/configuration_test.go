@@ -12,9 +12,10 @@ import (
 )
 
 func configurationModel(service *fakeService) Model {
-	m := NewModel(nil, service, &fakeMigration{}, ViewOverview, ActionNone)
+	m := NewModel(nil, service, &fakeMigration{}, ViewConfiguration, ActionNone)
 	m.Snapshot, m.Width, m.Height = testSnapshot(), 100, 24
-	m.Mode = ModeConfiguration
+	m.Mode, m.Focus, m.ActionPane = ModeTable, FocusCollectionActions, actionPaneCollection
+	m.Activity, m.Busy = Activity{}, false
 	m.Config = app.ConfigurationDetail{Config: "/home/aikit/config.yaml", Library: "/home/aikit/library", Cache: "/home/aikit/cache"}
 	return m
 }
@@ -23,7 +24,18 @@ func invokeConfigurationAction(t *testing.T, m Model, label string, mouse bool) 
 	t.Helper()
 	index := actionIndex(t, m, label)
 	if mouse {
-		region := m.hitRegions().Actions[index]
+		regions := m.hitRegions().CollectionActions
+		visible := -1
+		for position, actionIndex := range regions.Indexes {
+			if actionIndex == index {
+				visible = position
+				break
+			}
+		}
+		if visible < 0 || visible >= len(regions.Buttons) {
+			t.Fatalf("Configuration action %q has no mouse region: %+v", label, regions)
+		}
+		region := regions.Buttons[visible]
 		next, cmd := m.Update(click(region.X, region.Y))
 		return next.(Model), cmd
 	}
@@ -36,7 +48,7 @@ func invokeConfigurationAction(t *testing.T, m Model, label string, mouse bool) 
 }
 
 func TestConfigurationReadOnlyActionsKeyboardMouseParity(t *testing.T) {
-	for _, label := range []string{"Validate", "Reload", "Show paths", "Close"} {
+	for _, label := range []string{"Validate", "Reload", "Show paths"} {
 		for _, mouse := range []bool{false, true} {
 			t.Run(label+map[bool]string{false: "-keyboard", true: "-mouse"}[mouse], func(t *testing.T) {
 				service := &fakeService{configuration: app.ConfigurationDetail{Config: "/new/config.yaml", Library: "/new/library", Cache: "/new/cache"}, configurationValidation: app.ConfigurationValidation{Path: "/home/aikit/config.yaml", Valid: true}}
@@ -69,10 +81,6 @@ func TestConfigurationReadOnlyActionsKeyboardMouseParity(t *testing.T) {
 					if cmd != nil || m.Mode != ModeErrorDetail || !strings.Contains(m.ViewString(), "/home/aikit/config.yaml") || strings.Contains(strings.ToLower(m.Status), "copied") {
 						t.Fatalf("Show path invalid:\n%s", m.ViewString())
 					}
-				case "Close":
-					if cmd != nil || m.Mode != ModeTable {
-						t.Fatalf("Close mode=%s cmd=%v", m.Mode, cmd != nil)
-					}
 				}
 			})
 		}
@@ -81,8 +89,8 @@ func TestConfigurationReadOnlyActionsKeyboardMouseParity(t *testing.T) {
 
 func TestConfigurationActionsExposeNoClipboardOrEditor(t *testing.T) {
 	m := configurationModel(&fakeService{})
-	actions := m.primaryActions()
-	if !reflect.DeepEqual(actions, []string{"Validate", "Reload", "Show paths", "Close"}) {
+	actions := m.collectionActions()
+	if !reflect.DeepEqual(actions, []string{"Validate", "Reload", "Show paths"}) {
 		t.Fatalf("configuration actions=%v", actions)
 	}
 	joined := strings.ToLower(strings.Join(actions, " "))
@@ -119,8 +127,8 @@ func TestConfigurationShowPathDetailCloseKeyboardMouseParity(t *testing.T) {
 				next, cmd = m.Update(actionKey(tea.KeyEsc))
 			}
 			m = next.(Model)
-			if cmd != nil || m.Mode != ModeConfiguration {
-				t.Fatalf("Close mode=%s cmd=%v, want configuration", m.Mode, cmd != nil)
+			if cmd != nil || m.Mode != ModeTable || m.ActiveView != ViewConfiguration {
+				t.Fatalf("Close view=%s mode=%s cmd=%v, want Configuration page", m.ActiveView, m.Mode, cmd != nil)
 			}
 		})
 	}

@@ -96,6 +96,13 @@ func (m Model) rows() []row {
 				rows = append(rows, row{Key: "preset:" + preset.Name, ID: preset.Name, Name: preset.Name, State: fmt.Sprintf("%d %s · %d scopes", len(preset.Skills), skillNoun, len(usage)), Detail: strings.Join(usage, " · ")})
 			}
 		}
+	case ViewConfiguration:
+		rows = []row{
+			{Key: "configuration:config", ID: "config", Name: "Config file", Source: firstNonEmpty(m.Config.Config, "Loading..."), State: "Read only", Severity: rowSeverityInfo},
+			{Key: "configuration:library", ID: "library", Name: "Library", Source: firstNonEmpty(m.Config.Library, "Loading..."), State: "Managed content", Severity: rowSeverityInfo},
+			{Key: "configuration:cache", ID: "cache", Name: "Cache", Source: firstNonEmpty(m.Config.Cache, "Loading..."), State: "Git metadata", Severity: rowSeverityInfo},
+			{Key: "configuration:validation", ID: "validation", Name: "Validation", State: m.configurationValidationLabel(), Detail: m.ConfigValidationDisplay.Message, Severity: m.configurationValidationSeverity()},
+		}
 	case ViewMigration:
 		rows = m.scanRows(m.Inventory.Items)
 	case ViewStatus:
@@ -128,6 +135,26 @@ func (m Model) rows() []row {
 		sort.SliceStable(rows, func(i, j int) bool { return rows[i].selectionKey() < rows[j].selectionKey() })
 	}
 	return m.filtered(rows)
+}
+
+func (m Model) configurationValidationLabel() string {
+	if !m.ConfigValidationDisplay.Attempted {
+		return "Not validated"
+	}
+	if m.ConfigValidationDisplay.Valid {
+		return "Valid"
+	}
+	return "Invalid"
+}
+
+func (m Model) configurationValidationSeverity() rowSeverity {
+	if !m.ConfigValidationDisplay.Attempted {
+		return rowSeverityInfo
+	}
+	if m.ConfigValidationDisplay.Valid {
+		return rowSeveritySuccess
+	}
+	return rowSeverityError
 }
 
 func (m Model) attentionRows() []row {

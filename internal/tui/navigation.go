@@ -10,7 +10,6 @@ type navigationKind int
 
 const (
 	navigationView navigationKind = iota
-	navigationConfiguration
 	navigationAction
 )
 
@@ -32,7 +31,7 @@ func navigationEntries(m Model) []navigationEntry {
 		{Key: "global", Label: "Global", Section: "Workspaces", Kind: navigationView, View: ViewWorkspaces, Scope: Scope{Level: "workspace-global"}},
 		{Key: "agents", Label: "Agents", Section: "Workspaces", Kind: navigationView, View: ViewWorkspaces, Scope: Scope{Level: "workspace-agents"}},
 		{Key: "projects", Label: "Projects", Section: "Workspaces", Kind: navigationView, View: ViewWorkspaces, Scope: Scope{Level: "workspace-projects"}},
-		{Key: "configuration", Label: "Configuration", Section: "Tools", Kind: navigationConfiguration},
+		configurationNavigationEntry(),
 		{Key: "add-source", Label: "Add source", Section: "Actions", Kind: navigationAction, Action: uiAddSource},
 		{Key: "create-project", Label: "Create project", Section: "Actions", Kind: navigationAction, Action: uiCreateProject},
 		{Key: "create-preset", Label: "Create preset", Section: "Actions", Kind: navigationAction, Action: uiCreatePreset},
@@ -85,17 +84,26 @@ func (m *Model) enterCommandPalette() {
 func (m Model) activateCommandEntry(entry navigationEntry) (tea.Model, tea.Cmd) {
 	switch entry.Kind {
 	case navigationView:
+		if entry.View == ViewConfiguration {
+			if m.ActiveView == ViewConfiguration && m.Busy {
+				return m, nil
+			}
+			m.switchDestination(entry)
+			m.Busy, m.Status = true, "Loading configuration paths..."
+			return m, configurationCmd(m.ctx, m.service)
+		}
 		m.switchDestination(entry)
 		return m, nil
-	case navigationConfiguration:
-		m.enterConfiguration()
-		return m, configurationCmd(m.ctx, m.service)
 	case navigationAction:
 		m.Mode = ModeTable
 		return m.perform(entry.Action)
 	default:
 		return m, nil
 	}
+}
+
+func configurationNavigationEntry() navigationEntry {
+	return navigationEntry{Key: "configuration", Label: "Configuration", Section: "Tools", Kind: navigationView, View: ViewConfiguration}
 }
 
 func (m *Model) switchDestination(entry navigationEntry) {

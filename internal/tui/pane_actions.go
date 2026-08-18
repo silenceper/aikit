@@ -56,6 +56,8 @@ func (m Model) collectionActions() []string {
 			return []string{"Save"}
 		}
 		return []string{"Create preset"}
+	case ViewConfiguration:
+		return []string{"Validate", "Reload", "Show paths"}
 	case ViewStatus:
 		return []string{"Refresh"}
 	case ViewMigration:

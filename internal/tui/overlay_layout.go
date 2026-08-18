@@ -26,7 +26,7 @@ func (m Model) overlayPanelActions() []string {
 		return []string{"Confirm", "Cancel"}
 	case ModeInput:
 		return []string{"Apply", "Cancel"}
-	case ModeConfiguration, ModeErrorDetail:
+	case ModeErrorDetail:
 		return m.primaryActions()
 	default:
 		return nil

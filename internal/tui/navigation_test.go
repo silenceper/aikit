@@ -174,8 +174,8 @@ func TestToolsAndCommandPaletteMouseUseSameRoutes(t *testing.T) {
 	}
 	next, cmd := m.Update(click(configuration.X, configuration.Y))
 	got := next.(Model)
-	if cmd == nil || got.Mode != ModeConfiguration {
-		t.Fatalf("configuration mouse mode=%s cmd=%v", got.Mode, cmd != nil)
+	if cmd == nil || got.ActiveView != ViewConfiguration || got.Mode != ModeTable || got.hasOverlay() {
+		t.Fatalf("configuration mouse view=%s mode=%s overlay=%v cmd=%v", got.ActiveView, got.Mode, got.hasOverlay(), cmd != nil)
 	}
 
 	m.enterCommandPalette()

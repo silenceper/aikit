@@ -267,7 +267,7 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		if (m.Mode == ModeConfiguration || m.Mode == ModeErrorDetail) && regions.ActionBar.Contains(msg.X, msg.Y) {
+		if m.Mode == ModeErrorDetail && regions.ActionBar.Contains(msg.X, msg.Y) {
 			switch msg.Button {
 			case tea.MouseButtonWheelUp:
 				m.moveActionViewport(-1)
@@ -287,7 +287,7 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		}
-		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft && (m.Mode == ModeConfiguration || m.Mode == ModeErrorDetail) {
+		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft && m.Mode == ModeErrorDetail {
 			for i, rect := range regions.Actions {
 				if rect.Contains(msg.X, msg.Y) {
 					m.Focus, m.ActionIndex = FocusActions, regions.ActionIndexes[i]
@@ -645,7 +645,7 @@ func (pane actionPane) focus() Focus {
 }
 
 func (m Model) hasOverlay() bool {
-	return m.Help || m.Mode == ModeConfiguration || m.Mode == ModeFilter || m.Mode == ModeCommand || m.Mode == ModeConfirm || m.Mode == ModeInput || m.Mode == ModeMore || m.Mode == ModeErrorDetail
+	return m.Help || m.Mode == ModeFilter || m.Mode == ModeCommand || m.Mode == ModeConfirm || m.Mode == ModeInput || m.Mode == ModeMore || m.Mode == ModeErrorDetail
 }
 
 func (m Model) performPrimaryAction(index int) (tea.Model, tea.Cmd) {

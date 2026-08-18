@@ -21,17 +21,6 @@ func (m Model) overlayLines() []string {
 			"r refresh · Ctrl+K configuration · ? help",
 			"Esc back/cancel · Ctrl+Q quit · Ctrl+C emergency quit",
 		}
-	case m.Mode == ModeConfiguration:
-		lines := []string{
-			activeStyle.Render("Configuration"),
-			"Config:  " + firstNonEmpty(m.Config.Config, "Loading..."),
-			"Library: " + firstNonEmpty(m.Config.Library, "Loading..."),
-			"Cache:   " + firstNonEmpty(m.Config.Cache, "Loading..."),
-		}
-		if m.ConfigValidation.Valid {
-			lines = append(lines, "Configuration valid: "+m.ConfigValidation.Path)
-		}
-		return lines
 	case m.Mode == ModeErrorDetail:
 		return []string{activeStyle.Render(firstNonEmpty(m.FullDetailTitle, "Error details")), m.FullError}
 	case m.Mode == ModeConfirm:

@@ -96,11 +96,10 @@ func TestCompactOverlayKeepsTitleAndPrimaryActionsVisible(t *testing.T) {
 		t.Run(fmt.Sprintf("height-%d", height), func(t *testing.T) {
 			m := NewModel(context.Background(), &fakeService{}, &fakeMigration{}, ViewLibrary, ActionNone)
 			m.Snapshot, m.Width, m.Height = testSnapshot(), 80, height
-			m.Mode = ModeConfiguration
-			m.Config = app.ConfigurationDetail{Config: "/config", Library: "/library", Cache: "/cache"}
-			m.ConfigValidation = app.ConfigurationValidation{Path: "/config", Valid: true}
+			m.Mode = ModeErrorDetail
+			m.FullError = "configuration load failed"
 			got := stripANSI(m.ViewString())
-			if !strings.Contains(got, "Configuration") || !strings.Contains(got, "[Validate]") {
+			if !strings.Contains(got, "Error details") || !strings.Contains(got, "[Close]") {
 				t.Fatalf("short overlay lost fixed title/action:\n%s", got)
 			}
 			regions := m.hitRegions()

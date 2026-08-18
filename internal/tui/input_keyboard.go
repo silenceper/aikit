@@ -55,24 +55,6 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	if m.Mode == ModeConfiguration {
-		if key == "esc" {
-			return m.perform(uiCancel)
-		}
-		switch key {
-		case "left", "shift+tab":
-			m.Focus = FocusActions
-			m.moveAction(-1)
-			return m, nil
-		case "right", "tab":
-			m.Focus = FocusActions
-			m.moveAction(1)
-			return m, nil
-		case "enter":
-			return m.performPrimaryAction(m.ActionIndex)
-		}
-		return m, nil
-	}
 	if m.Mode == ModeErrorDetail {
 		if key == "esc" || key == "enter" {
 			return m.perform(uiCancel)
@@ -397,8 +379,7 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m.perform(uiRefresh)
 	case "ctrl+k":
-		m.enterConfiguration()
-		return m, configurationCmd(m.ctx, m.service)
+		return m.activateCommandEntry(configurationNavigationEntry())
 	case "u":
 		m.openUpdates()
 	case "a":

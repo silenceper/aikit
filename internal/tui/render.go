@@ -719,6 +719,8 @@ func (m Model) rowContext(current row) string {
 		return firstNonEmpty(strings.Join(parts, " · "), "Review in Migration")
 	case ViewStatus:
 		return firstNonEmpty(current.Source, current.Detail, "Review status")
+	case ViewConfiguration:
+		return firstNonEmpty(current.Source, current.Detail, current.State)
 	default:
 		return firstNonEmpty(current.Detail, current.Source, current.State)
 	}
@@ -1054,6 +1056,8 @@ func (m Model) collectionTitle() string {
 		label = "Discovered skills"
 	case ViewStatus:
 		label = "Issues"
+	case ViewConfiguration:
+		label = "Configuration"
 	}
 	return m.filteredTitle(label)
 }
@@ -1141,9 +1145,6 @@ func (m Model) primaryActions() []string {
 	}
 	if m.Mode == ModeErrorDetail {
 		return []string{"Close"}
-	}
-	if m.Mode == ModeConfiguration {
-		return []string{"Validate", "Reload", "Show paths", "Close"}
 	}
 	if m.Mode == ModeConfirm {
 		return []string{"Confirm", "Cancel"}
@@ -1348,7 +1349,7 @@ func (m Model) footer() string {
 	if m.Help {
 		return "↑/↓ Scroll   Esc Close"
 	}
-	if m.Mode == ModeConfiguration || m.Mode == ModeMore || m.Mode == ModeErrorDetail {
+	if m.Mode == ModeMore || m.Mode == ModeErrorDetail {
 		return "Esc Close"
 	}
 	if m.Detail && m.Width < 60 {

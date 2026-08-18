@@ -68,7 +68,7 @@ func TestModalConfirmEnterUsesVisibleActionAndMouseParity(t *testing.T) {
 	}
 }
 
-func TestModalInputAndConfigurationResetLeakedMoreState(t *testing.T) {
+func TestModalInputAndConfigurationPageResetLeakedMoreState(t *testing.T) {
 	service := &fakeService{}
 	m := selectedLibraryModel(service)
 	delete(m.Selected, "library:acme/beta")
@@ -123,7 +123,7 @@ func TestModalInputAndConfigurationResetLeakedMoreState(t *testing.T) {
 	m.Mode, m.Focus, m.ActionIndex, m.OverlayScroll = ModeTable, FocusActions, 7, 6
 	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
 	m = next.(Model)
-	if cmd == nil || m.Mode != ModeConfiguration || m.Focus != FocusActions || m.ActionIndex != 0 || m.OverlayScroll != 0 || !strings.Contains(stripANSI(m.ViewString()), "{Validate}") {
+	if cmd == nil || m.ActiveView != ViewConfiguration || m.Mode != ModeTable || m.Focus != FocusList || m.ActionIndex != 0 || m.hasOverlay() {
 		t.Fatalf("configuration inherited state: mode=%s focus=%s action=%d scroll=%d cmd=%v\n%s", m.Mode, m.Focus, m.ActionIndex, m.OverlayScroll, cmd != nil, m.ViewString())
 	}
 }

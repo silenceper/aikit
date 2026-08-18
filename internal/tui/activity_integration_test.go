@@ -217,8 +217,7 @@ func TestActivityResultChoosesTruthfulTerminalStateAndReview(t *testing.T) {
 
 func TestConfigurationReloadChainsIntoOfflineSnapshotActivity(t *testing.T) {
 	service := &fakeService{snapshot: testSnapshot(), configuration: app.ConfigurationDetail{Config: "/tmp/config.yaml"}}
-	m := NewModel(context.Background(), service, &fakeMigration{}, ViewOverview, ActionNone)
-	m.enterConfiguration()
+	m := configurationModel(service)
 	m.ActionIndex = 1 // Reload
 	nextModel, command := m.Update(actionKey(tea.KeyEnter))
 	next := nextModel.(Model)

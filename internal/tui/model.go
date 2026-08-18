@@ -14,12 +14,13 @@ import (
 type View string
 
 const (
-	ViewOverview   View = "overview"
-	ViewLibrary    View = "library"
-	ViewWorkspaces View = "workspaces"
-	ViewPresets    View = "presets"
-	ViewMigration  View = "migration"
-	ViewStatus     View = "status"
+	ViewOverview      View = "overview"
+	ViewLibrary       View = "library"
+	ViewWorkspaces    View = "workspaces"
+	ViewPresets       View = "presets"
+	ViewMigration     View = "migration"
+	ViewStatus        View = "status"
+	ViewConfiguration View = "configuration"
 
 	// Legacy launch aliases are accepted at the command boundary and open the
 	// corresponding subsection of Workspaces.
@@ -60,7 +61,6 @@ const (
 	ModeUpdates         Mode = "updates"
 	ModeScan            Mode = "scan"
 	ModeConfirm         Mode = "confirm"
-	ModeConfiguration   Mode = "configuration"
 	ModeInput           Mode = "input"
 	ModeAddSelect       Mode = "add-select"
 	ModeProjectAgents   Mode = "project-agents"
@@ -104,6 +104,12 @@ const (
 	LibrarySourceGit   LibrarySourceFilter = "git"
 	LibrarySourceLocal LibrarySourceFilter = "local"
 )
+
+type configurationValidationDisplay struct {
+	Attempted bool
+	Valid     bool
+	Message   string
+}
 
 type inputKind string
 
@@ -217,85 +223,86 @@ type Model struct {
 	inventoryCancel context.CancelFunc
 	inventoryEvents <-chan app.InventoryEvent
 
-	ActiveView          View
-	OverviewSection     overviewSectionID
-	Mode                Mode
-	Focus               Focus
-	ActionIndex         int
-	ActionPane          actionPane
-	MorePane            actionPane
-	CommandDraft        string
-	CommandIndex        int
-	NavigationIndex     int
-	Scope               Scope
-	Cursor              int
-	Scroll              int
-	DetailScroll        int
-	OverlayScroll       int
-	errorDetailParent   Mode
-	errorDetailReturn   confirmReturnState
-	Filter              string
-	FilterDraft         string
-	LibraryStateFilter  LibraryStateFilter
-	LibrarySourceFilter LibrarySourceFilter
-	Help                bool
-	Detail              bool
-	Width               int
-	Height              int
-	Status              string
-	Err                 string
-	Activity            Activity
-	Busy                bool
-	MutationBusy        bool
-	activityGeneration  uint64
-	Snapshot            app.Snapshot
-	Scan                app.ScanResult
-	Inventory           InventoryState
-	Selected            map[string]bool
-	Ignored             map[string]bool
-	routePositions      map[string]routePosition
-	overviewPositions   map[overviewSectionID]routePosition
-	Config              app.ConfigurationDetail
-	ConfigValidation    app.ConfigurationValidation
-	SkillDetail         app.SkillDetail
-	Preview             app.MutationPreview
-	PlanPreview         app.Result
-	AddPreview          app.AddPreview
-	Compare             app.CompareResult
-	BatchResult         app.BatchResult
-	ProjectPreview      app.ProjectEditPreview
-	ProjectRegistration app.ProjectRegistrationPreview
-	ProjectResult       app.Result
-	Picker              pickerState
-	RecoveryPreview     app.RecoveryPreview
-	RecoveryResult      app.RecoveryResult
-	FullError           string
-	FullDetailTitle     string
-	UpdateWarnings      []string
-	UpdateFailures      []updatecheck.Result
-	Input               inputState
-	confirm             Action
-	pendingID           string
-	pendingDetailID     string
-	pendingBinding      app.BindingPreviewRequest
-	pendingRemove       app.RemoveRequest
-	pendingScan         app.ScanRequest
-	pendingSync         app.SyncRequest
-	pendingAdd          app.AddRequest
-	pendingPreset       app.PresetMutationRequest
-	pendingBatch        app.BatchRequest
-	pendingUpdate       app.UpdateRequest
-	pendingProject      app.ProjectEditRequest
-	pendingProjectPath  string
-	pendingProjectOpen  string
-	workspaceIntent     string
-	pendingRecovery     app.RecoveryRequest
-	forceAcknowledged   bool
-	filterParent        Mode
-	filterCursor        int
-	filterScroll        int
-	confirmReturn       confirmReturnState
-	confirmReturnReady  bool
+	ActiveView              View
+	OverviewSection         overviewSectionID
+	Mode                    Mode
+	Focus                   Focus
+	ActionIndex             int
+	ActionPane              actionPane
+	MorePane                actionPane
+	CommandDraft            string
+	CommandIndex            int
+	NavigationIndex         int
+	Scope                   Scope
+	Cursor                  int
+	Scroll                  int
+	DetailScroll            int
+	OverlayScroll           int
+	errorDetailParent       Mode
+	errorDetailReturn       confirmReturnState
+	Filter                  string
+	FilterDraft             string
+	LibraryStateFilter      LibraryStateFilter
+	LibrarySourceFilter     LibrarySourceFilter
+	Help                    bool
+	Detail                  bool
+	Width                   int
+	Height                  int
+	Status                  string
+	Err                     string
+	Activity                Activity
+	Busy                    bool
+	MutationBusy            bool
+	activityGeneration      uint64
+	Snapshot                app.Snapshot
+	Scan                    app.ScanResult
+	Inventory               InventoryState
+	Selected                map[string]bool
+	Ignored                 map[string]bool
+	routePositions          map[string]routePosition
+	overviewPositions       map[overviewSectionID]routePosition
+	Config                  app.ConfigurationDetail
+	ConfigValidation        app.ConfigurationValidation
+	ConfigValidationDisplay configurationValidationDisplay
+	SkillDetail             app.SkillDetail
+	Preview                 app.MutationPreview
+	PlanPreview             app.Result
+	AddPreview              app.AddPreview
+	Compare                 app.CompareResult
+	BatchResult             app.BatchResult
+	ProjectPreview          app.ProjectEditPreview
+	ProjectRegistration     app.ProjectRegistrationPreview
+	ProjectResult           app.Result
+	Picker                  pickerState
+	RecoveryPreview         app.RecoveryPreview
+	RecoveryResult          app.RecoveryResult
+	FullError               string
+	FullDetailTitle         string
+	UpdateWarnings          []string
+	UpdateFailures          []updatecheck.Result
+	Input                   inputState
+	confirm                 Action
+	pendingID               string
+	pendingDetailID         string
+	pendingBinding          app.BindingPreviewRequest
+	pendingRemove           app.RemoveRequest
+	pendingScan             app.ScanRequest
+	pendingSync             app.SyncRequest
+	pendingAdd              app.AddRequest
+	pendingPreset           app.PresetMutationRequest
+	pendingBatch            app.BatchRequest
+	pendingUpdate           app.UpdateRequest
+	pendingProject          app.ProjectEditRequest
+	pendingProjectPath      string
+	pendingProjectOpen      string
+	workspaceIntent         string
+	pendingRecovery         app.RecoveryRequest
+	forceAcknowledged       bool
+	filterParent            Mode
+	filterCursor            int
+	filterScroll            int
+	confirmReturn           confirmReturnState
+	confirmReturnReady      bool
 }
 
 func NewModel(ctx context.Context, service app.Service, migration app.MigrationService, initialView View, initialAction Action) Model {
@@ -325,7 +332,7 @@ func NewModel(ctx context.Context, service app.Service, migration app.MigrationS
 }
 
 func validView(view View) bool {
-	if view == ViewMigration || view == ViewStatus || view == ViewWorkspaces {
+	if view == ViewMigration || view == ViewStatus || view == ViewWorkspaces || view == ViewConfiguration {
 		return true
 	}
 	for _, current := range topViews {
@@ -587,6 +594,11 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case configurationValidationMsg:
 		m.Busy = false
 		m.ConfigValidation = msg.result
+		m.ConfigValidationDisplay = configurationValidationDisplay{
+			Attempted: true,
+			Valid:     msg.err == nil && msg.result.Valid,
+			Message:   firstNonEmpty(errorText(msg.err), msg.result.Path),
+		}
 		if msg.err != nil {
 			m.Err, m.Status = msg.err.Error(), "Configuration invalid; review details"
 			return m, nil
