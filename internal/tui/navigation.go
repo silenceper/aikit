@@ -85,7 +85,8 @@ func (m Model) activateCommandEntry(entry navigationEntry) (tea.Model, tea.Cmd) 
 	switch entry.Kind {
 	case navigationView:
 		if entry.View == ViewConfiguration {
-			if m.ActiveView == ViewConfiguration && m.Busy {
+			if m.readingActivityActive() {
+				m.switchDestination(entry)
 				return m, nil
 			}
 			m.switchDestination(entry)

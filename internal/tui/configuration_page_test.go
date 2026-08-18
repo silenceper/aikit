@@ -179,13 +179,20 @@ func TestConfigurationNavigationWhileReading(t *testing.T) {
 		t.Fatalf("reading navigation view=%s cmd=%v", m.ActiveView, navigationCmd != nil)
 	}
 
+	configuration = configurationNavigationRect(t, m, "Configuration")
+	next, duplicate = m.Update(click(configuration.X, configuration.Y))
+	m = next.(Model)
+	if duplicate != nil || m.ActiveView != ViewConfiguration {
+		t.Fatalf("reading re-entry view=%s duplicate cmd=%v", m.ActiveView, duplicate != nil)
+	}
+
 	result := loadCmd()
 	if _, ok := result.(activityResultMsg); !ok {
 		t.Fatalf("configuration load was not generation wrapped: %T", result)
 	}
 	next, _ = m.Update(result)
 	m = next.(Model)
-	if m.ActiveView != ViewLibrary {
+	if m.ActiveView != ViewConfiguration {
 		t.Fatalf("late Configuration result changed route to %s", m.ActiveView)
 	}
 	if m.Config.Config != "/late/config.yaml" {
