@@ -15,6 +15,7 @@
 - Create `internal/tui/activity.go`: activity kinds, review targets, transitions, spinner/expiry messages, rendering text, and shared input classification.
 - Create `internal/tui/activity_test.go`: pure state-machine, timer-generation, marker/color, clipping, and no-fake-progress tests.
 - Create `internal/tui/activity_integration_test.go`: command lifecycle, browsing/submission gates, status focus, keyboard/mouse parity, and typed review routing.
+- Modify `internal/tui/commands.go`: wrap every ordinary asynchronous result in a generation-tagged activity envelope and mark internal refresh messages as silent.
 - Modify `internal/tui/model.go`: store activity/focus history, handle activity messages, and translate command results into terminal activities.
 - Modify `internal/tui/styles.go`: add blue reading, cyan network, and purple mutating semantic styles while retaining adaptive/reduced/no-color behavior.
 - Modify `internal/tui/render.go`: render activity in the framed footer and short phase in the app bar; remove visible `busy`.
@@ -80,10 +81,11 @@ git add internal/tui/activity.go internal/tui/activity_test.go internal/tui/styl
 git commit -m "feat(tui): add semantic activity state"
 ```
 
-### Task 2: Generation-safe spinner and success expiry
+### Task 2: Generation-safe commands, spinner, and success expiry
 
 **Files:**
 - Modify: `internal/tui/activity.go`
+- Modify: `internal/tui/commands.go`
 - Modify: `internal/tui/model.go`
 - Test: `internal/tui/activity_test.go`
 
@@ -91,7 +93,10 @@ git commit -m "feat(tui): add semantic activity state"
 
 Assert spinner tick advances only the matching generation; an old tick cannot
 change a newer activity; success expiry fires after `3*time.Second`; an old
-expiry cannot clear a newer warning or operation.
+expiry cannot clear a newer warning or operation. Wrap a blocked fake snapshot,
+preview, update check, and mutation command; start a newer generation before
+releasing each fake; assert its ordinary result is discarded without changing
+model data, guards, or activity.
 
 - [ ] **Step 2: Run RED test**
 
@@ -101,10 +106,13 @@ Expected: FAIL because messages and transitions are missing.
 
 - [ ] **Step 3: Implement messages and helpers**
 
-Add `activityTickMsg`, `activityExpireMsg`, `activityTickCmd`,
-`activityExpireCmd`, `beginActivity`, `finishActivity`, and generation checks in
-`Model.Update`. Schedule ticks only for reading/network indeterminate activity;
-schedule expiry only for success.
+Add `activityTickMsg`, `activityExpireMsg`, and an `activityResultMsg` envelope
+containing generation plus the original typed `tea.Msg`. `beginActivity` wraps
+the submitted command so every ordinary result carries the same generation.
+`Model.Update` drops a stale envelope before unwrapping it, so stale messages
+cannot mutate model data or clear guards. Add `activityTickCmd`,
+`activityExpireCmd`, `beginActivity`, and `finishActivity`; schedule ticks only
+for reading/network indeterminate activity and expiry only for success.
 
 - [ ] **Step 4: Run GREEN and package tests**
 
@@ -117,7 +125,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add internal/tui/activity.go internal/tui/activity_test.go internal/tui/model.go
+git add internal/tui/activity.go internal/tui/activity_test.go internal/tui/commands.go internal/tui/model.go
 git commit -m "feat(tui): animate and expire activity status"
 ```
 
@@ -226,6 +234,10 @@ Enter precedence, exact stable keys/operation IDs for each review kind, Escape
 dismissal, fallback to the previously valid focus, banner acknowledgement, and
 ordinary row Enter remaining unchanged.
 
+For generic `operationMsg`, assert the model retains the complete `app.Result`
+under the activity generation key. The review target must resolve that exact
+stored result even though `app.Result` has no backend operation ID.
+
 - [ ] **Step 2: Run RED test**
 
 Run: `go test ./internal/tui -run 'TestActivity(StatusFocus|ExactReview|Dismiss)' -count=1`
@@ -234,11 +246,15 @@ Expected: FAIL because `FocusStatus` and exact review dispatch do not exist.
 
 - [ ] **Step 3: Implement closed review dispatch**
 
-Store previous focus when entering status focus. Add status to the Tab cycle
+Store previous focus when entering status focus. Add `OperationResult app.Result`
+and `OperationResultGeneration uint64` to the model; the UI generation is the
+stable key for generic operation results. Add status to the Tab cycle
 only when `ReviewTarget` is non-empty. Dispatch the closed review kind to the
 existing `enterErrorDetail`, batch/result/recovery/status/update/inventory
-views using the stable key. Opening or Escape dismissal clears only the banner,
-not typed model data, and restores the previous valid focus.
+views using the stable key. Generic operation results are rendered through the
+existing full-detail overlay from the stored typed `app.Result`; no callback or
+unkeyed transient message is used. Opening or Escape dismissal clears only the
+banner, not typed model data, and restores the previous valid focus.
 
 - [ ] **Step 4: Run GREEN and parity tests**
 
@@ -275,6 +291,8 @@ update check, sync preview, recovery preview, add, project, preset, batch,
 update/import/adopt, sync, and recovery completion. Assert correct kind/label,
 real progress where available, success/warning/error result, review target, and
 no stale overwrite. Assert partial results are warning rather than success.
+Assert a mutation success/warning followed by its automatic snapshot and
+inventory refresh retains the terminal activity for its full lifetime.
 
 - [ ] **Step 2: Run RED test**
 
@@ -284,10 +302,12 @@ Expected: FAIL because call sites still set only `Busy`/`Status`.
 
 - [ ] **Step 3: Integrate read-only starts and completions**
 
-Use reading for Snapshot/detail/configuration/compare/preview and network for
-explicit update checks or network-enabled add discovery. Inventory updates
-`current/total` from real root events. Clear the in-flight guard on every error,
-cancel, and completion path.
+Use reading for user-started Snapshot/detail/configuration/compare/preview and
+network for explicit update checks or network-enabled add discovery. Inventory
+updates `current/total` from real root events. Clear the in-flight guard on every
+error, cancel, and completion path. Add a `silent` flag to snapshot messages
+used only for automatic post-mutation refresh; silent refresh updates typed
+snapshot data without beginning or finishing visible activity.
 
 - [ ] **Step 4: Integrate mutation starts and completions**
 
@@ -296,6 +316,12 @@ sync, and recovery. Translate aggregate and per-item typed results: committed
 success -> success, partial/issues -> warning with exact review target, error ->
 error with the best typed target. Do not infer completion from an item-level
 `Changed` when aggregate `Changed` is false.
+
+Automatic inventory started by a silent post-mutation snapshot is background
+work. A current success/warning/error has display priority and is not replaced;
+after success expiry, a still-running inventory may publish its real scanning
+progress. Persistent warning/error remains until review/dismiss/new explicit
+operation. Tests cover both refresh completion orders.
 
 - [ ] **Step 5: Run GREEN and package regressions**
 
@@ -336,10 +362,11 @@ only when the build/test exit code is 0.
 
 - [ ] **Step 2: Run real configuration smoke test**
 
-Hash `~/.aikit` files, run `make run`, inspect reading/network/mutation preview,
-navigate while a read-only preview is active, cancel before every mutation,
-exercise warning/error status focus, exit with Ctrl+Q, and verify the before/after
-hash is identical.
+Hash `~/.aikit/config.yaml` and `~/.aikit/library/skills` only, run `make run`,
+inspect reading/network/mutation preview, navigate while a read-only preview is
+active, cancel before every mutation, exercise warning/error status focus, exit
+with Ctrl+Q, and verify those config/library hashes are identical. Do not include
+`~/.aikit/cache`: an explicit update check may legitimately refresh cache data.
 
 - [ ] **Step 3: Review requirements and working tree**
 
