@@ -319,6 +319,15 @@ func TestRenderedActionEndToEndKeyboardMouseParity(t *testing.T) {
 
 func actionIndex(t *testing.T, m Model, label string) int {
 	t.Helper()
+	if m.librarySelectionBarActive() {
+		aliases := map[string]string{
+			"Enable selected": "Enable", "Disable selected": "Disable", "Update selected": "Update",
+			"Remove selected": "Remove", "Clear selection": "Clear",
+		}
+		if replacement, ok := aliases[label]; ok {
+			label = replacement
+		}
+	}
 	for i, action := range testActions(m) {
 		if action == label {
 			return i

@@ -14,6 +14,7 @@ type pickerPurpose string
 
 const (
 	pickerBatchScope             pickerPurpose = "batch-scope"
+	pickerLibraryBatchScope      pickerPurpose = "library-batch-scope"
 	pickerPresetApplyScope       pickerPurpose = "preset-apply-scope"
 	pickerProjectPreset          pickerPurpose = "project-preset"
 	pickerProjectTargetPreset    pickerPurpose = "project-target-preset"
@@ -42,6 +43,15 @@ func (m *Model) enterScopePicker(purpose pickerPurpose, project, preset string, 
 		m.captureConfirmReturn()
 	}
 	choices := m.scopeChoices(project)
+	if purpose == pickerLibraryBatchScope {
+		exact := choices[:0]
+		for _, choice := range choices {
+			if len(choice.Bindings) == 1 {
+				exact = append(exact, choice)
+			}
+		}
+		choices = exact
+	}
 	if purpose == pickerGlobalPresetApplyScope {
 		choices = globalScopeChoices()
 	}
@@ -167,7 +177,7 @@ func (m Model) applyPicker() (tea.Model, tea.Cmd) {
 		}
 	}
 	switch m.Picker.Purpose {
-	case pickerBatchScope:
+	case pickerBatchScope, pickerLibraryBatchScope:
 		ids := m.selectedBatchSkillIDs()
 		m.pendingBatch.Bindings = nil
 		for _, binding := range choice.Bindings {

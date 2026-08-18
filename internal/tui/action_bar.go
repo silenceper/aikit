@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -22,6 +23,40 @@ type actionBarLayout struct {
 	Next          Rect
 	PreviousIndex int
 	NextIndex     int
+}
+
+type librarySelectionBarLayout struct {
+	Text    string
+	Count   Rect
+	Actions actionBarLayout
+}
+
+func layoutLibrarySelectionBar(count int, actions []string, focused bool, selected, width int) librarySelectionBarLayout {
+	result := librarySelectionBarLayout{}
+	if count <= 0 || width <= 0 || len(actions) == 0 {
+		return result
+	}
+	countText := clipPlain(fmt.Sprintf("%d selected", count), width)
+	result.Count = Rect{Width: lipgloss.Width(countText), Height: 1}
+	result.Text = countText
+	offset := result.Count.Width
+	if offset < width {
+		result.Text += actionBarSeparator
+		offset += lipgloss.Width(actionBarSeparator)
+	}
+	if offset >= width {
+		return result
+	}
+	bar := layoutActionBar(actions, focused, selected, width-offset)
+	bar.Bar.X += offset
+	bar.Previous.X += offset
+	bar.Next.X += offset
+	for index := range bar.Buttons {
+		bar.Buttons[index].X += offset
+	}
+	result.Actions = bar
+	result.Text += bar.Text
+	return result
 }
 
 // layoutActionBar is the single source of horizontal action-bar geometry.

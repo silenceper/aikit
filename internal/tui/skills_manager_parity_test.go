@@ -36,8 +36,7 @@ func TestSkillsManagerParityRoutesAreVisibleAndStructured(t *testing.T) {
 		m := NewModel(nil, &fakeService{}, &fakeMigration{}, ViewLibrary, ActionNone)
 		m.Snapshot, m.Width, m.Height = testSnapshot(), 110, 30
 		m.Selected["library:acme/alpha"] = true
-		m, _ = keyboardAction(t, m, actionIndex(t, m, "More"))
-		m.ActionIndex, m.Focus = actionIndex(t, m, "Enable selected"), FocusActions
+		m.ActionIndex, m.Focus = actionIndex(t, m, "Enable selected"), FocusCollectionActions
 		next, cmd := m.Update(actionKey(tea.KeyEnter))
 		m = next.(Model)
 		if cmd != nil {

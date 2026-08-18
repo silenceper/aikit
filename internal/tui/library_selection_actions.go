@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"unicode"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/silenceper/aikit/internal/app"
 	"github.com/silenceper/aikit/internal/library"
 	"github.com/silenceper/aikit/internal/updatecheck"
@@ -47,6 +49,46 @@ func (m Model) librarySelectionActions() []librarySelectionAction {
 	}
 }
 
+func (m Model) librarySelectionBarActive() bool {
+	return m.ActiveView == ViewLibrary && m.Mode == ModeTable && len(m.librarySelectionActions()) > 0
+}
+
+func (m Model) librarySelectionActionLabels() []string {
+	actions := m.librarySelectionActions()
+	labels := make([]string, 0, len(actions))
+	for _, action := range actions {
+		labels = append(labels, renderLibrarySelectionAction(action))
+	}
+	return labels
+}
+
+func (m Model) librarySelectionPlainLabels() []string {
+	actions := m.librarySelectionActions()
+	labels := make([]string, 0, len(actions))
+	for _, action := range actions {
+		labels = append(labels, action.Label)
+	}
+	return labels
+}
+
+func renderLibrarySelectionAction(action librarySelectionAction) string {
+	characters := []rune(action.Label)
+	for index, character := range characters {
+		if unicode.ToLower(character) != action.Mnemonic {
+			continue
+		}
+		prefix, mnemonic, suffix := string(characters[:index]), string(character), string(characters[index+1:])
+		if !action.Enabled {
+			return uiTheme.disabledAction.Render(prefix) + uiTheme.disabledMnemonic.Render(mnemonic) + uiTheme.disabledAction.Render(suffix)
+		}
+		return prefix + uiTheme.actionMnemonic.Render(mnemonic) + suffix
+	}
+	if !action.Enabled {
+		return uiTheme.disabledAction.Render(action.Label)
+	}
+	return action.Label
+}
+
 func (m Model) librarySelectionActionByMnemonic(key string) (librarySelectionAction, bool) {
 	key = strings.ToLower(key)
 	for _, action := range m.librarySelectionActions() {
@@ -55,6 +97,42 @@ func (m Model) librarySelectionActionByMnemonic(key string) (librarySelectionAct
 		}
 	}
 	return librarySelectionAction{}, false
+}
+
+func (m Model) performLibrarySelectionAction(action librarySelectionAction) (tea.Model, tea.Cmd) {
+	if !action.Enabled {
+		m.Status = action.Reason
+		return m, nil
+	}
+	switch action.ID {
+	case selectionClear:
+		m.Selected = make(map[string]bool)
+		m.ActionIndex = 0
+		m.Status = "Library selection cleared"
+		return m, nil
+	case selectionEnable, selectionDisable:
+		operation := app.BatchEnable
+		if action.ID == selectionDisable {
+			operation = app.BatchDisable
+		}
+		m.pendingBatch = app.BatchRequest{Operation: operation}
+		m.enterScopePicker(pickerLibraryBatchScope, "", "", false)
+		return m, nil
+	case selectionUpdate, selectionRemove:
+		operation := app.BatchUpdate
+		if action.ID == selectionRemove {
+			operation = app.BatchRemove
+		}
+		request, err := m.libraryBatchRequest(operation)
+		if err != nil {
+			m.Status = err.Error()
+			return m, nil
+		}
+		m.pendingBatch = request
+		m.confirm, m.Busy, m.Status = ActionBatch, true, "Building exact atomic batch preview..."
+		return m, batchPreviewCmd(m.ctx, m.service, request)
+	}
+	return m, nil
 }
 
 func (m Model) libraryUpdateBatchRequest(ids []string) (app.BatchRequest, error) {

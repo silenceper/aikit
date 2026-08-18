@@ -73,7 +73,6 @@ func TestPickerChoiceDoesNotApplyUntilExplicitAction(t *testing.T) {
 	m := NewModel(nil, service, &fakeMigration{}, ViewLibrary, ActionNone)
 	m.Snapshot, m.Width, m.Height = testSnapshot(), 110, 30
 	m.Selected["library:acme/alpha"] = true
-	m, _ = keyboardAction(t, m, actionIndex(t, m, "More"))
 	m, _ = chooseVisibleAction(t, m, "Enable selected", false)
 	if m.Mode != ModeScopePicker {
 		t.Fatalf("mode=%s, want scope picker", m.Mode)
@@ -125,17 +124,19 @@ func TestStructuredScopePickerLibraryBatchKeyboardMouse(t *testing.T) {
 			m := NewModel(nil, service, &fakeMigration{}, ViewLibrary, ActionNone)
 			m.Snapshot, m.Width, m.Height = testSnapshot(), 110, 30
 			m.Selected["library:acme/alpha"] = true
-			m, _ = keyboardAction(t, m, actionIndex(t, m, "More"))
 			var cmd tea.Cmd
 			m, cmd = chooseVisibleAction(t, m, "Enable selected", mouse)
 			if cmd != nil || m.Mode != ModeScopePicker {
 				t.Fatalf("scope picker mode=%s cmd=%v prompt=%q", m.Mode, cmd != nil, m.Input.Prompt)
 			}
 			view := m.ViewString()
-			for _, want := range []string{"All agents", "Global / codex", "Project / aikit / Common", "Project / aikit / codex"} {
+			for _, want := range []string{"Global / codex", "Project / aikit / Common", "Project / aikit / codex"} {
 				if !strings.Contains(view, want) {
 					t.Fatalf("scope picker missing %q:\n%s", want, view)
 				}
+			}
+			if strings.Contains(view, "All agents") {
+				t.Fatalf("Library batch picker exposed multi-scope All agents:\n%s", view)
 			}
 			for _, forbidden := range []string{"agent:name", "project:name", "project-agent:"} {
 				if strings.Contains(view, forbidden) {

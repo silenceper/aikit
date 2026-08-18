@@ -233,6 +233,11 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	if m.librarySelectionBarActive() && !m.Detail {
+		if action, ok := m.librarySelectionActionByMnemonic(key); ok {
+			return m.performLibrarySelectionAction(action)
+		}
+	}
 	if key == "ctrl+p" || key == ":" {
 		m.enterCommandPalette()
 		return m, nil
@@ -627,6 +632,10 @@ func (m Model) visibleFocusOrder() []Focus {
 		order = append(order, FocusStatus)
 	}
 	compactDetail := layout.DetailPanel.Outer.Empty() && (m.Detail || m.hasPinnedDetail())
+	if compactDetail && m.librarySelectionBarActive() {
+		order = append(order, FocusDetail, FocusCollectionActions)
+		return order
+	}
 	if compactDetail {
 		order = append(order, FocusDetail)
 		if len(m.detailActions()) > 0 {

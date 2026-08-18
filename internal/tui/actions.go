@@ -468,6 +468,12 @@ func (m Model) cancel() (tea.Model, tea.Cmd) {
 		m.pendingDetailID = ""
 		return m, nil
 	}
+	if m.ActiveView == ViewLibrary && m.Mode == ModeTable && m.librarySelectionCount() > 0 {
+		m.Selected = make(map[string]bool)
+		m.ActionIndex = 0
+		m.Status = "Library selection cleared"
+		return m, nil
+	}
 	if m.Mode == ModeUpdates || m.Mode == ModeScan {
 		m.Mode = ModeTable
 		m.Selected = make(map[string]bool)

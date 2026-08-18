@@ -44,20 +44,23 @@ const (
 )
 
 type semanticTheme struct {
-	mode          themeMode
-	appTitle      lipgloss.Style
-	navigation    lipgloss.Style
-	selected      lipgloss.Style
-	muted         lipgloss.Style
-	reading       lipgloss.Style
-	network       lipgloss.Style
-	mutating      lipgloss.Style
-	success       lipgloss.Style
-	warning       lipgloss.Style
-	error         lipgloss.Style
-	badge         lipgloss.Style
-	panelTitle    lipgloss.Style
-	primaryAction lipgloss.Style
+	mode             themeMode
+	appTitle         lipgloss.Style
+	navigation       lipgloss.Style
+	selected         lipgloss.Style
+	muted            lipgloss.Style
+	reading          lipgloss.Style
+	network          lipgloss.Style
+	mutating         lipgloss.Style
+	success          lipgloss.Style
+	warning          lipgloss.Style
+	error            lipgloss.Style
+	badge            lipgloss.Style
+	panelTitle       lipgloss.Style
+	primaryAction    lipgloss.Style
+	actionMnemonic   lipgloss.Style
+	disabledAction   lipgloss.Style
+	disabledMnemonic lipgloss.Style
 }
 
 func adaptive(lightTrue, darkTrue, ansi256, ansi string) lipgloss.TerminalColor {
@@ -97,20 +100,23 @@ func newSemanticTheme(mode themeMode) semanticTheme {
 		return style
 	}
 	return semanticTheme{
-		mode:          mode,
-		appTitle:      base(accent).Bold(true),
-		navigation:    base(muted),
-		selected:      base(accent).Bold(true),
-		muted:         base(muted),
-		reading:       base(blue),
-		network:       base(cyan),
-		mutating:      base(purple).Bold(true),
-		success:       base(green),
-		warning:       base(amber),
-		error:         base(red).Bold(true),
-		badge:         base(muted),
-		panelTitle:    base(accent).Bold(true),
-		primaryAction: base(accent).Bold(true).Underline(true),
+		mode:             mode,
+		appTitle:         base(accent).Bold(true),
+		navigation:       base(muted),
+		selected:         base(accent).Bold(true),
+		muted:            base(muted),
+		reading:          base(blue),
+		network:          base(cyan),
+		mutating:         base(purple).Bold(true),
+		success:          base(green),
+		warning:          base(amber),
+		error:            base(red).Bold(true),
+		badge:            base(muted),
+		panelTitle:       base(accent).Bold(true),
+		primaryAction:    base(accent).Bold(true).Underline(true),
+		actionMnemonic:   base(accent).Bold(true).Underline(true),
+		disabledAction:   base(muted),
+		disabledMnemonic: base(muted).Underline(true),
 	}
 }
 

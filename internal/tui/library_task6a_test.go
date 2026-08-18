@@ -225,18 +225,11 @@ func TestLibraryBatchActionsUseOneConfirmedAppBatchCallWithParity(t *testing.T) 
 		t.Run(tt.label, func(t *testing.T) {
 			keyboardService := &fakeService{}
 			keyboard := selectedLibraryModel(keyboardService)
-			keyboard, _ = keyboardAction(t, keyboard, actionIndex(t, keyboard, "More"))
-			index := actionIndex(t, keyboard, tt.label)
-			for i := 0; i < index; i++ {
-				next, _ := keyboard.Update(actionKey(tea.KeyRight))
-				keyboard = next.(Model)
-			}
-			next, cmd := keyboard.Update(actionKey(tea.KeyEnter))
-			keyboard = next.(Model)
-			if cmd == nil || keyboard.Mode != ModeMore || keyboardService.batchCalls != 0 || keyboard.pendingBatch.Operation != tt.op {
+			keyboard, cmd := keyboardAction(t, keyboard, actionIndex(t, keyboard, tt.label))
+			if cmd == nil || keyboard.Mode != ModeTable || keyboardService.batchCalls != 0 || keyboard.pendingBatch.Operation != tt.op {
 				t.Fatalf("keyboard preview mode=%s op=%s calls=%d cmd=%v", keyboard.Mode, keyboard.pendingBatch.Operation, keyboardService.batchCalls, cmd != nil)
 			}
-			next, _ = keyboard.Update(cmd())
+			next, _ := keyboard.Update(cmd())
 			keyboard = next.(Model)
 			if keyboard.Mode != ModeConfirm || keyboardService.previewBatchCalls != 1 {
 				t.Fatalf("keyboard preview mode=%s calls=%d", keyboard.Mode, keyboardService.previewBatchCalls)
@@ -244,10 +237,7 @@ func TestLibraryBatchActionsUseOneConfirmedAppBatchCallWithParity(t *testing.T) 
 
 			mouseService := &fakeService{}
 			mouse := selectedLibraryModel(mouseService)
-			mouse, _ = mouseAction(t, mouse, actionIndex(t, mouse, "More"))
-			regions := mouse.hitRegions()
-			next, cmd = mouse.Update(click(regions.Actions[index].X, regions.Actions[index].Y))
-			mouse = next.(Model)
+			mouse, cmd = mouseAction(t, mouse, actionIndex(t, mouse, tt.label))
 			if cmd == nil || mouseService.batchCalls != 0 || !reflect.DeepEqual(mouse.pendingBatch, keyboard.pendingBatch) {
 				t.Fatalf("mouse preview=%+v keyboard=%+v calls=%d cmd=%v", mouse.pendingBatch, keyboard.pendingBatch, mouseService.batchCalls, cmd != nil)
 			}
@@ -299,14 +289,7 @@ func TestBatchEnableDisableRequireExactScopeChoiceAndPreview(t *testing.T) {
 		t.Run(tt.label+"_"+tt.choice, func(t *testing.T) {
 			service := &fakeService{batchPreview: app.BatchPreview{MutationPreview: app.MutationPreview{Title: "Batch preview", Summary: "Exact target", AffectedScopes: []config.Scope{{Project: tt.wantProject, Agent: tt.wantAgent}}, RequiresConfirmation: true}}}
 			m := selectedLibraryModel(service)
-			m, _ = keyboardAction(t, m, actionIndex(t, m, "More"))
-			index := actionIndex(t, m, tt.label)
-			for i := 0; i < index; i++ {
-				next, _ := m.Update(actionKey(tea.KeyRight))
-				m = next.(Model)
-			}
-			next, cmd := m.Update(actionKey(tea.KeyEnter))
-			m = next.(Model)
+			m, cmd := keyboardAction(t, m, actionIndex(t, m, tt.label))
 			if cmd != nil || m.Mode != ModeScopePicker || service.previewBatchCalls != 0 || service.batchCalls != 0 {
 				t.Fatalf("scope choice mode=%s cmd=%v preview=%d batch=%d", m.Mode, cmd != nil, service.previewBatchCalls, service.batchCalls)
 			}
@@ -314,7 +297,7 @@ func TestBatchEnableDisableRequireExactScopeChoiceAndPreview(t *testing.T) {
 			if preview == nil || service.previewBatchCalls != 0 {
 				t.Fatalf("binding preview cmd=%v calls=%d", preview != nil, service.previewBatchCalls)
 			}
-			next, _ = m.Update(preview())
+			next, _ := m.Update(preview())
 			m = next.(Model)
 			if service.previewBatchCalls != 1 || m.Mode != ModeConfirm || len(m.pendingBatch.Bindings) != 2 || !strings.Contains(m.ViewString(), tt.wantScope) {
 				t.Fatalf("preview calls=%d mode=%s bindings=%+v\n%s", service.previewBatchCalls, m.Mode, m.pendingBatch.Bindings, m.ViewString())
@@ -335,20 +318,10 @@ func TestBatchEnableDisableRequireExactScopeChoiceAndPreview(t *testing.T) {
 func TestBatchScopeChoiceEntryKeyboardMouseParity(t *testing.T) {
 	for _, label := range []string{"Enable selected", "Disable selected"} {
 		base := selectedLibraryModel(&fakeService{})
-		keyboard, _ := keyboardAction(t, base, actionIndex(t, base, "More"))
-		index := actionIndex(t, keyboard, label)
-		for i := 0; i < index; i++ {
-			next, _ := keyboard.Update(actionKey(tea.KeyRight))
-			keyboard = next.(Model)
-		}
-		next, keyboardCmd := keyboard.Update(actionKey(tea.KeyEnter))
-		keyboard = next.(Model)
+		keyboard, keyboardCmd := keyboardAction(t, base, actionIndex(t, base, label))
 
 		mouse := selectedLibraryModel(&fakeService{})
-		mouse, _ = mouseAction(t, mouse, actionIndex(t, mouse, "More"))
-		regions := mouse.hitRegions()
-		next, mouseCmd := mouse.Update(click(regions.Actions[index].X, regions.Actions[index].Y))
-		mouse = next.(Model)
+		mouse, mouseCmd := mouseAction(t, mouse, actionIndex(t, mouse, label))
 		if keyboardCmd != nil || mouseCmd != nil || keyboard.Mode != mouse.Mode || keyboard.Input.Kind != mouse.Input.Kind || keyboard.pendingBatch.Operation != mouse.pendingBatch.Operation {
 			t.Fatalf("scope choice parity keyboard=(%s,%s,%s) mouse=(%s,%s,%s)", keyboard.Mode, keyboard.Input.Kind, keyboard.pendingBatch.Operation, mouse.Mode, mouse.Input.Kind, mouse.pendingBatch.Operation)
 		}
@@ -360,18 +333,11 @@ func TestBatchRemoveAggregatesPreviewsAndRequiresSecondForceConfirmation(t *test
 		batchPreview: app.BatchPreview{MutationPreview: app.MutationPreview{Title: "Remove selected", Summary: "Exact references", References: []string{"agent:codex", "project:aikit:common"}, RequiresForce: true, RequiresConfirmation: true}},
 	}
 	m := selectedLibraryModel(service)
-	m, _ = keyboardAction(t, m, actionIndex(t, m, "More"))
-	index := actionIndex(t, m, "Remove selected")
-	for i := 0; i < index; i++ {
-		next, _ := m.Update(actionKey(tea.KeyRight))
-		m = next.(Model)
-	}
-	next, preview := m.Update(actionKey(tea.KeyEnter))
-	m = next.(Model)
+	m, preview := keyboardAction(t, m, actionIndex(t, m, "Remove selected"))
 	if preview == nil || service.previewBatchCalls != 0 || service.batchCalls != 0 {
 		t.Fatalf("remove preview cmd=%v previewCalls=%d batchCalls=%d", preview != nil, service.previewBatchCalls, service.batchCalls)
 	}
-	next, _ = m.Update(preview())
+	next, _ := m.Update(preview())
 	m = next.(Model)
 	if service.previewBatchCalls != 1 || m.Mode != ModeConfirm || m.pendingBatch.Force {
 		t.Fatalf("preview calls=%d mode=%s pending=%+v", service.previewBatchCalls, m.Mode, m.pendingBatch)
@@ -408,27 +374,20 @@ func TestBatchUpdateRejectsHiddenInvalidSelectionBeforeConfirmation(t *testing.T
 			m.Snapshot.Updates.Results[i].Remote = ""
 		}
 	}
-	m, _ = keyboardAction(t, m, actionIndex(t, m, "More"))
-	if strings.Contains(strings.Join(m.primaryActions(), " "), "Update selected") || m.Mode != ModeMore || service.batchCalls != 0 {
-		t.Fatalf("invalid hidden update exposed: mode=%s actions=%v calls=%d", m.Mode, m.primaryActions(), service.batchCalls)
+	actions := m.librarySelectionActions()
+	if actions[2].Enabled || !strings.Contains(actions[2].Reason, "acme/beta") || service.batchCalls != 0 {
+		t.Fatalf("invalid hidden update exposed: action=%+v calls=%d", actions[2], service.batchCalls)
 	}
 }
 
 func TestBatchUpdateExpectedContainsFullCurrentRemoteAndRef(t *testing.T) {
 	service := &fakeService{}
 	m := selectedLibraryModel(service)
-	m, _ = keyboardAction(t, m, actionIndex(t, m, "More"))
-	index := actionIndex(t, m, "Update selected")
-	for i := 0; i < index; i++ {
-		next, _ := m.Update(actionKey(tea.KeyRight))
-		m = next.(Model)
-	}
-	next, cmd := m.Update(actionKey(tea.KeyEnter))
-	m = next.(Model)
-	if cmd == nil || m.Mode != ModeMore {
+	m, cmd := keyboardAction(t, m, actionIndex(t, m, "Update selected"))
+	if cmd == nil || m.Mode != ModeTable {
 		t.Fatalf("valid update mode=%s cmd=%v err=%q", m.Mode, cmd != nil, m.Err)
 	}
-	next, _ = m.Update(cmd())
+	next, _ := m.Update(cmd())
 	m = next.(Model)
 	if m.Mode != ModeConfirm || service.previewBatchCalls != 1 {
 		t.Fatalf("valid update preview mode=%s calls=%d", m.Mode, service.previewBatchCalls)

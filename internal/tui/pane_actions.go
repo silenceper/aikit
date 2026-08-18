@@ -32,6 +32,9 @@ func (m Model) collectionActions() []string {
 		}
 		return m.overviewSectionActions(m.OverviewSection)
 	case ViewLibrary:
+		if m.librarySelectionBarActive() {
+			return m.librarySelectionPlainLabels()
+		}
 		return []string{"Add source", "More"}
 	case ViewWorkspaces:
 		switch m.Scope.Level {

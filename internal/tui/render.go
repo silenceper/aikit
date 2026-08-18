@@ -56,8 +56,8 @@ func (m Model) renderFramedShell(layout Layout) string {
 		if m.Mode != ModeTable {
 			collectionActions, detailActions = m.primaryActions(), nil
 		}
-		collectionAction := m.renderPaneActionBar(collectionActions, layout.CollectionPanel.Actions.Width, m.Focus == FocusCollectionActions)
-		if layout.DetailPanel.Outer.Empty() && (m.Detail || m.hasPinnedDetail()) {
+		collectionAction := m.renderCollectionActionBar(collectionActions, layout.CollectionPanel.Actions.Width, m.Focus == FocusCollectionActions)
+		if layout.DetailPanel.Outer.Empty() && (m.Detail || m.hasPinnedDetail()) && !m.librarySelectionBarActive() {
 			collectionAction = m.renderPaneActionBar(detailActions, layout.CollectionPanel.Actions.Width, false)
 		}
 		groups = append(groups, positionedLines{X: layout.CollectionPanel.Outer.X, Y: layout.CollectionPanel.Outer.Y, Lines: renderPanel(layout.CollectionPanel, collectionTitle, m.Focus == FocusList || m.Focus == FocusCollectionActions, collectionBody, collectionAction, glyphs)})
@@ -226,7 +226,7 @@ func (m Model) renderLowHeightShell(layout Layout) string {
 	panel := layout.CollectionPanel
 	actions := m.collectionActions()
 	actionsFocused := m.Focus == FocusCollectionActions
-	if m.Detail || m.hasPinnedDetail() {
+	if (m.Detail || m.hasPinnedDetail()) && !m.librarySelectionBarActive() {
 		actions = m.detailActions()
 		actionsFocused = m.Focus == FocusDetailActions
 	}
@@ -234,7 +234,11 @@ func (m Model) renderLowHeightShell(layout Layout) string {
 		actions = m.primaryActions()
 		actionsFocused = m.Focus == FocusActions
 	}
-	panelLines := renderPanel(panel, title, true, body, m.renderPaneActionBar(actions, panel.Actions.Width, actionsFocused), glyphs)
+	actionBar := m.renderPaneActionBar(actions, panel.Actions.Width, actionsFocused)
+	if m.librarySelectionBarActive() && m.Mode == ModeTable {
+		actionBar = m.renderCollectionActionBar(actions, panel.Actions.Width, actionsFocused)
+	}
+	panelLines := renderPanel(panel, title, true, body, actionBar, glyphs)
 	groups := []positionedLines{{X: panel.Outer.X, Y: panel.Outer.Y, Lines: panelLines}}
 	if m.hasOverlay() {
 		overlay, lines := m.renderFramedOverlay(layout, glyphs)
@@ -1019,6 +1023,13 @@ func (m Model) renderActionBar(width int) string {
 
 func (m Model) renderPaneActionBar(actions []string, width int, focused bool) string {
 	return layoutActionBar(actions, focused, m.ActionIndex, width).Text
+}
+
+func (m Model) renderCollectionActionBar(actions []string, width int, focused bool) string {
+	if !m.librarySelectionBarActive() {
+		return m.renderPaneActionBar(actions, width, focused)
+	}
+	return layoutLibrarySelectionBar(m.librarySelectionCount(), m.librarySelectionActionLabels(), focused, m.ActionIndex, width).Text
 }
 
 func (m Model) detailTitle() string {

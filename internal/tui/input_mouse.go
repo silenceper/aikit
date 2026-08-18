@@ -155,17 +155,37 @@ func (m Model) hitRegions() HitRegions {
 		collectionArea, detailArea := layout.CollectionPanel.Actions, layout.DetailPanel.Actions
 		collectionActions, detailActions := m.collectionActions(), m.detailActions()
 		if detailArea.Empty() {
-			if m.Detail || m.hasPinnedDetail() {
+			if (m.Detail || m.hasPinnedDetail()) && !m.librarySelectionBarActive() {
 				detailArea, collectionArea = collectionArea, Rect{}
 			} else {
 				detailActions = nil
 			}
 		}
-		regions.CollectionActions = paneActionHitRegions(collectionArea, collectionActions, m.Focus == FocusCollectionActions, m.ActionIndex)
+		regions.CollectionActions = m.collectionActionHitRegions(collectionArea, collectionActions, m.Focus == FocusCollectionActions, m.ActionIndex)
 		regions.DetailActions = paneActionHitRegions(detailArea, detailActions, m.Focus == FocusDetailActions, m.ActionIndex)
 		regions.populateLegacyActions(m.primaryActions(), collectionActions, detailActions)
 	}
 	return regions
+}
+
+func (m Model) collectionActionHitRegions(area Rect, actions []string, focused bool, selected int) PaneActionRegions {
+	if !m.librarySelectionBarActive() {
+		return paneActionHitRegions(area, actions, focused, selected)
+	}
+	result := PaneActionRegions{PreviousIndex: -1, NextIndex: -1}
+	if area.Empty() {
+		return result
+	}
+	bar := layoutLibrarySelectionBar(m.librarySelectionCount(), m.librarySelectionActionLabels(), focused, selected, area.Width).Actions
+	result.Bar = Rect{X: area.X, Y: area.Y, Width: area.Width, Height: 1}
+	result.Previous = translateRect(bar.Previous, area.X, area.Y)
+	result.Next = translateRect(bar.Next, area.X, area.Y)
+	result.PreviousIndex, result.NextIndex = bar.PreviousIndex, bar.NextIndex
+	result.Indexes = append(result.Indexes, bar.ButtonIndexes...)
+	for _, button := range bar.Buttons {
+		result.Buttons = append(result.Buttons, translateRect(button, area.X, area.Y))
+	}
+	return result
 }
 
 func paneActionHitRegions(area Rect, actions []string, focused bool, selected int) PaneActionRegions {
@@ -630,6 +650,12 @@ func (m Model) performPrimaryAction(index int) (tea.Model, tea.Cmd) {
 	actions := m.currentActions()
 	if index < 0 || index >= len(actions) {
 		return m, nil
+	}
+	if m.librarySelectionBarActive() && m.Mode == ModeTable && (m.Focus == FocusCollectionActions || m.ActionPane == actionPaneCollection) {
+		selectionActions := m.librarySelectionActions()
+		if index < len(selectionActions) {
+			return m.performLibrarySelectionAction(selectionActions[index])
+		}
 	}
 	if m.ActiveView == ViewOverview && m.OverviewSection == overviewHealth && (actions[index] == "Open" || actions[index] == "Adopt" || actions[index] == "Sync preview" || actions[index] == "Review recovery") {
 		return m.beginOverviewHealthAction(actions[index])
