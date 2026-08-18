@@ -21,6 +21,7 @@
 - Modify `internal/tui/input_mouse.go`: use the same contextual layout and action indexes for hit testing.
 - Modify `internal/tui/input_keyboard.go`: mnemonic precedence, disabled dispatch, and selection-aware Esc.
 - Modify `internal/tui/actions.go`: ID-based dispatch and existing exact scope/preview reuse.
+- Modify `internal/tui/scope_picker.go`: add a Library batch picker purpose that exposes only single-binding exact scopes.
 - Modify `internal/tui/model.go`: retain selection on batch error/partial; clear only on complete success.
 - Modify `internal/tui/styles.go`: mnemonic and disabled styles with a non-color fallback.
 - Modify existing focused tests only where they intentionally assert the old hidden-`More` workflow.
@@ -115,6 +116,8 @@ For widths 24, 38, 59, 80, and 120, assert:
 - separators, clipped cells, and unused space are no-ops;
 - keyboard paging and pure mouse page controls/wheel can reach Clear from default index zero at 24 columns; and
 - long ASCII, CJK, and emoji row names remain bounded with the state column visible.
+- partial/error BatchResult detail at all target widths does not replace the
+  retained Library selection bar in render or hit geometry.
 
 - [ ] **Step 2: Run geometry tests and observe RED**
 
@@ -140,6 +143,11 @@ Reserve display cells for `N selected`, lay out paged actions in the remaining w
 
 When selection is non-empty, Library `collectionActions()` returns typed labels instead of `Add source`/`More`. Render the mnemonic character inside each word using the semantic theme and disabled labels dimmed. `NO_COLOR` retains underline/focus markers. Do not change `ComputeLayout`.
 
+In compact layouts, make a non-empty Library selection bar take precedence over
+pinned BatchResult detail actions in both `renderFramedShell` and `hitRegions`.
+Do not hide the result itself; only preserve collection action ownership so a
+failed/partial batch remains retryable.
+
 - [ ] **Step 4: Run geometry, rendering, mouse, and package tests**
 
 ```bash
@@ -162,6 +170,7 @@ git commit -m "feat(tui): show contextual Library batch actions"
 - Modify: `internal/tui/input_keyboard.go`
 - Modify: `internal/tui/input_mouse.go`
 - Modify: `internal/tui/actions.go`
+- Modify: `internal/tui/scope_picker.go`
 - Modify: `internal/tui/library_selection_actions_test.go`
 
 - [ ] **Step 1: Write failing end-to-end input tests**
@@ -172,6 +181,8 @@ Use real `tea.KeyMsg` and `tea.MouseMsg` updates to prove:
 - mnemonics do not override filter/input/overlay/detail behavior or ordinary row shortcuts with zero selection;
 - disabled Update via mnemonic, Enter, or mouse makes zero `PreviewBatch`/`Batch` calls and reports the same exact reason;
 - Enable/Disable enter the exact scope picker and do not submit before scope preview and confirmation;
+- the Library batch scope picker never contains `All agents`, every choice has
+  exactly one Binding, and every selected skill is expanded into that one scope;
 - Clear performs no backend call; and
 - Esc closes overlay/detail first, then clears selection while staying in Library, then performs normal back on the next Esc.
 
@@ -185,7 +196,13 @@ Expected: FAIL because mnemonic and selection-aware cancellation are absent.
 
 - [ ] **Step 3: Implement ID-based shared dispatch**
 
-Before legacy label dispatch in `performPrimaryAction`, detect the Library contextual bar and map the selected index to a descriptor ID. Disabled descriptors return no command after setting warning activity/status. Enabled IDs reuse the existing scope picker, `libraryBatchRequest`, `batchPreviewCmd`, and local clear paths.
+Before legacy label dispatch in `performPrimaryAction`, detect the Library contextual bar and map the selected index to a descriptor ID. Disabled descriptors return no command after setting only the ordinary replaceable `Status` hint; they must not create `ActivityWarning` or a `ReviewTarget`. Selection changes, Clear, or the next enabled action replace that hint. Enabled IDs reuse `libraryBatchRequest`, `batchPreviewCmd`, and local clear paths.
+
+Add a dedicated `pickerLibraryBatchScope` purpose. Its choices are the existing
+global-agent, project-common, and project-agent entries filtered to exactly one
+Binding, explicitly excluding `All agents`. Applying it expands the one chosen
+binding across the complete selected stable-ID set and then issues one
+`PreviewBatch`.
 
 In `updateKey`, after overlay/input/filter/detail guards and before ordinary table shortcuts, map `e/d/u/r/c` to the same descriptor dispatch. Add Library selection clearing to `cancel()` after overlay/detail cancellation but before route/back behavior.
 
@@ -201,7 +218,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add internal/tui/input_keyboard.go internal/tui/input_mouse.go internal/tui/actions.go internal/tui/library_selection_actions_test.go
+git add internal/tui/input_keyboard.go internal/tui/input_mouse.go internal/tui/actions.go internal/tui/scope_picker.go internal/tui/library_selection_actions_test.go
 git commit -m "feat(tui): unify Library batch input"
 ```
 
@@ -305,4 +322,3 @@ Expected: production changes are confined to `internal/tui`; no app API, config 
 git add internal/tui
 git commit -m "test(tui): verify Library multi-select actions"
 ```
-

@@ -66,8 +66,10 @@ dispatch all consume the same ordered model. Labels are presentation only and
 must not be used as dispatch identities.
 
 Disabled actions remain visible and focusable. Activating one performs no
-backend call and writes its precise reason into the semantic activity/status
-line. Examples include an update selection containing a local skill, a remote
+backend call and writes its precise reason into the ordinary replaceable Status
+hint. It does not create a persistent warning Activity or ReviewTarget. The
+hint is replaced when selection changes, Clear runs, or another action starts.
+Examples include an update selection containing a local skill, a remote
 skill without a branch ref, or a skill without a complete checked remote
 identity.
 
@@ -83,6 +85,10 @@ exact scope input/choice flow. The chosen target must be one of:
 - `agent:<agent>`;
 - `project:<project>` for project common bindings; or
 - `project-agent:<project>:<agent>`.
+
+Multi-target choices such as `All agents` are not offered for this Library
+batch flow. Every chosen picker entry contains exactly one binding scope; the
+TUI expands that one scope across all selected skill IDs.
 
 Every selected skill is previewed against that same exact scope. The typed
 preview is shown before a single atomic `app.Batch` request is submitted.
@@ -134,6 +140,11 @@ The count and page controls participate in the shared render/hit geometry.
 Separators and unused cells remain no-ops. Long ASCII, CJK, and emoji skill names
 are clipped by display cells without changing the action row, list height,
 detail boundary, or state column.
+
+When a partial/error batch result pins detail content in a compact layout, a
+non-empty Library selection action bar retains ownership of the collection
+action row. Result detail remains scrollable/openable, but it must not replace
+or hide the actions needed to retry, adjust, or Clear the retained selection.
 
 ## Escape and completion behavior
 
