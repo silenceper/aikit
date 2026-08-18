@@ -459,7 +459,7 @@ func TestResponsiveMetricsRangeAndNavigationStayLegible(t *testing.T) {
 	}
 
 	labels := layoutNavigation(ComputeLayout(80, 20), topViews, ViewLibrary)
-	if labels[2].Label != "Presets" || labels[3].Label != "Status" {
+	if len(labels) != 3 || labels[2].Label != "Presets" {
 		t.Fatalf("compact navigation labels=%+v", labels)
 	}
 

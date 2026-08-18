@@ -29,11 +29,9 @@ func navigationEntries(m Model) []navigationEntry {
 		{Key: "overview", Label: "Overview", Section: "Main", Kind: navigationView, View: ViewOverview},
 		{Key: "library", Label: "Library", Section: "Main", Kind: navigationView, View: ViewLibrary},
 		{Key: "presets", Label: "Presets", Section: "Main", Kind: navigationView, View: ViewPresets},
-		{Key: "status", Label: "Status", Section: "Main", Kind: navigationView, View: ViewStatus},
 		{Key: "global", Label: "Global", Section: "Workspaces", Kind: navigationView, View: ViewWorkspaces, Scope: Scope{Level: "workspace-global"}},
 		{Key: "agents", Label: "Agents", Section: "Workspaces", Kind: navigationView, View: ViewWorkspaces, Scope: Scope{Level: "workspace-agents"}},
 		{Key: "projects", Label: "Projects", Section: "Workspaces", Kind: navigationView, View: ViewWorkspaces, Scope: Scope{Level: "workspace-projects"}},
-		{Key: "migration", Label: "Migration", Section: "Tools", Kind: navigationView, View: ViewMigration},
 		{Key: "configuration", Label: "Configuration", Section: "Tools", Kind: navigationConfiguration},
 		{Key: "add-source", Label: "Add source", Section: "Actions", Kind: navigationAction, Action: uiAddSource},
 		{Key: "create-project", Label: "Create project", Section: "Actions", Kind: navigationAction, Action: uiCreateProject},
@@ -45,9 +43,29 @@ func navigationEntries(m Model) []navigationEntry {
 	return entries
 }
 
+func commandNavigationEntries(m Model) []navigationEntry {
+	entries := navigationEntries(m)
+	advanced := []navigationEntry{
+		{Key: "status", Label: "Review health details", Section: "Tools", Kind: navigationView, View: ViewStatus},
+		{Key: "migration", Label: "Review local skill imports", Section: "Tools", Kind: navigationView, View: ViewMigration},
+	}
+	insertAt := len(entries)
+	for i, entry := range entries {
+		if entry.Section == "Actions" {
+			insertAt = i
+			break
+		}
+	}
+	result := make([]navigationEntry, 0, len(entries)+len(advanced))
+	result = append(result, entries[:insertAt]...)
+	result = append(result, advanced...)
+	result = append(result, entries[insertAt:]...)
+	return result
+}
+
 func (m Model) commandEntries() []navigationEntry {
 	query := strings.ToLower(strings.TrimSpace(m.CommandDraft))
-	entries := navigationEntries(m)
+	entries := commandNavigationEntries(m)
 	result := make([]navigationEntry, 0, len(entries))
 	for _, entry := range entries {
 		if query == "" || strings.Contains(strings.ToLower(entry.Label), query) || strings.Contains(strings.ToLower(entry.Section), query) {

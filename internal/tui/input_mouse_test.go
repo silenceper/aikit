@@ -259,22 +259,23 @@ func TestMouseTabsRowsCheckboxWheelAndKeyboardParity(t *testing.T) {
 	base.Width, base.Height = 100, 20
 
 	regions := base.hitRegions()
-	var migration Rect
+	var projects Rect
 	for _, item := range regions.Navigation {
-		if item.Entry.View == ViewMigration {
-			migration = item.Rect
+		if item.Entry.Label == "Projects" {
+			projects = item.Rect
 		}
 	}
-	mouseNext, _ := base.Update(click(migration.X, migration.Y))
+	mouseNext, _ := base.Update(click(projects.X, projects.Y))
 	keyboard := base
 	keyboard.enterCommandPalette()
-	keyboard.CommandDraft = "migration"
+	keyboard.CommandDraft = "projects"
 	keyboardNext, _ := keyboard.Update(key("enter"))
-	if mouseNext.(Model).ActiveView != keyboardNext.(Model).ActiveView || mouseNext.(Model).ActiveView != ViewMigration {
+	if mouseNext.(Model).ActiveView != keyboardNext.(Model).ActiveView || mouseNext.(Model).Scope.Level != "workspace-projects" {
 		t.Fatalf("tab parity mouse=%s keyboard=%s", mouseNext.(Model).ActiveView, keyboardNext.(Model).ActiveView)
 	}
 
-	m := mouseNext.(Model)
+	m := base
+	m.switchView(ViewMigration)
 	regions = m.hitRegions()
 	next, _ := m.Update(click(regions.Rows[1].X+2, regions.Rows[1].Y))
 	m = next.(Model)

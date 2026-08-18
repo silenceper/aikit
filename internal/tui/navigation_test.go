@@ -10,20 +10,20 @@ import (
 )
 
 func TestPermanentNavigationAndToolsAreSeparated(t *testing.T) {
-	want := []View{ViewOverview, ViewLibrary, ViewPresets, ViewStatus}
+	want := []View{ViewOverview, ViewLibrary, ViewPresets}
 	if !reflect.DeepEqual(topViews, want) {
 		t.Fatalf("topViews=%v want=%v", topViews, want)
 	}
 	entries := navigationEntries(Model{})
-	if got := entryLabels(entries[:9]); !reflect.DeepEqual(got, []string{"Overview", "Library", "Presets", "Status", "Global", "Agents", "Projects", "Migration", "Configuration"}) {
+	if got := entryLabels(entries[:7]); !reflect.DeepEqual(got, []string{"Overview", "Library", "Presets", "Global", "Agents", "Projects", "Configuration"}) {
 		t.Fatalf("entries=%v", got)
 	}
-	for _, index := range []int{4, 5, 6} {
+	for _, index := range []int{3, 4, 5} {
 		if entries[index].Section != "Workspaces" || entries[index].Scope.Level == "" {
 			t.Fatalf("workspace entry not direct: %+v", entries[index])
 		}
 	}
-	if entries[7].Section != "Tools" || entries[8].Section != "Tools" {
+	if entries[6].Section != "Tools" {
 		t.Fatalf("tools not separated: %+v", entries)
 	}
 }
@@ -106,7 +106,7 @@ func TestWorkspaceLandingNormalizesToProjects(t *testing.T) {
 }
 
 func TestNumericNavigationMatchesMainEntries(t *testing.T) {
-	want := []View{ViewOverview, ViewLibrary, ViewPresets, ViewStatus}
+	want := []View{ViewOverview, ViewLibrary, ViewPresets}
 	for index, view := range want {
 		got, ok := viewKey(string(rune('1' + index)))
 		if !ok || got != view {
@@ -162,25 +162,18 @@ func TestToolsAndCommandPaletteMouseUseSameRoutes(t *testing.T) {
 	m := NewModel(context.Background(), service, &fakeMigration{}, ViewOverview, ActionNone)
 	m.Snapshot, m.Width, m.Height = testSnapshot(), 120, 24
 	regions := m.hitRegions()
-	var migration, configuration Rect
+	var configuration Rect
 	for _, item := range regions.Navigation {
 		switch item.Entry.Label {
-		case "Migration":
-			migration = item.Rect
 		case "Configuration":
 			configuration = item.Rect
 		}
 	}
-	if migration.Empty() || configuration.Empty() {
-		t.Fatalf("tool regions missing: migration=%+v config=%+v", migration, configuration)
+	if configuration.Empty() {
+		t.Fatalf("configuration region missing: config=%+v", configuration)
 	}
-	next, cmd := m.Update(click(migration.X, migration.Y))
+	next, cmd := m.Update(click(configuration.X, configuration.Y))
 	got := next.(Model)
-	if cmd != nil || got.ActiveView != ViewMigration {
-		t.Fatalf("migration mouse view=%s cmd=%v", got.ActiveView, cmd != nil)
-	}
-	next, cmd = m.Update(click(configuration.X, configuration.Y))
-	got = next.(Model)
 	if cmd == nil || got.Mode != ModeConfiguration {
 		t.Fatalf("configuration mouse mode=%s cmd=%v", got.Mode, cmd != nil)
 	}
@@ -195,6 +188,15 @@ func TestToolsAndCommandPaletteMouseUseSameRoutes(t *testing.T) {
 	got = next.(Model)
 	if cmd != nil || got.Mode != ModeInput || got.Input.Kind != inputPresetCreate {
 		t.Fatalf("palette mouse mode=%s kind=%s cmd=%v", got.Mode, got.Input.Kind, cmd != nil)
+	}
+
+	m = NewModel(context.Background(), service, &fakeMigration{}, ViewOverview, ActionNone)
+	m.enterCommandPalette()
+	m.CommandDraft = "review local skill imports"
+	next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got = next.(Model)
+	if cmd != nil || got.ActiveView != ViewMigration {
+		t.Fatalf("retained migration route view=%s cmd=%v", got.ActiveView, cmd != nil)
 	}
 }
 

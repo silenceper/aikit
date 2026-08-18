@@ -27,7 +27,7 @@ const (
 	ViewProjects View = "projects"
 )
 
-var topViews = []View{ViewOverview, ViewLibrary, ViewPresets, ViewStatus}
+var topViews = []View{ViewOverview, ViewLibrary, ViewPresets}
 
 type Action string
 
@@ -319,7 +319,7 @@ func NewModel(ctx context.Context, service app.Service, migration app.MigrationS
 }
 
 func validView(view View) bool {
-	if view == ViewMigration || view == ViewWorkspaces {
+	if view == ViewMigration || view == ViewStatus || view == ViewWorkspaces {
 		return true
 	}
 	for _, current := range topViews {

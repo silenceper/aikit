@@ -13,7 +13,7 @@ func TestRenderFullAndNarrowLayoutsWithStableFooterAndErrors(t *testing.T) {
 	m = next.(Model)
 	m.Err = "fetch failed"
 	full := m.ViewString()
-	for _, wanted := range []string{"Overview", "Library", "Workspaces", "Presets", "Migration", "Status", "alpha", "fetch failed", "/ Search", "? Help"} {
+	for _, wanted := range []string{"Overview", "Library", "Workspaces", "Presets", "Configuration", "alpha", "fetch failed", "/ Search", "? Help"} {
 		if !strings.Contains(full, wanted) {
 			t.Fatalf("full render missing %q:\n%s", wanted, full)
 		}

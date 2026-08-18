@@ -503,8 +503,8 @@ func TestModernNavigationShowsCompactCountsAndAttention(t *testing.T) {
 		width int
 		want  []string
 	}{
-		{120, []string{"Library  2", "Migration  !", "Status  1"}},
-		{80, []string{"Library  2", "Migration  !", "Status  1"}},
+		{120, []string{"Library  2", "Configuration"}},
+		{80, []string{"Library  2", "Configurati"}},
 	} {
 		m.Width, m.Height = tt.width, 20
 		got := stripANSI(m.ViewString())
@@ -576,7 +576,7 @@ func TestRenderNewInformationArchitectureAndDensity(t *testing.T) {
 	m.Width, m.Height = 100, 24
 
 	got := m.ViewString()
-	for _, want := range []string{"Overview", "Library", "Workspaces", "Presets", "Migration", "Status", "Needs attention", "one root failed"} {
+	for _, want := range []string{"Overview", "Library", "Workspaces", "Presets", "Configuration", "Needs attention", "one root failed"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("overview missing %q:\n%s", want, got)
 		}
