@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"reflect"
 	"slices"
 	"strings"
@@ -223,6 +224,34 @@ func TestLibraryBatchScopePickerOffersOnlySingleExactScopes(t *testing.T) {
 		if binding.Agent != "codex" || binding.Project != "" {
 			t.Fatalf("binding is not one exact scope: %+v", binding)
 		}
+	}
+}
+
+func TestLibrarySelectionResultLifecycle(t *testing.T) {
+	tests := []struct {
+		name       string
+		result     app.BatchResult
+		err        error
+		wantSelect bool
+	}{
+		{name: "complete success clears", result: app.BatchResult{Result: app.Result{Changed: true}}},
+		{name: "top-level error retains", err: errors.New("commit failed"), wantSelect: true},
+		{name: "partial retains", result: app.BatchResult{Result: app.Result{Changed: true, Exit: app.ExitPartial}, Issues: []app.OperationIssue{{Item: "acme/beta", Message: "blocked"}}}, wantSelect: true},
+		{name: "typed issue retains", result: app.BatchResult{Result: app.Result{Changed: true}, Issues: []app.OperationIssue{{Item: "acme/beta", Message: "blocked"}}}, wantSelect: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := selectedLibraryModel(&fakeService{})
+			m.MutationBusy, m.Busy = true, true
+			next, _ := m.Update(batchOperationMsg{name: "batch update", result: tt.result, err: tt.err})
+			m = next.(Model)
+			if got := m.librarySelectionCount() > 0; got != tt.wantSelect {
+				t.Fatalf("selected=%d want retained=%v status=%q", m.librarySelectionCount(), tt.wantSelect, m.Status)
+			}
+			if tt.wantSelect && (len(m.BatchResult.Issues) != len(tt.result.Issues) || m.Mode != ModeTable) {
+				t.Fatalf("typed result lost or wrong mode: result=%+v mode=%s", m.BatchResult, m.Mode)
+			}
+		})
 	}
 }
 

@@ -725,7 +725,6 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.Busy, m.MutationBusy = false, false
 		m.BatchResult = msg.result
 		m.Mode, m.confirm = ModeTable, ActionNone
-		m.Selected = make(map[string]bool)
 		m.Preview = app.MutationPreview{}
 		if msg.err != nil {
 			if pending, ok := pendingRecoveryFromError(msg.err); ok {
@@ -743,6 +742,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if len(msg.result.Issues) > 0 || msg.result.Exit == app.ExitPartial {
 			m.Status = fmt.Sprintf("%s completed with %d issue(s); review details", title(msg.name), len(msg.result.Issues))
 		} else {
+			m.Selected = make(map[string]bool)
 			m.Status = title(msg.name) + " completed"
 		}
 		return m, snapshotCmd(m.ctx, m.service)

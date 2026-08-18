@@ -339,8 +339,11 @@ func TestBatchRemoveAggregatesPreviewsAndRequiresSecondForceConfirmation(t *test
 	}
 	next, _ := m.Update(preview())
 	m = next.(Model)
-	if service.previewBatchCalls != 1 || m.Mode != ModeConfirm || m.pendingBatch.Force {
+	if service.previewBatchCalls != 1 || service.previewRemoveCalls != 0 || m.Mode != ModeConfirm || m.pendingBatch.Force {
 		t.Fatalf("preview calls=%d mode=%s pending=%+v", service.previewBatchCalls, m.Mode, m.pendingBatch)
+	}
+	if !reflect.DeepEqual(service.lastBatchPreview.SkillIDs, []string{"acme/alpha", "acme/beta"}) {
+		t.Fatalf("remove preview did not receive complete stable selection: %+v", service.lastBatchPreview)
 	}
 	for _, wanted := range []string{"agent:codex", "project:aikit:common"} {
 		if !strings.Contains(m.ViewString(), wanted) {
