@@ -42,7 +42,12 @@ if got.ActiveView != ViewConfiguration || got.Mode != ModeTable || got.hasOverla
 }
 ```
 
-From that state, click Library and activate Presets with keyboard; assert immediate route changes. Repeat while a Configuration read is in flight (`Busy=true`, `MutationBusy=false`) and ensure both paths still navigate.
+From that state, click Library and activate Presets with keyboard; assert immediate route changes. Open Configuration through the real `Model.Update` path and assert it immediately enters a generation-tagged `ActivityReading` state with `Busy=true`. While that real load is in flight:
+
+- keyboard and mouse navigation to another destination still works;
+- activating Configuration again returns no command;
+- Validate and Reload cannot submit another command;
+- delivering the late generation-tagged load result updates cached detail/activity but does not change the selected destination.
 
 - [ ] **Step 2: Run the focused tests and verify RED**
 
@@ -64,7 +69,7 @@ const ViewConfiguration View = "configuration"
 {Key: "configuration", Label: "Configuration", Section: "Tools", Kind: navigationView, View: ViewConfiguration}
 ```
 
-Have activation call `switchDestination(entry)` and return `configurationCmd`. Change `Ctrl+K` to the same helper. Remove `ModeConfiguration` from `hasOverlay`, overlay-only keyboard/mouse branches, and modal entry helpers. Do not change genuine overlay behavior.
+Have activation call `switchDestination(entry)`, set `Busy=true` plus a specific `Loading configuration paths...` status, and return `configurationCmd`. This lets the existing `Model.Update` transition wrapper create the `ActivityReading` generation envelope. When Configuration is already the active destination and a read is in flight, activation returns no command; the general reading-state keyboard/mouse handlers continue to allow other `navigationView` destinations. Change `Ctrl+K` to the same helper. Remove `ModeConfiguration` from `hasOverlay`, overlay-only keyboard/mouse branches, and modal entry helpers. Do not change genuine overlay behavior.
 
 - [ ] **Step 4: Run focused and package tests**
 
@@ -176,7 +181,7 @@ Test all four states:
 - failed validation: `Invalid` and exact error retained;
 - navigate away and back: last result remains.
 
-For load, Validate, and Reload, start the command, navigate elsewhere using keyboard and mouse before delivering its result, then deliver the late result. Assert cached configuration/validation updates but `ActiveView` remains the destination chosen by the user.
+For load, Validate, and Reload, start each command through the real `Model.Update` activity path, navigate elsewhere using keyboard and mouse before delivering its generation-tagged result, then deliver the late result. Assert cached configuration/validation updates and Activity review/terminal state complete normally, but `ActiveView` remains the destination chosen by the user. Also assert a second activation/action during the in-flight read produces no command and no second backend call.
 
 - [ ] **Step 2: Run tests and verify RED**
 
