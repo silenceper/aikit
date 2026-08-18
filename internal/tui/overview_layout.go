@@ -7,6 +7,8 @@ type overviewLayout struct {
 	Local      PanelLayout
 	Health     PanelLayout
 	SectionBar Rect
+	Previous   Rect
+	Next       Rect
 	Active     overviewSectionID
 	Rows       map[overviewSectionID]visibleRowsLayout
 }
@@ -55,6 +57,11 @@ func (m Model) overviewLayout(shell Layout) overviewLayout {
 	if shell.Narrow {
 		if nextY < outer.Bottom() {
 			result.SectionBar = Rect{X: outer.X, Y: nextY, Width: outer.Width, Height: 1}
+			labelWidth := min(outer.Width, len([]rune(overviewSectionBarLabel(active))))
+			if labelWidth > 0 {
+				result.Previous = Rect{X: outer.X, Y: nextY, Width: 1, Height: 1}
+				result.Next = Rect{X: outer.X + labelWidth - 1, Y: nextY, Width: 1, Height: 1}
+			}
 			nextY++
 		}
 		panel := layoutPanel(Rect{X: outer.X, Y: nextY, Width: outer.Width, Height: max(0, outer.Bottom()-nextY)}, true)

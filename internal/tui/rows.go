@@ -579,6 +579,10 @@ func (m Model) selectedStatusCanSync() bool {
 	if !ok {
 		return false
 	}
+	return statusItemCanSync(item)
+}
+
+func statusItemCanSync(item status.Item) bool {
 	switch item.Kind {
 	case status.Missing, status.LibraryMissing, status.Conflict, status.ScopeConflict, status.OrphanedLink, status.PendingCleanup:
 		return true

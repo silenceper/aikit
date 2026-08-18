@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/silenceper/aikit/internal/app"
+	"github.com/silenceper/aikit/internal/status"
 	"github.com/silenceper/aikit/internal/updatecheck"
 	"github.com/silenceper/aikit/pkg/config"
 )
@@ -143,4 +144,70 @@ func TestOverviewHealthOpensExactRetainedStatusRow(t *testing.T) {
 	if cmd != nil || m.ActiveView != ViewStatus || m.activeKey() != tasks[index].DestinationKey {
 		t.Fatalf("health route view=%s key=%q want=%q", m.ActiveView, m.activeKey(), tasks[index].DestinationKey)
 	}
+}
+
+func TestOverviewHealthActionAdoptsExactUnmanagedTarget(t *testing.T) {
+	migration := &fakeMigration{}
+	m := NewModel(context.Background(), &fakeService{}, migration, ViewOverview, ActionNone)
+	m.Snapshot, m.OverviewSection = testSnapshot(), overviewHealth
+	m.Focus, m.ActionIndex = FocusCollectionActions, 0
+	if got := m.overviewSectionActions(overviewHealth); len(got) == 0 || got[0] != "Adopt" {
+		t.Fatalf("health actions=%v want Adopt first", got)
+	}
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(Model)
+	if cmd == nil || !m.Busy || migration.scanCalls != 0 {
+		t.Fatalf("adopt preview not deferred: busy=%v cmd=%v calls=%d", m.Busy, cmd != nil, migration.scanCalls)
+	}
+	next, _ = m.Update(cmd())
+	m = next.(Model)
+	request := migration.requests[0]
+	if migration.scanCalls != 1 || !request.DryRun || !request.Adopt || request.Project != "aikit" || request.Agent != "codex" || !reflect.DeepEqual(request.Targets, []string{"/work/.codex/skills/loose"}) || m.Mode != ModeConfirm {
+		t.Fatalf("adopt request=%+v mode=%s", request, m.Mode)
+	}
+	next, cancelCmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(Model)
+	if cancelCmd != nil || migration.scanCalls != 1 || m.ActiveView != ViewOverview || m.OverviewSection != overviewHealth {
+		t.Fatalf("cancel changed calls=%d view=%s section=%s", migration.scanCalls, m.ActiveView, m.OverviewSection)
+	}
+}
+
+func TestOverviewHealthActionBuildsSyncAndRecoveryPreviews(t *testing.T) {
+	t.Run("sync", func(t *testing.T) {
+		service := &fakeService{}
+		m := NewModel(context.Background(), service, &fakeMigration{}, ViewOverview, ActionNone)
+		m.Snapshot, m.OverviewSection = testSnapshot(), overviewHealth
+		m.Snapshot.Status.Items = []status.Item{{Kind: status.Missing, Name: "missing", SkillID: "acme/alpha", Path: "/work/.codex/skills/alpha", Scope: config.Scope{Agent: "codex"}}}
+		m.Focus, m.ActionIndex = FocusCollectionActions, 0
+		if got := m.overviewSectionActions(overviewHealth); len(got) == 0 || got[0] != "Sync preview" {
+			t.Fatalf("health actions=%v want Sync preview first", got)
+		}
+		next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		m = next.(Model)
+		if cmd == nil || !m.Busy || service.syncCalls != 0 {
+			t.Fatalf("sync preview not deferred: busy=%v cmd=%v calls=%d", m.Busy, cmd != nil, service.syncCalls)
+		}
+	})
+
+	t.Run("recovery", func(t *testing.T) {
+		service := &fakeService{}
+		m := NewModel(context.Background(), service, &fakeMigration{}, ViewOverview, ActionNone)
+		m.Snapshot, m.OverviewSection = testSnapshot(), overviewHealth
+		m.Snapshot.Config.PendingOperations = []config.PendingOperation{{ID: "recover-1"}}
+		m.Focus, m.ActionIndex = FocusCollectionActions, 0
+		if got := m.overviewSectionActions(overviewHealth); len(got) == 0 || got[0] != "Review recovery" {
+			t.Fatalf("health actions=%v want Review recovery first", got)
+		}
+		next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		m = next.(Model)
+		if cmd == nil || !m.Busy || service.previewRecoveryCalls != 0 {
+			t.Fatalf("recovery preview not deferred: busy=%v cmd=%v calls=%d", m.Busy, cmd != nil, service.previewRecoveryCalls)
+		}
+		next, _ = m.Update(cmd())
+		m = next.(Model)
+		if service.previewRecoveryCalls != 1 || !reflect.DeepEqual(service.lastRecoveryPreview.OperationIDs, []string{"recover-1"}) || m.Mode != ModeConfirm {
+			t.Fatalf("recovery request=%+v mode=%s", service.lastRecoveryPreview, m.Mode)
+		}
+	})
 }

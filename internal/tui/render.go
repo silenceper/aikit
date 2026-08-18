@@ -108,10 +108,14 @@ func (m Model) renderOverviewDashboard(layout Layout, glyphs FrameGlyphs) []posi
 		groups = append(groups, positionedLines{X: panel.Outer.X, Y: panel.Outer.Y, Lines: renderPanel(panel, title, section == geometry.Active, body, actionBar, glyphs)})
 	}
 	if !geometry.SectionBar.Empty() {
-		label := fmt.Sprintf("‹ %s · %d/3 ›", overviewSectionTitle(geometry.Active), overviewSectionIndex(geometry.Active)+1)
+		label := overviewSectionBarLabel(geometry.Active)
 		groups = append(groups, positionedLines{X: geometry.SectionBar.X, Y: geometry.SectionBar.Y, Lines: []string{padCells(uiTheme.focused(label), geometry.SectionBar.Width)}})
 	}
 	return groups
+}
+
+func overviewSectionBarLabel(section overviewSectionID) string {
+	return fmt.Sprintf("‹ %s · %d/3 ›", overviewSectionTitle(section), overviewSectionIndex(section)+1)
 }
 
 func overviewSectionTitle(section overviewSectionID) string {
@@ -197,7 +201,7 @@ func (m Model) overviewSectionActions(section overviewSectionID) []string {
 		}
 		return actions
 	case overviewHealth:
-		return []string{"Open", "Review all"}
+		return []string{m.overviewHealthPrimaryAction(), "Review all"}
 	default:
 		return nil
 	}

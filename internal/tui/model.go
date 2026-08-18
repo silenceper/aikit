@@ -251,6 +251,7 @@ type Model struct {
 	Selected            map[string]bool
 	Ignored             map[string]bool
 	routePositions      map[string]routePosition
+	overviewPositions   map[overviewSectionID]routePosition
 	Config              app.ConfigurationDetail
 	ConfigValidation    app.ConfigurationValidation
 	SkillDetail         app.SkillDetail
@@ -315,6 +316,7 @@ func NewModel(ctx context.Context, service app.Service, migration app.MigrationS
 		ActiveView: initialView, OverviewSection: overviewUpdates, Mode: ModeTable, Focus: FocusList, Scope: scope, Width: 80, Height: 24,
 		Status: "Loading local snapshot...", Selected: make(map[string]bool), Ignored: make(map[string]bool),
 		routePositions:     make(map[string]routePosition),
+		overviewPositions:  make(map[overviewSectionID]routePosition),
 		LibraryStateFilter: LibraryStateAll, LibrarySourceFilter: LibrarySourceAll,
 	}
 }
@@ -385,6 +387,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		activeKey := m.activeKey()
 		viewportOffset := m.Cursor - m.Scroll
 		m.mergeInventory(msg.event)
+		if m.ActiveView == ViewOverview {
+			m.reconcileOverviewSelection()
+		}
 		m.restoreActiveKey(activeKey)
 		if m.ActiveView == ViewOverview && activeKey != "" {
 			m.Scroll = max(0, m.Cursor-viewportOffset)

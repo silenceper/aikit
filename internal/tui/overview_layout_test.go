@@ -1,6 +1,10 @@
 package tui
 
-import "testing"
+import (
+	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
+)
 
 func TestOverviewDashboardLayoutUsesTaskSections(t *testing.T) {
 	for _, width := range []int{120, 80, 59, 38, 24} {
@@ -58,5 +62,24 @@ func TestOverviewDashboardMouseGeometryMatchesRenderedSections(t *testing.T) {
 	}
 	if len(regions.OverviewQuick.Buttons) != 3 {
 		t.Fatalf("quick buttons=%+v", regions.OverviewQuick)
+	}
+}
+
+func TestOverviewNarrowSectionMouseCyclesLikeKeyboard(t *testing.T) {
+	base := NewModel(nil, &fakeService{}, &fakeMigration{}, ViewOverview, ActionNone)
+	base.Snapshot, base.Width, base.Height = testSnapshot(), 38, 20
+	base.OverviewSection = overviewUpdates
+	regions := base.hitRegions()
+	if regions.OverviewNext.Empty() || regions.OverviewPrevious.Empty() {
+		t.Fatalf("narrow section controls missing: prev=%+v next=%+v", regions.OverviewPrevious, regions.OverviewNext)
+	}
+
+	next, mouseCmd := base.Update(tea.MouseMsg{X: regions.OverviewNext.X, Y: regions.OverviewNext.Y, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	mouse := next.(Model)
+	keyboard := base
+	next, keyboardCmd := keyboard.Update(tea.KeyMsg{Type: tea.KeyRight})
+	keyboard = next.(Model)
+	if mouseCmd != nil || keyboardCmd != nil || mouse.OverviewSection != overviewLocal || keyboard.OverviewSection != mouse.OverviewSection {
+		t.Fatalf("section parity mouse=%s keyboard=%s", mouse.OverviewSection, keyboard.OverviewSection)
 	}
 }

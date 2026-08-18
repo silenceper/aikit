@@ -31,6 +31,8 @@ type HitRegions struct {
 	OverviewCheckboxIndexes map[overviewSectionID][]int
 	OverviewActions         map[overviewSectionID]PaneActionRegions
 	OverviewQuick           PaneActionRegions
+	OverviewPrevious        Rect
+	OverviewNext            Rect
 }
 
 type PaneActionRegions struct {
@@ -61,6 +63,7 @@ func (m Model) hitRegions() HitRegions {
 	}
 	if m.ActiveView == ViewOverview && m.Mode == ModeTable && !m.hasOverlay() {
 		geometry := m.overviewLayout(layout)
+		regions.OverviewPrevious, regions.OverviewNext = geometry.Previous, geometry.Next
 		regions.OverviewQuick = paneActionHitRegions(geometry.Quick.Actions, []string{"Add skill", "Add project", "Create preset"}, m.OverviewSection == overviewQuick, m.ActionIndex)
 		dashboard := m.overviewDashboard()
 		for _, section := range []overviewSectionID{overviewUpdates, overviewLocal, overviewHealth} {
@@ -448,6 +451,14 @@ func (m Model) updateOverviewMouse(msg tea.MouseMsg, regions HitRegions) (tea.Mo
 	if regions.Back.Contains(msg.X, msg.Y) {
 		return m.perform(uiBack)
 	}
+	if regions.OverviewPrevious.Contains(msg.X, msg.Y) {
+		m.switchOverviewSection(previousOverviewSection(m.OverviewSection))
+		return m, nil
+	}
+	if regions.OverviewNext.Contains(msg.X, msg.Y) {
+		m.switchOverviewSection(nextOverviewSection(m.OverviewSection))
+		return m, nil
+	}
 	for _, item := range regions.Navigation {
 		if item.Rect.Contains(msg.X, msg.Y) {
 			return m.activateCommandEntry(item.Entry)
@@ -553,6 +564,9 @@ func (m Model) performPrimaryAction(index int) (tea.Model, tea.Cmd) {
 	actions := m.currentActions()
 	if index < 0 || index >= len(actions) {
 		return m, nil
+	}
+	if m.ActiveView == ViewOverview && m.OverviewSection == overviewHealth && (actions[index] == "Open" || actions[index] == "Adopt" || actions[index] == "Sync preview" || actions[index] == "Review recovery") {
+		return m.beginOverviewHealthAction(actions[index])
 	}
 	if actions[index] == "Cancel" {
 		return m.perform(uiCancel)

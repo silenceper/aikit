@@ -267,6 +267,72 @@ func (m Model) overviewLocalSelectionAction() string {
 	return "Apply selected"
 }
 
+func (m Model) overviewHealthPrimaryAction() string {
+	tasks := m.overviewDashboard().Health
+	if m.Cursor < 0 || m.Cursor >= len(tasks) {
+		return "Open"
+	}
+	task := tasks[m.Cursor]
+	if task.DestinationAction == ActionRecovery {
+		return "Review recovery"
+	}
+	if task.DestinationView == ViewStatus {
+		for _, item := range m.Snapshot.Status.Items {
+			if statusItemKey(item) != task.DestinationKey {
+				continue
+			}
+			if isUnmanaged(item) {
+				return "Adopt"
+			}
+			if statusItemCanSync(item) {
+				return "Sync preview"
+			}
+			break
+		}
+	}
+	return "Open"
+}
+
+func (m Model) beginOverviewHealthAction(action string) (tea.Model, tea.Cmd) {
+	tasks := m.overviewDashboard().Health
+	if m.Cursor < 0 || m.Cursor >= len(tasks) {
+		return m, nil
+	}
+	task := tasks[m.Cursor]
+	if action == "Open" || action == "Review recovery" {
+		return m.openAttention(m.overviewRows()[m.Cursor])
+	}
+	if task.DestinationView != ViewStatus || (action != "Adopt" && action != "Sync preview") {
+		return m, nil
+	}
+	m.prepareConfirmReturn()
+	if action == "Adopt" {
+		for _, item := range m.Snapshot.Status.Items {
+			if statusItemKey(item) != task.DestinationKey || !isUnmanaged(item) {
+				continue
+			}
+			m.pendingScan = app.ScanRequest{Agent: item.Scope.Agent, Project: item.Scope.Project, Targets: []string{item.Path}, Adopt: true}
+			preview := m.pendingScan
+			preview.DryRun = true
+			m.Busy, m.Status = true, "Building exact adoption preview..."
+			return m, migrationPreviewCmd(m.ctx, m.migration, preview)
+		}
+		m.restoreConfirmReturn()
+		m.Err, m.Status = "status task is no longer eligible for adoption", "Health task changed; review it again"
+		return m, nil
+	}
+	m.switchView(ViewStatus)
+	m.restoreActiveKey(task.DestinationKey)
+	if !m.selectedStatusCanSync() {
+		m.restoreConfirmReturn()
+		m.Err, m.Status = "status task is no longer eligible for sync", "Health task changed; review it again"
+		return m, nil
+	}
+	m.pendingSync = app.SyncRequest{}
+	m.Busy, m.Status = true, "Building exact sync preview..."
+	return m, syncPreviewCmd(m.ctx, m.service, app.SyncRequest{DryRun: true})
+}
+
 func overviewLocalExecutable(item app.ScanItem, state app.ScanState) bool {
 	switch state {
 	case app.ScanStateNameConflict, app.ScanStateDrifted, app.ScanStateError, app.ScanStatePendingRecovery, app.ScanStateBrokenLink:
@@ -309,7 +375,18 @@ func (m *Model) switchOverviewSection(section overviewSectionID) {
 	if m.OverviewSection == section {
 		return
 	}
+	if m.overviewPositions == nil {
+		m.overviewPositions = make(map[overviewSectionID]routePosition)
+	}
+	current := m.OverviewSection
+	if current != overviewQuick {
+		m.overviewPositions[current] = routePosition{Cursor: m.Cursor, Scroll: m.Scroll, ActiveKey: m.activeKey()}
+	}
 	m.OverviewSection, m.Cursor, m.Scroll, m.ActionIndex = section, 0, 0, 0
+	if position, ok := m.overviewPositions[section]; ok {
+		m.Cursor, m.Scroll = position.Cursor, position.Scroll
+		m.restoreActiveKey(position.ActiveKey)
+	}
 	if section == overviewQuick {
 		m.Focus = FocusCollectionActions
 	} else {

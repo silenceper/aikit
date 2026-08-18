@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -147,5 +148,46 @@ func TestRetainedAdvancedRoutesStayInCommandPalette(t *testing.T) {
 		if !found[label] {
 			t.Errorf("command route %q missing", label)
 		}
+	}
+}
+
+func TestOverviewSectionsKeepIndependentCursorAndScroll(t *testing.T) {
+	m := NewModel(context.Background(), &fakeService{}, &fakeMigration{}, ViewOverview, ActionNone)
+	m.Snapshot, m.Width, m.Height = testSnapshot(), 80, 16
+	m.Snapshot.Status.Items = nil
+	for i := 0; i < 10; i++ {
+		m.Inventory.Items = append(m.Inventory.Items, app.ScanItem{
+			Key: fmt.Sprintf("item-%02d", i), State: app.ScanStateUnmanaged,
+			Action: app.ScanActionAdopt, Skill: config.Skill{Name: fmt.Sprintf("item-%02d", i)},
+		})
+	}
+	m.OverviewSection, m.Cursor, m.Scroll = overviewLocal, 6, 3
+	wantKey := m.activeKey()
+
+	m.switchOverviewSection(overviewHealth)
+	m.Cursor, m.Scroll = 1, 1
+	m.switchOverviewSection(overviewLocal)
+
+	if got := m.activeKey(); got != wantKey || m.Cursor != 6 || m.Scroll != 3 {
+		t.Fatalf("local position not restored: key=%q cursor=%d scroll=%d want key=%q cursor=6 scroll=3", got, m.Cursor, m.Scroll, wantKey)
+	}
+}
+
+func TestOverviewIncrementalInventoryInvalidatesUnsafeSelection(t *testing.T) {
+	m := NewModel(context.Background(), &fakeService{}, &fakeMigration{}, ViewOverview, ActionNone)
+	m.OverviewSection = overviewLocal
+	m.Inventory = InventoryState{Generation: 11, Loading: true, Items: []app.ScanItem{{
+		Key: "candidate", Origin: "g/codex", Target: "/work/candidate", State: app.ScanStateUnmanaged,
+		Action: app.ScanActionAdopt, Skill: config.Skill{ID: "local/candidate", Name: "candidate"},
+	}}}
+	m.Selected["overview:local:candidate"] = true
+
+	next, _ := m.Update(inventoryMsg{ok: true, event: app.InventoryEvent{Generation: 11, Items: []app.ScanItem{{
+		Key: "candidate", Origin: "g/codex", Target: "/work/candidate", State: app.ScanStateNameConflict,
+		Action: app.ScanActionConflict, Skill: config.Skill{ID: "local/candidate", Name: "candidate"},
+	}}}})
+	m = next.(Model)
+	if m.Selected["overview:local:candidate"] {
+		t.Fatalf("unsafe inventory replacement remained selected: %+v", m.Selected)
 	}
 }
