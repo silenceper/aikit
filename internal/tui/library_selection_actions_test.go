@@ -191,6 +191,48 @@ func TestLibrarySelectionEscapeClosesDetailThenClearsSelection(t *testing.T) {
 	}
 }
 
+func TestLibrarySelectionEscapeFromActionFocusUsesSamePrecedence(t *testing.T) {
+	m := selectedLibraryModel(&fakeService{})
+	m.Activity, m.Busy = Activity{}, false
+	m.Focus, m.ActionIndex = FocusCollectionActions, 2
+	m, _ = apply(m, "esc")
+	if m.librarySelectionCount() != 0 || m.Focus != FocusCollectionActions {
+		t.Fatalf("collection action Esc selected=%d focus=%s", m.librarySelectionCount(), m.Focus)
+	}
+
+	m = selectedLibraryModel(&fakeService{})
+	m.Activity, m.Busy, m.Width = Activity{}, false, 59
+	m.Detail, m.Focus = true, FocusDetailActions
+	m, _ = apply(m, "esc")
+	if m.Detail || m.librarySelectionCount() != 2 {
+		t.Fatalf("detail action Esc detail=%v selected=%d", m.Detail, m.librarySelectionCount())
+	}
+}
+
+func TestPinnedLibraryBatchDetailOwnsCompactMouseBody(t *testing.T) {
+	m := selectedLibraryModel(&fakeService{})
+	m.Activity, m.Busy, m.Width, m.Height = Activity{}, false, 38, 12
+	for index := 0; index < 12; index++ {
+		m.BatchResult.Issues = append(m.BatchResult.Issues, app.OperationIssue{Item: "acme/alpha", Path: "/work/path", Message: strings.Repeat("blocked ", 3)})
+	}
+	regions := m.hitRegions()
+	if len(regions.Rows) != 0 || len(regions.Checkboxes) != 0 {
+		t.Fatalf("hidden Library rows remain clickable: rows=%+v checkboxes=%+v", regions.Rows, regions.Checkboxes)
+	}
+	beforeCursor, beforeSelection := m.Cursor, m.librarySelectionCount()
+	x, y := regions.Layout.CollectionPanel.Body.X, regions.Layout.CollectionPanel.Body.Y
+	next, cmd := m.Update(tea.MouseMsg{X: x, Y: y, Button: tea.MouseButtonWheelDown})
+	m = next.(Model)
+	if cmd != nil || m.DetailScroll == 0 || m.Cursor != beforeCursor || m.librarySelectionCount() != beforeSelection {
+		t.Fatalf("detail wheel scroll=%d cursor=%d selected=%d cmd=%v", m.DetailScroll, m.Cursor, m.librarySelectionCount(), cmd != nil)
+	}
+	next, cmd = m.Update(click(x, y))
+	m = next.(Model)
+	if cmd != nil || m.Focus != FocusDetail || m.Cursor != beforeCursor || m.librarySelectionCount() != beforeSelection {
+		t.Fatalf("detail click focus=%s cursor=%d selected=%d cmd=%v", m.Focus, m.Cursor, m.librarySelectionCount(), cmd != nil)
+	}
+}
+
 func TestLibraryBatchScopePickerOffersOnlySingleExactScopes(t *testing.T) {
 	m := selectedLibraryModel(&fakeService{})
 	m.Activity, m.Busy = Activity{}, false

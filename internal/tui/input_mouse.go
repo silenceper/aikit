@@ -91,7 +91,8 @@ func (m Model) hitRegions() HitRegions {
 		}
 		return regions
 	}
-	if m.Mode != ModeTable || !m.Detail {
+	compactDetail := layout.DetailPanel.Outer.Empty() && (m.Detail || m.hasPinnedDetail())
+	if m.Mode != ModeTable || !compactDetail {
 		rowGeometry := m.visibleRowsLayout(layout)
 		for _, rowRect := range rowGeometry.Rects {
 			regions.Rows = append(regions.Rows, rowRect)
@@ -361,12 +362,13 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
-	if m.Detail && msg.Button == tea.MouseButtonWheelUp && regions.Layout.Main.Contains(msg.X, msg.Y) {
+	detailVisible := m.Detail || (regions.Layout.DetailPanel.Outer.Empty() && m.hasPinnedDetail())
+	if detailVisible && msg.Button == tea.MouseButtonWheelUp && regions.Layout.Main.Contains(msg.X, msg.Y) {
 		m.Focus = FocusDetail
 		m.moveDetailScroll(-1)
 		return m, nil
 	}
-	if m.Detail && msg.Button == tea.MouseButtonWheelDown && regions.Layout.Main.Contains(msg.X, msg.Y) {
+	if detailVisible && msg.Button == tea.MouseButtonWheelDown && regions.Layout.Main.Contains(msg.X, msg.Y) {
 		m.Focus = FocusDetail
 		m.moveDetailScroll(1)
 		return m, nil
@@ -454,7 +456,7 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if regions.ActionBar.Contains(msg.X, msg.Y) {
 		return m, nil
 	}
-	if m.Detail && regions.Layout.Main.Contains(msg.X, msg.Y) {
+	if detailVisible && regions.Layout.Main.Contains(msg.X, msg.Y) {
 		m.Focus = FocusDetail
 		return m, nil
 	}
