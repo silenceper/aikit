@@ -3,7 +3,12 @@ package tui
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
+
+	"github.com/silenceper/aikit/internal/app"
+	"github.com/silenceper/aikit/internal/updatecheck"
+	"github.com/silenceper/aikit/pkg/config"
 )
 
 func TestOverviewDashboardNavigationHidesAdvancedViewsFromRail(t *testing.T) {
@@ -22,6 +27,78 @@ func TestOverviewDashboardNavigationHidesAdvancedViewsFromRail(t *testing.T) {
 		if item.Entry.View == ViewStatus || item.Entry.View == ViewMigration {
 			t.Fatalf("advanced view has permanent hit region: %+v", item.Entry)
 		}
+	}
+}
+
+func TestOverviewSectionsAlwaysExposeQuickActions(t *testing.T) {
+	m := NewModel(context.Background(), &fakeService{}, &fakeMigration{}, ViewOverview, ActionNone)
+	dashboard := m.overviewDashboard()
+	if got := dashboard.sectionIDs(); !reflect.DeepEqual(got, []overviewSectionID{overviewQuick, overviewUpdates, overviewLocal, overviewHealth}) {
+		t.Fatalf("sections=%v", got)
+	}
+	if got := dashboard.QuickActions; !reflect.DeepEqual(got, []uiAction{uiAddSource, uiCreateProject, uiCreatePreset}) {
+		t.Fatalf("quick actions=%v", got)
+	}
+}
+
+func TestOverviewUpdateTasksRequireCompleteTypedTokens(t *testing.T) {
+	m := NewModel(context.Background(), &fakeService{}, &fakeMigration{}, ViewOverview, ActionNone)
+	m.Snapshot = testSnapshot()
+	m.Snapshot.Config.Library.Skills[0].Ref = &config.Ref{Kind: "branch", Value: "main"}
+	m.Snapshot.Updates.Results = append(m.Snapshot.Updates.Results,
+		updatecheck.Result{SkillID: "acme/beta", Current: strings.Repeat("b", 40), State: updatecheck.StateCheckFailed, Error: "offline"},
+	)
+	dashboard := m.overviewDashboard()
+	if len(dashboard.Updates) != 2 {
+		t.Fatalf("updates=%+v", dashboard.Updates)
+	}
+	if task := dashboard.Updates[0]; !task.Selectable || task.SkillID != "acme/alpha" || task.Current == "" || task.Remote == "" || task.SelectionKey != "overview:update:acme/alpha" {
+		t.Fatalf("valid update task=%+v", task)
+	}
+	if task := dashboard.Updates[1]; task.Selectable || task.State != "Update check failed" || task.Detail != "offline" {
+		t.Fatalf("failed update task=%+v", task)
+	}
+
+	m.Snapshot.Config.Library.Skills[0].Ref = nil
+	if task := m.overviewDashboard().Updates[0]; task.Selectable {
+		t.Fatalf("update without ref is selectable: %+v", task)
+	}
+}
+
+func TestOverviewLocalTasksKeepExactSelectorsAndDisableUnsafeRows(t *testing.T) {
+	m := NewModel(context.Background(), &fakeService{}, &fakeMigration{}, ViewOverview, ActionNone)
+	m.Inventory.Items = []app.ScanItem{
+		{Key: "safe", Origin: "g/codex", Target: "/work/.codex/skills/safe", ContentHash: "hash", ObjectID: "object", RootObjectID: "root", State: app.ScanStateUnmanaged, Action: app.ScanActionAdopt, Skill: config.Skill{ID: "local/safe", Name: "safe"}},
+		{Key: "conflict", Origin: "g/claude", Target: "/work/.claude/skills/safe", State: app.ScanStateNameConflict, Action: app.ScanActionConflict, Skill: config.Skill{ID: "local/other", Name: "safe"}},
+	}
+	tasks := m.overviewDashboard().Local
+	if len(tasks) != 2 {
+		t.Fatalf("local tasks=%+v", tasks)
+	}
+	if !tasks[0].Selectable || tasks[0].Selector.Key != "safe" || tasks[0].Selector.Origin != "g/codex" || tasks[0].Selector.Target != "/work/.codex/skills/safe" || tasks[0].Selector.ExpectedObjectID != "object" {
+		t.Fatalf("safe local task=%+v", tasks[0])
+	}
+	if tasks[1].Selectable || tasks[1].Action != app.ScanActionConflict {
+		t.Fatalf("unsafe local task=%+v", tasks[1])
+	}
+}
+
+func TestOverviewHealthTasksKeepExactDestinations(t *testing.T) {
+	m := NewModel(context.Background(), &fakeService{}, &fakeMigration{}, ViewOverview, ActionNone)
+	m.Snapshot = testSnapshot()
+	m.Snapshot.Config.PendingOperations = []config.PendingOperation{{ID: "recover-1"}}
+	tasks := m.overviewDashboard().Health
+	if len(tasks) < 2 || tasks[0].DestinationAction != ActionRecovery {
+		t.Fatalf("health tasks=%+v", tasks)
+	}
+	foundStatus := false
+	for _, task := range tasks {
+		if task.DestinationView == ViewStatus && strings.HasPrefix(task.DestinationKey, "status:") {
+			foundStatus = true
+		}
+	}
+	if !foundStatus {
+		t.Fatalf("exact status destination missing: %+v", tasks)
 	}
 }
 
