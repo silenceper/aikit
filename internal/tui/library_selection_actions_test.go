@@ -196,7 +196,7 @@ func TestLibrarySelectionEscapeFromActionFocusUsesSamePrecedence(t *testing.T) {
 	m.Activity, m.Busy = Activity{}, false
 	m.Focus, m.ActionIndex = FocusCollectionActions, 2
 	m, _ = apply(m, "esc")
-	if m.librarySelectionCount() != 0 || m.Focus != FocusCollectionActions {
+	if m.librarySelectionCount() != 0 || m.Focus != FocusList {
 		t.Fatalf("collection action Esc selected=%d focus=%s", m.librarySelectionCount(), m.Focus)
 	}
 
@@ -204,8 +204,12 @@ func TestLibrarySelectionEscapeFromActionFocusUsesSamePrecedence(t *testing.T) {
 	m.Activity, m.Busy, m.Width = Activity{}, false, 59
 	m.Detail, m.Focus = true, FocusDetailActions
 	m, _ = apply(m, "esc")
-	if m.Detail || m.librarySelectionCount() != 2 {
-		t.Fatalf("detail action Esc detail=%v selected=%d", m.Detail, m.librarySelectionCount())
+	if m.Detail || m.librarySelectionCount() != 2 || m.Focus != FocusCollectionActions {
+		t.Fatalf("detail action Esc detail=%v selected=%d focus=%s", m.Detail, m.librarySelectionCount(), m.Focus)
+	}
+	m, _ = apply(m, "esc")
+	if m.librarySelectionCount() != 0 || m.Focus != FocusList {
+		t.Fatalf("selection Esc selected=%d focus=%s", m.librarySelectionCount(), m.Focus)
 	}
 }
 

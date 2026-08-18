@@ -302,7 +302,16 @@ func (m Model) updateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.performPrimaryAction(m.ActionIndex)
 		case "esc":
 			if m.librarySelectionBarActive() && (m.Focus == FocusCollectionActions || m.Detail) {
-				return m.perform(uiCancel)
+				wasDetail := m.Detail
+				next, cmd := m.perform(uiCancel)
+				m = next.(Model)
+				m.ActionIndex = 0
+				if wasDetail {
+					m.Focus = FocusCollectionActions
+				} else {
+					m.Focus = FocusList
+				}
+				return m, cmd
 			}
 			if m.Focus == FocusDetailActions {
 				m.Focus = FocusDetail
