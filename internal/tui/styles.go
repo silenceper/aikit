@@ -49,6 +49,9 @@ type semanticTheme struct {
 	navigation    lipgloss.Style
 	selected      lipgloss.Style
 	muted         lipgloss.Style
+	reading       lipgloss.Style
+	network       lipgloss.Style
+	mutating      lipgloss.Style
 	success       lipgloss.Style
 	warning       lipgloss.Style
 	error         lipgloss.Style
@@ -70,15 +73,21 @@ func newSemanticTheme(mode themeMode) semanticTheme {
 	green := adaptive("#147D45", "#55D68B", "35", "2")
 	amber := adaptive("#9A6700", "#F0B429", "178", "3")
 	red := adaptive("#B42318", "#FF6B6B", "167", "1")
+	blue := adaptive("#1D4ED8", "#60A5FA", "33", "4")
+	cyan := adaptive("#0E7490", "#22D3EE", "37", "6")
+	purple := adaptive("#7E22CE", "#C084FC", "135", "5")
 	if mode == themeDark {
 		accent, muted = lipgloss.CompleteColor{TrueColor: "#9B8CFF", ANSI256: "99", ANSI: "5"}, lipgloss.CompleteColor{TrueColor: "#8B93A7", ANSI256: "245", ANSI: "8"}
 		green, amber, red = lipgloss.CompleteColor{TrueColor: "#55D68B", ANSI256: "35", ANSI: "2"}, lipgloss.CompleteColor{TrueColor: "#F0B429", ANSI256: "178", ANSI: "3"}, lipgloss.CompleteColor{TrueColor: "#FF6B6B", ANSI256: "167", ANSI: "1"}
+		blue, cyan, purple = lipgloss.CompleteColor{TrueColor: "#60A5FA", ANSI256: "33", ANSI: "4"}, lipgloss.CompleteColor{TrueColor: "#22D3EE", ANSI256: "37", ANSI: "6"}, lipgloss.CompleteColor{TrueColor: "#C084FC", ANSI256: "135", ANSI: "5"}
 	} else if mode == themeLight {
 		accent, muted = lipgloss.CompleteColor{TrueColor: "#5B4DD8", ANSI256: "62", ANSI: "5"}, lipgloss.CompleteColor{TrueColor: "#596273", ANSI256: "240", ANSI: "8"}
 		green, amber, red = lipgloss.CompleteColor{TrueColor: "#147D45", ANSI256: "28", ANSI: "2"}, lipgloss.CompleteColor{TrueColor: "#9A6700", ANSI256: "136", ANSI: "3"}, lipgloss.CompleteColor{TrueColor: "#B42318", ANSI256: "124", ANSI: "1"}
+		blue, cyan, purple = lipgloss.CompleteColor{TrueColor: "#1D4ED8", ANSI256: "26", ANSI: "4"}, lipgloss.CompleteColor{TrueColor: "#0E7490", ANSI256: "30", ANSI: "6"}, lipgloss.CompleteColor{TrueColor: "#7E22CE", ANSI256: "92", ANSI: "5"}
 	} else if mode == themeReduced {
 		accent, muted = lipgloss.Color("5"), lipgloss.Color("8")
 		green, amber, red = lipgloss.Color("2"), lipgloss.Color("3"), lipgloss.Color("1")
+		blue, cyan, purple = lipgloss.Color("4"), lipgloss.Color("6"), lipgloss.Color("5")
 	}
 	base := func(color lipgloss.TerminalColor) lipgloss.Style {
 		style := lipgloss.NewStyle()
@@ -93,6 +102,9 @@ func newSemanticTheme(mode themeMode) semanticTheme {
 		navigation:    base(muted),
 		selected:      base(accent).Bold(true),
 		muted:         base(muted),
+		reading:       base(blue),
+		network:       base(cyan),
+		mutating:      base(purple).Bold(true),
 		success:       base(green),
 		warning:       base(amber),
 		error:         base(red).Bold(true),
@@ -100,6 +112,25 @@ func newSemanticTheme(mode themeMode) semanticTheme {
 		panelTitle:    base(accent).Bold(true),
 		primaryAction: base(accent).Bold(true).Underline(true),
 	}
+}
+
+func (t semanticTheme) activity(kind ActivityKind, label string) string {
+	style := t.muted
+	switch kind {
+	case ActivityReading:
+		style = t.reading
+	case ActivityNetwork:
+		style = t.network
+	case ActivityMutating:
+		style = t.mutating
+	case ActivitySuccess:
+		style = t.success
+	case ActivityWarning:
+		style = t.warning
+	case ActivityError:
+		style = t.error
+	}
+	return style.Render(label)
 }
 
 func defaultSemanticTheme() semanticTheme {
