@@ -176,3 +176,30 @@ func uniqueStrings(values []string) []string {
 	}
 	return result
 }
+
+func (m *Model) switchOverviewSection(section overviewSectionID) {
+	if section != overviewQuick && section != overviewUpdates && section != overviewLocal && section != overviewHealth {
+		return
+	}
+	if m.OverviewSection == section {
+		return
+	}
+	m.OverviewSection, m.Cursor, m.Scroll, m.ActionIndex = section, 0, 0, 0
+	if section == overviewQuick {
+		m.Focus = FocusCollectionActions
+	} else {
+		m.Focus = FocusList
+	}
+}
+
+func (m *Model) ensureOverviewVisible() {
+	dashboard := m.overviewDashboard()
+	tasks := dashboard.tasks(m.OverviewSection)
+	if len(tasks) == 0 {
+		m.Cursor, m.Scroll = 0, 0
+		return
+	}
+	m.Cursor = min(max(0, m.Cursor), len(tasks)-1)
+	geometry := m.overviewLayout(ComputeLayout(m.Width, m.Height))
+	m.Scroll = geometry.Rows[m.OverviewSection].Start
+}

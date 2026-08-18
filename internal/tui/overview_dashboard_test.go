@@ -102,6 +102,26 @@ func TestOverviewHealthTasksKeepExactDestinations(t *testing.T) {
 	}
 }
 
+func TestOverviewDashboardRenderShowsFourTaskSections(t *testing.T) {
+	m := NewModel(context.Background(), &fakeService{}, &fakeMigration{}, ViewOverview, ActionNone)
+	m.Snapshot, m.Width, m.Height = testSnapshot(), 120, 28
+	m.Inventory.Items = []app.ScanItem{{Key: "safe", Origin: "g/codex", Target: "/work/.codex/skills/safe", State: app.ScanStateUnmanaged, Action: app.ScanActionAdopt, Skill: config.Skill{ID: "local/safe", Name: "safe"}}}
+	plain := stripANSI(m.ViewString())
+	for _, want := range []string{"Task dashboard", "Quick actions", "Add skill", "Add project", "Create preset", "Updates", "Local skills", "Needs attention", "alpha", "safe"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("dashboard missing %q:\n%s", want, plain)
+		}
+	}
+	if strings.Contains(plain, "Workspace summary") {
+		t.Fatalf("legacy Overview panel remains:\n%s", plain)
+	}
+	for _, line := range strings.Split(plain, "\n") {
+		if len([]rune(line)) > m.Width {
+			t.Fatalf("line exceeds width %d: %q", m.Width, line)
+		}
+	}
+}
+
 func TestRetainedAdvancedRoutesStayInCommandPalette(t *testing.T) {
 	m := NewModel(context.Background(), &fakeService{}, &fakeMigration{}, ViewOverview, ActionNone)
 	m.Snapshot = testSnapshot()

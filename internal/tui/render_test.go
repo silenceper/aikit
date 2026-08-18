@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -50,7 +51,11 @@ func TestVisualInspectionFixtures(t *testing.T) {
 				m.Inventory.Items = []app.ScanItem{{Key: "error", State: app.ScanStateError, Skill: config.Skill{Name: "Broken skill"}}}
 				ansi, plain := m.ViewString(), stripANSI(m.ViewString())
 				t.Logf("theme=%s width=%d ANSI:\n%s\nSTRIPPED:\n%s", mode, width, ansi, plain)
-				for _, landmark := range []string{"aikit", "Overview", "Needs attention", "Broken skill", "Error", ">"} {
+				landmarks := []string{"aikit", "Overview", "Quick actions", "Updates", ">"}
+				if width >= 60 {
+					landmarks = append(landmarks, "Needs attention", "Broken skill", "Error")
+				}
+				for _, landmark := range landmarks {
 					if !strings.Contains(plain, landmark) {
 						t.Fatalf("theme=%s width=%d missing %q:\n%s", mode, width, landmark, plain)
 					}
@@ -144,14 +149,14 @@ func TestModernOverviewMetricsAndAttentionOrdering(t *testing.T) {
 			t.Fatalf("overview missing %q:\n%s", want, got)
 		}
 	}
-	ordered := []string{"Error item", "Conflict item", "Drift item", "Update item", "Unmanaged item"}
-	previous := -1
-	for _, want := range ordered {
-		index := strings.Index(got, want)
-		if index < 0 || index <= previous {
-			t.Fatalf("attention order missing/out of order %q:\n%s", want, got)
+	dashboard := m.overviewDashboard()
+	if gotHealth := []string{dashboard.Health[0].Name, dashboard.Health[1].Name, dashboard.Health[2].Name}; !slices.Equal(gotHealth, []string{"Error item", "Conflict item", "Drift item"}) {
+		t.Fatalf("health severity order=%v", gotHealth)
+	}
+	for _, want := range []string{"Error item", "Conflict item", "Drift item", "Update item", "Unmanaged item"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("dashboard missing %q:\n%s", want, got)
 		}
-		previous = index
 	}
 	if strings.Contains(got, "SKILL.md") || strings.Contains(got, "/private/") || strings.Contains(got, "hash") {
 		t.Fatalf("overview leaked heavy detail:\n%s", got)

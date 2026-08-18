@@ -217,6 +217,7 @@ type Model struct {
 	inventoryEvents <-chan app.InventoryEvent
 
 	ActiveView          View
+	OverviewSection     overviewSectionID
 	Mode                Mode
 	Focus               Focus
 	ActionIndex         int
@@ -311,7 +312,7 @@ func NewModel(ctx context.Context, service app.Service, migration app.MigrationS
 	}
 	return Model{
 		ctx: ctx, service: service, migration: migration, action: initialAction,
-		ActiveView: initialView, Mode: ModeTable, Focus: FocusList, Scope: scope, Width: 80, Height: 24,
+		ActiveView: initialView, OverviewSection: overviewUpdates, Mode: ModeTable, Focus: FocusList, Scope: scope, Width: 80, Height: 24,
 		Status: "Loading local snapshot...", Selected: make(map[string]bool), Ignored: make(map[string]bool),
 		routePositions:     make(map[string]routePosition),
 		LibraryStateFilter: LibraryStateAll, LibrarySourceFilter: LibrarySourceAll,

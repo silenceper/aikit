@@ -113,23 +113,25 @@ func TestCompactOverlayKeepsTitleAndPrimaryActionsVisible(t *testing.T) {
 
 func TestOverviewAttentionRenderAndHitShareGeometry(t *testing.T) {
 	m := NewModel(context.Background(), &fakeService{}, &fakeMigration{}, ViewOverview, ActionNone)
-	m.Snapshot, m.Width, m.Height = testSnapshot(), 80, 20
+	m.Snapshot, m.Width, m.Height = testSnapshot(), 80, 28
 	m.Inventory.Items = []app.ScanItem{
 		{Key: "error", State: app.ScanStateError, Skill: config.Skill{Name: "error item"}},
 		{Key: "drift", State: app.ScanStateDrifted, Skill: config.Skill{Name: "drift item"}},
 	}
+	m.OverviewSection = overviewHealth
 	regions := m.hitRegions()
-	wantY := regions.Layout.CollectionPanel.Body.Y + m.overviewHeaderHeight(regions.Layout.CollectionPanel.Body.Width, regions.Layout.CollectionPanel.Body.Height)
-	if len(regions.Rows) == 0 || regions.Rows[0].Y != wantY || regions.Rows[0].Height != collectionRowHeight {
-		t.Fatalf("overview row geometry=%+v want first y=%d height=%d", regions.Rows, wantY, collectionRowHeight)
+	healthRows := regions.OverviewRows[overviewHealth]
+	wantY := m.overviewLayout(regions.Layout).Health.Body.Y
+	if len(healthRows) == 0 || healthRows[0].Y != wantY || healthRows[0].Height != collectionRowHeight {
+		t.Fatalf("overview row geometry=%+v want first y=%d height=%d", healthRows, wantY, collectionRowHeight)
 	}
 	plain := strings.Split(stripANSI(m.ViewString()), "\n")
-	if !strings.Contains(plain[regions.Rows[0].Y], m.rows()[0].Name) {
-		t.Fatalf("hit row does not align with rendered row at y=%d:\n%s", regions.Rows[0].Y, m.ViewString())
+	if !strings.Contains(plain[healthRows[0].Y], m.overviewDashboard().Health[0].Name) {
+		t.Fatalf("hit row does not align with rendered row at y=%d:\n%s", healthRows[0].Y, m.ViewString())
 	}
-	next, cmd := m.Update(click(regions.Rows[1].X, regions.Rows[1].Y))
+	next, cmd := m.Update(click(healthRows[1].X, healthRows[1].Y))
 	got := next.(Model)
-	if cmd != nil || got.Cursor != 1 {
+	if cmd != nil || got.Cursor != 1 || got.OverviewSection != overviewHealth {
 		t.Fatalf("overview second-line click cursor=%d cmd=%v", got.Cursor, cmd != nil)
 	}
 }

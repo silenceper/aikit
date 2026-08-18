@@ -48,6 +48,8 @@ func (m Model) renderFramedShell(layout Layout) string {
 	if m.hasOverlay() {
 		panel, lines := m.renderFramedOverlay(layout, glyphs)
 		groups = append(groups, positionedLines{X: panel.Outer.X, Y: panel.Outer.Y, Lines: lines})
+	} else if m.ActiveView == ViewOverview && m.Mode == ModeTable {
+		groups = append(groups, m.renderOverviewDashboard(layout, glyphs)...)
 	} else {
 		collectionTitle, collectionBody := m.renderFramedCollection(layout)
 		collectionActions, detailActions := m.collectionActions(), m.detailActions()
@@ -64,6 +66,151 @@ func (m Model) renderFramedShell(layout Layout) string {
 		}
 	}
 	return strings.Join(composePositioned(layout.Width, layout.Height, groups...), "\n")
+}
+
+func (m Model) renderOverviewDashboard(layout Layout, glyphs FrameGlyphs) []positionedLines {
+	geometry := m.overviewLayout(layout)
+	dashboard := m.overviewDashboard()
+	groups := make([]positionedLines, 0, 4)
+	quickActions := []string{"Add skill", "Add project", "Create preset"}
+	quickBar := ""
+	if !geometry.Quick.Actions.Empty() {
+		quickBar = layoutActionBar(quickActions, m.OverviewSection == overviewQuick, m.ActionIndex, geometry.Quick.Actions.Width).Text
+	}
+	groups = append(groups, positionedLines{X: geometry.Quick.Outer.X, Y: geometry.Quick.Outer.Y, Lines: renderPanel(geometry.Quick, "Task dashboard · Quick actions", m.OverviewSection == overviewQuick, m.overviewMetricLines(geometry.Quick.Body.Width), quickBar, glyphs)})
+	for _, section := range []overviewSectionID{overviewUpdates, overviewLocal, overviewHealth} {
+		panel := geometry.panel(section)
+		if panel.Outer.Empty() {
+			continue
+		}
+		tasks := dashboard.tasks(section)
+		rows := geometry.Rows[section]
+		body := make([]string, panel.Body.Height)
+		if len(tasks) == 0 && len(body) > 0 {
+			body[0] = uiTheme.muted.Render(overviewEmptyState(section, m))
+		}
+		for visible, rect := range rows.Rects {
+			index := rows.Start + visible
+			if index < 0 || index >= len(tasks) {
+				continue
+			}
+			relativeY := rect.Y - panel.Body.Y
+			if relativeY >= 0 && relativeY < len(body) {
+				body[relativeY] = m.renderOverviewTask(tasks[index], section == geometry.Active && index == m.Cursor && m.Focus == FocusList, panel.Body.Width)
+			}
+		}
+		title := rangeTitle(overviewSectionTitle(section), rows.Start, rows.End, len(tasks))
+		actions := m.overviewSectionActions(section)
+		actionBar := ""
+		if !panel.Actions.Empty() {
+			actionBar = layoutActionBar(actions, section == geometry.Active && m.Focus == FocusCollectionActions, m.ActionIndex, panel.Actions.Width).Text
+		}
+		groups = append(groups, positionedLines{X: panel.Outer.X, Y: panel.Outer.Y, Lines: renderPanel(panel, title, section == geometry.Active, body, actionBar, glyphs)})
+	}
+	if !geometry.SectionBar.Empty() {
+		label := fmt.Sprintf("‹ %s · %d/3 ›", overviewSectionTitle(geometry.Active), overviewSectionIndex(geometry.Active)+1)
+		groups = append(groups, positionedLines{X: geometry.SectionBar.X, Y: geometry.SectionBar.Y, Lines: []string{padCells(uiTheme.focused(label), geometry.SectionBar.Width)}})
+	}
+	return groups
+}
+
+func overviewSectionTitle(section overviewSectionID) string {
+	switch section {
+	case overviewLocal:
+		return "Local skills"
+	case overviewHealth:
+		return "Needs attention"
+	default:
+		return "Updates"
+	}
+}
+
+func overviewSectionIndex(section overviewSectionID) int {
+	switch section {
+	case overviewLocal:
+		return 1
+	case overviewHealth:
+		return 2
+	default:
+		return 0
+	}
+}
+
+func overviewEmptyState(section overviewSectionID, m Model) string {
+	switch section {
+	case overviewUpdates:
+		if m.Snapshot.Updates.Results == nil && m.Snapshot.Updates.Warnings == nil {
+			return "Not checked"
+		}
+		return "No updates available"
+	case overviewLocal:
+		if m.Inventory.Loading {
+			return "Scanning local skills..."
+		}
+		return "No local skills need action"
+	case overviewHealth:
+		return "[OK] All clear"
+	default:
+		return ""
+	}
+}
+
+func (m Model) renderOverviewTask(task overviewTask, active bool, width int) string {
+	prefix := "  "
+	if task.Selectable {
+		marker := "[ ]"
+		if m.Selected[task.SelectionKey] {
+			marker = "[x]"
+		}
+		prefix = marker + " "
+	}
+	value := prefix + firstNonEmpty(task.Name, task.Target, task.Key)
+	stateText := task.State
+	if task.State == "Update check failed" {
+		stateText = firstNonEmpty(task.Detail, task.State)
+	}
+	state := renderStateBadge(stateText, task.Severity, max(0, width/2))
+	if state != " " {
+		available := max(0, width-lipgloss.Width(value)-1)
+		if available > 0 {
+			value = clip(value, max(0, width-lipgloss.Width(state)-1)) + " " + state
+		}
+	}
+	if active {
+		return uiTheme.focused(clip(value, width))
+	}
+	return clip(value, width)
+}
+
+func (m Model) overviewSectionActions(section overviewSectionID) []string {
+	switch section {
+	case overviewUpdates:
+		actions := []string{"Check updates"}
+		if m.overviewSelectionCount(overviewUpdates) > 0 {
+			actions = append(actions, "Update selected")
+		}
+		return actions
+	case overviewLocal:
+		actions := []string{"Review all"}
+		if m.overviewSelectionCount(overviewLocal) > 0 {
+			actions = append(actions, "Import selected")
+		}
+		return actions
+	case overviewHealth:
+		return []string{"Open", "Review all"}
+	default:
+		return nil
+	}
+}
+
+func (m Model) overviewSelectionCount(section overviewSectionID) int {
+	count := 0
+	for _, task := range m.overviewDashboard().tasks(section) {
+		if task.Selectable && m.Selected[task.SelectionKey] {
+			count++
+		}
+	}
+	return count
 }
 
 func (m Model) renderLowHeightShell(layout Layout) string {

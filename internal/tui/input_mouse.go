@@ -6,25 +6,30 @@ import (
 )
 
 type HitRegions struct {
-	Layout            Layout
-	Tabs              map[View]Rect
-	Navigation        []navigationEntryItem
-	Commands          []Rect
-	CommandIndexes    []int
-	Rows              []Rect
-	Checkboxes        []Rect
-	Actions           []Rect
-	ActionIndexes     []int
-	ActionBar         Rect
-	Confirm           Rect
-	Cancel            Rect
-	Back              Rect
-	ActionPrev        Rect
-	ActionNext        Rect
-	actionPrev        int
-	actionNext        int
-	CollectionActions PaneActionRegions
-	DetailActions     PaneActionRegions
+	Layout             Layout
+	Tabs               map[View]Rect
+	Navigation         []navigationEntryItem
+	Commands           []Rect
+	CommandIndexes     []int
+	Rows               []Rect
+	Checkboxes         []Rect
+	Actions            []Rect
+	ActionIndexes      []int
+	ActionBar          Rect
+	Confirm            Rect
+	Cancel             Rect
+	Back               Rect
+	ActionPrev         Rect
+	ActionNext         Rect
+	actionPrev         int
+	actionNext         int
+	CollectionActions  PaneActionRegions
+	DetailActions      PaneActionRegions
+	OverviewSections   map[overviewSectionID]Rect
+	OverviewRows       map[overviewSectionID][]Rect
+	OverviewCheckboxes map[overviewSectionID][]Rect
+	OverviewActions    map[overviewSectionID]PaneActionRegions
+	OverviewQuick      PaneActionRegions
 }
 
 type PaneActionRegions struct {
@@ -38,7 +43,11 @@ type PaneActionRegions struct {
 
 func (m Model) hitRegions() HitRegions {
 	layout := ComputeLayout(m.Width, m.Height)
-	regions := HitRegions{Layout: layout, Tabs: make(map[View]Rect), actionPrev: -1, actionNext: -1}
+	regions := HitRegions{
+		Layout: layout, Tabs: make(map[View]Rect), actionPrev: -1, actionNext: -1,
+		OverviewSections: make(map[overviewSectionID]Rect), OverviewRows: make(map[overviewSectionID][]Rect),
+		OverviewCheckboxes: make(map[overviewSectionID][]Rect), OverviewActions: make(map[overviewSectionID]PaneActionRegions),
+	}
 	if layout.TooShort {
 		return regions
 	}
@@ -48,6 +57,28 @@ func (m Model) hitRegions() HitRegions {
 	regions.Navigation = layoutNavigationEntries(layout, m)
 	if layout.Narrow && !layout.Breadcrumb.Empty() {
 		regions.Back = Rect{X: layout.Breadcrumb.X, Y: layout.Breadcrumb.Y, Width: min(2, layout.Breadcrumb.Width), Height: 1}
+	}
+	if m.ActiveView == ViewOverview && m.Mode == ModeTable && !m.hasOverlay() {
+		geometry := m.overviewLayout(layout)
+		regions.OverviewQuick = paneActionHitRegions(geometry.Quick.Actions, []string{"Add skill", "Add project", "Create preset"}, m.OverviewSection == overviewQuick, m.ActionIndex)
+		dashboard := m.overviewDashboard()
+		for _, section := range []overviewSectionID{overviewUpdates, overviewLocal, overviewHealth} {
+			panel := geometry.panel(section)
+			if panel.Outer.Empty() {
+				continue
+			}
+			regions.OverviewSections[section] = panel.Outer
+			regions.OverviewRows[section] = append(regions.OverviewRows[section], geometry.Rows[section].Rects...)
+			tasks := dashboard.tasks(section)
+			for visible, rect := range geometry.Rows[section].Rects {
+				index := geometry.Rows[section].Start + visible
+				if index < len(tasks) && tasks[index].Selectable {
+					regions.OverviewCheckboxes[section] = append(regions.OverviewCheckboxes[section], Rect{X: rect.X, Y: rect.Y, Width: min(3, rect.Width), Height: rect.Height})
+				}
+			}
+			regions.OverviewActions[section] = paneActionHitRegions(panel.Actions, m.overviewSectionActions(section), section == geometry.Active && m.Focus == FocusCollectionActions, m.ActionIndex)
+		}
+		return regions
 	}
 	if m.Mode != ModeTable || !m.Detail {
 		rowGeometry := m.visibleRowsLayout(layout)
@@ -275,6 +306,9 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
+	if m.ActiveView == ViewOverview && m.Mode == ModeTable {
+		return m.updateOverviewMouse(msg, regions)
+	}
 	if m.Mode == ModeTable && (msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown) {
 		if regions.CollectionActions.Bar.Contains(msg.X, msg.Y) {
 			return m.movePaneActionWithMouse(actionPaneCollection, regions.CollectionActions, msg)
@@ -389,6 +423,54 @@ func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if !regions.Layout.Detail.Empty() && regions.Layout.Detail.Contains(msg.X, msg.Y) {
 		m.Focus = FocusDetail
 		return m, nil
+	}
+	return m, nil
+}
+
+func (m Model) updateOverviewMouse(msg tea.MouseMsg, regions HitRegions) (tea.Model, tea.Cmd) {
+	if msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown {
+		for _, section := range []overviewSectionID{overviewUpdates, overviewLocal, overviewHealth} {
+			if !regions.OverviewSections[section].Contains(msg.X, msg.Y) {
+				continue
+			}
+			m.switchOverviewSection(section)
+			if msg.Button == tea.MouseButtonWheelUp {
+				return m.perform(uiMoveUp)
+			}
+			return m.perform(uiMoveDown)
+		}
+	}
+	if msg.Action != tea.MouseActionPress || msg.Button != tea.MouseButtonLeft {
+		return m, nil
+	}
+	if regions.Back.Contains(msg.X, msg.Y) {
+		return m.perform(uiBack)
+	}
+	for _, item := range regions.Navigation {
+		if item.Rect.Contains(msg.X, msg.Y) {
+			return m.activateCommandEntry(item.Entry)
+		}
+	}
+	for visible, rect := range regions.OverviewQuick.Buttons {
+		if !rect.Contains(msg.X, msg.Y) {
+			continue
+		}
+		m.OverviewSection, m.ActionIndex = overviewQuick, regions.OverviewQuick.Indexes[visible]
+		return m.perform([]uiAction{uiAddSource, uiCreateProject, uiCreatePreset}[regions.OverviewQuick.Indexes[visible]])
+	}
+	geometry := m.overviewLayout(regions.Layout)
+	for _, section := range []overviewSectionID{overviewUpdates, overviewLocal, overviewHealth} {
+		rows := regions.OverviewRows[section]
+		for visible, rect := range rows {
+			if !rect.Contains(msg.X, msg.Y) {
+				continue
+			}
+			m.switchOverviewSection(section)
+			m.Cursor = geometry.Rows[section].Start + visible
+			m.Focus = FocusList
+			m.ensureOverviewVisible()
+			return m, nil
+		}
 	}
 	return m, nil
 }
