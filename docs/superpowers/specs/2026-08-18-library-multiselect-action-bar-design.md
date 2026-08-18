@@ -93,9 +93,11 @@ Update is enabled only when every selected skill has a non-local supported Git
 source, a non-empty branch ref, and an exact checked record for the same skill
 ID whose typed state is `update-available`, whose current value equals the
 ledger `Resolved`, and whose remote value is non-empty. Hidden selected skills
-participate in this validation. The request copies that record's current,
-remote, and ref into `Expected`; any missing or mismatched field disables the
-whole action before `PreviewBatch` is called.
+participate in this validation. The request copies `Current` and `Remote` from
+the matching typed update-check record and copies `Ref` from the same skill's
+current ledger entry into `Expected`. No update-check or backend type changes.
+Any missing or mismatched field disables the whole action before `PreviewBatch`
+is called.
 
 The confirmation shows the complete batch and uses the existing exact expected
 tokens. Confirmation submits one atomic batch update. If any selected skill is
