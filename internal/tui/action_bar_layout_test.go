@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/rivo/uniseg"
 )
 
 func TestRenderedActionBarClickBoundariesAndWhitespace(t *testing.T) {
@@ -15,6 +17,9 @@ func TestRenderedActionBarClickBoundariesAndWhitespace(t *testing.T) {
 			name = "narrow"
 		}
 		t.Run(name, func(t *testing.T) {
+			// CI renders Unicode frames by default. Keep this test independent
+			// from the developer terminal's NO_COLOR setting.
+			installRenderTheme(t, newSemanticTheme(themeDark))
 			base := NewModel(nil, &fakeService{}, &fakeMigration{}, ViewLibrary, ActionNone)
 			base.Snapshot, base.Width, base.Height = testSnapshot(), width, 20
 			if width < 60 {
@@ -40,7 +45,7 @@ func TestRenderedActionBarClickBoundariesAndWhitespace(t *testing.T) {
 					button := "[" + label + "]"
 					got := pane.regions.Buttons[visible]
 					start, end := got.X, got.Right()-1
-					if start < 0 || end >= len(line) || line[start:end+1] != button {
+					if start < 0 || end >= lipgloss.Width(line) || sliceDisplayCells(line, start, got.Width) != button {
 						t.Fatalf("%q render/hit mismatch cells=%d..%d row=%q hit=%+v", label, start, end, line, got)
 					}
 					for _, x := range []int{start, end} {
@@ -60,6 +65,29 @@ func TestRenderedActionBarClickBoundariesAndWhitespace(t *testing.T) {
 			}
 		})
 	}
+}
+
+func sliceDisplayCells(value string, start, width int) string {
+	if start < 0 || width <= 0 {
+		return ""
+	}
+	end, position := start+width, 0
+	var result strings.Builder
+	graphemes := uniseg.NewGraphemes(value)
+	for graphemes.Next() {
+		cluster := graphemes.Str()
+		next := position + lipgloss.Width(cluster)
+		if next <= start {
+			position = next
+			continue
+		}
+		if position >= end {
+			break
+		}
+		result.WriteString(cluster)
+		position = next
+	}
+	return result.String()
 }
 
 func TestNarrowConfigurationActionViewportKeepsEveryFocusedActionReachable(t *testing.T) {
