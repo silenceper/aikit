@@ -305,6 +305,7 @@ type Model struct {
 	filterScroll            int
 	confirmReturn           confirmReturnState
 	confirmReturnReady      bool
+	startupUpdatePending    bool
 }
 
 func NewModel(ctx context.Context, service app.Service, migration app.MigrationService, initialView View, initialAction Action) Model {
@@ -327,9 +328,10 @@ func NewModel(ctx context.Context, service app.Service, migration app.MigrationS
 		ctx: ctx, service: service, migration: migration, action: initialAction,
 		ActiveView: initialView, OverviewSection: overviewUpdates, Mode: ModeTable, Focus: FocusList, Scope: scope, Width: 80, Height: 24,
 		Status: "Loading local snapshot...", Selected: make(map[string]bool), Ignored: make(map[string]bool),
-		routePositions:     make(map[string]routePosition),
-		overviewPositions:  make(map[overviewSectionID]routePosition),
-		LibraryStateFilter: LibraryStateAll, LibrarySourceFilter: LibrarySourceAll,
+		startupUpdatePending: true,
+		routePositions:       make(map[string]routePosition),
+		overviewPositions:    make(map[overviewSectionID]routePosition),
+		LibraryStateFilter:   LibraryStateAll, LibrarySourceFilter: LibrarySourceAll,
 	}
 }
 
@@ -442,6 +444,11 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.event.Done {
 			m.Inventory.Loading, m.Inventory.Complete = false, true
 			m.Status = fmt.Sprintf("Inventory complete: %d roots", m.Inventory.Completed)
+			if m.startupUpdatePending {
+				m.startupUpdatePending = false
+				m.Busy, m.Status = true, "Running startup update check..."
+				return m, m.beginTransitionActivity(cachedUpdateCheckCmd(m.ctx, m.service))
+			}
 			if len(m.Inventory.Issues) > 0 {
 				key := inventoryIssueKey(m.Inventory.Issues[0])
 				return m, m.finishActivity(ActivityWarning, fmt.Sprintf("Inventory completed with %d issue(s)", len(m.Inventory.Issues)), m.Inventory.Issues[0].Message, ReviewTarget{Kind: ReviewInventoryIssue, Key: key})

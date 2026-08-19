@@ -589,13 +589,28 @@ func (m Model) overlayPageSize() int {
 }
 
 func (m Model) advanceFocus() (tea.Model, tea.Cmd) {
+	if isPaneActionFocus(m.Focus) && m.ActionIndex+1 < len(m.currentActions()) {
+		m.ActionIndex++
+		return m, nil
+	}
 	m.moveFocus(1)
 	return m, nil
 }
 
 func (m Model) reverseFocus() (tea.Model, tea.Cmd) {
+	if isPaneActionFocus(m.Focus) && m.ActionIndex > 0 {
+		m.ActionIndex--
+		return m, nil
+	}
 	m.moveFocus(-1)
+	if isPaneActionFocus(m.Focus) {
+		m.ActionIndex = max(0, len(m.currentActions())-1)
+	}
 	return m, nil
+}
+
+func isPaneActionFocus(focus Focus) bool {
+	return focus == FocusCollectionActions || focus == FocusDetailActions
 }
 
 func (m *Model) moveFocus(delta int) {

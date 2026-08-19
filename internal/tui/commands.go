@@ -332,11 +332,19 @@ func batchCmd(ctx context.Context, service app.Service, request app.BatchRequest
 }
 
 func updateCheckCmd(ctx context.Context, service app.Service) tea.Cmd {
+	return updateCheckCmdWithRefresh(ctx, service, true)
+}
+
+func cachedUpdateCheckCmd(ctx context.Context, service app.Service) tea.Cmd {
+	return updateCheckCmdWithRefresh(ctx, service, false)
+}
+
+func updateCheckCmdWithRefresh(ctx context.Context, service app.Service, refresh bool) tea.Cmd {
 	return func() tea.Msg {
 		if service == nil {
 			return updateCheckMsg{err: errUnavailable("app service")}
 		}
-		result, err := service.Update(ctx, app.UpdateRequest{CheckOnly: true, Refresh: true})
+		result, err := service.Update(ctx, app.UpdateRequest{CheckOnly: true, Refresh: refresh})
 		return updateCheckMsg{result: result, err: err}
 	}
 }

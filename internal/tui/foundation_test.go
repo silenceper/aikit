@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/silenceper/aikit/internal/app"
+	"github.com/silenceper/aikit/internal/updatecheck"
 	"github.com/silenceper/aikit/pkg/config"
 )
 
@@ -55,8 +56,51 @@ func TestStartupSnapshotIsOfflineAndInventoryIsIncremental(t *testing.T) {
 	migration.calls[0].ch <- app.InventoryEvent{Generation: generation, Root: "p/aikit/codex", Issues: []app.ScanIssue{{State: app.ScanStateError, Origin: "p/aikit/codex", Message: "permission denied"}}, Completed: 2, Total: 2, Done: true}
 	next, _ = m.Update(wait())
 	m = next.(Model)
-	if m.Inventory.Loading || !m.Inventory.Complete || len(m.Inventory.Issues) != 1 || !strings.Contains(m.ViewString(), "permission denied") {
+	if m.Inventory.Loading || !m.Inventory.Complete || len(m.Inventory.Issues) != 1 || m.Inventory.Issues[0].Message != "permission denied" {
 		t.Fatalf("completed inventory = %+v\n%s", m.Inventory, m.ViewString())
+	}
+}
+
+func TestStartupAutomaticallyChecksUpdatesOnceUsingCache(t *testing.T) {
+	service := &fakeService{
+		snapshot: testSnapshot(),
+		updateResult: app.Result{Updates: updatecheck.CheckReport{Results: []updatecheck.Result{{
+			SkillID: "acme/alpha", Current: strings.Repeat("a", 40), Remote: strings.Repeat("c", 40), State: updatecheck.StateUpdateAvailable,
+		}}}},
+	}
+	migration := &startupMigration{}
+	m := NewModel(context.Background(), service, migration, ViewOverview, ActionNone)
+
+	next, wait := m.Update(m.Init()())
+	m = next.(Model)
+	generation := migration.calls[0].request.Generation
+	migration.calls[0].ch <- app.InventoryEvent{Generation: generation, Completed: 1, Total: 1, Done: true}
+	next, check := m.Update(wait())
+	m = next.(Model)
+	if check == nil || !m.Busy || m.Activity.Kind != ActivityNetwork || service.updateCalls != 0 {
+		t.Fatalf("automatic check did not start after inventory: busy=%v activity=%v calls=%d cmd=%v", m.Busy, m.Activity.Kind, service.updateCalls, check != nil)
+	}
+
+	message, ok := check().(activityResultMsg)
+	if !ok {
+		t.Fatalf("automatic check command returned %T", check())
+	}
+	next, _ = m.Update(message)
+	m = next.(Model)
+	if service.updateCalls != 1 || !service.lastUpdate.CheckOnly || service.lastUpdate.Refresh || service.lastUpdate.Confirmed {
+		t.Fatalf("automatic update request=%+v calls=%d", service.lastUpdate, service.updateCalls)
+	}
+	if len(m.Snapshot.Updates.Results) != 1 || m.Snapshot.Updates.Results[0].State != updatecheck.StateUpdateAvailable {
+		t.Fatalf("automatic update result=%+v", m.Snapshot.Updates)
+	}
+
+	next, follow := m.Update(inventoryMsg{event: app.InventoryEvent{Generation: generation, Completed: 1, Total: 1, Done: true}, ok: true})
+	m = next.(Model)
+	if follow != nil {
+		_ = follow()
+	}
+	if service.updateCalls != 1 {
+		t.Fatalf("automatic update check repeated: calls=%d", service.updateCalls)
 	}
 }
 

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -12,21 +13,52 @@ import (
 func TestPaneFocusOrderWideForwardAndReverse(t *testing.T) {
 	m := NewModel(context.Background(), &fakeService{}, &fakeMigration{}, ViewLibrary, ActionNone)
 	m.Snapshot, m.Width, m.Height = testSnapshot(), 120, 24
-	m.Focus = FocusNavigation
+	want := []Focus{FocusNavigation, FocusList, FocusCollectionActions, FocusDetail, FocusDetailActions}
+	if got := m.visibleFocusOrder(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("visible focus order=%v want=%v", got, want)
+	}
+}
 
-	want := []Focus{FocusList, FocusCollectionActions, FocusDetail, FocusDetailActions, FocusNavigation}
-	for _, focus := range want {
+func TestTabAndShiftTabVisitEveryVisiblePaneButton(t *testing.T) {
+	m := NewModel(context.Background(), &fakeService{}, &fakeMigration{}, ViewLibrary, ActionNone)
+	m.Snapshot, m.Width, m.Height = testSnapshot(), 120, 24
+	m.Focus = FocusList
+
+	forward := []struct {
+		focus Focus
+		index int
+	}{
+		{FocusCollectionActions, 0},
+		{FocusCollectionActions, 1},
+		{FocusDetail, 0},
+		{FocusDetailActions, 0},
+		{FocusDetailActions, 1},
+		{FocusNavigation, 0},
+	}
+	for _, want := range forward {
 		next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyTab})
 		m = next.(Model)
-		if cmd != nil || m.Focus != focus {
-			t.Fatalf("Tab focus=%s want=%s cmd=%v", m.Focus, focus, cmd != nil)
+		if cmd != nil || m.Focus != want.focus || m.ActionIndex != want.index {
+			t.Fatalf("Tab focus/index=%s/%d want=%s/%d cmd=%v", m.Focus, m.ActionIndex, want.focus, want.index, cmd != nil)
 		}
 	}
-	for index := len(want) - 2; index >= 0; index-- {
+
+	reverse := []struct {
+		focus Focus
+		index int
+	}{
+		{FocusDetailActions, 1},
+		{FocusDetailActions, 0},
+		{FocusDetail, 0},
+		{FocusCollectionActions, 1},
+		{FocusCollectionActions, 0},
+		{FocusList, 0},
+	}
+	for _, want := range reverse {
 		next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
 		m = next.(Model)
-		if cmd != nil || m.Focus != want[index] {
-			t.Fatalf("Shift+Tab focus=%s want=%s cmd=%v", m.Focus, want[index], cmd != nil)
+		if cmd != nil || m.Focus != want.focus || m.ActionIndex != want.index {
+			t.Fatalf("Shift+Tab focus/index=%s/%d want=%s/%d cmd=%v", m.Focus, m.ActionIndex, want.focus, want.index, cmd != nil)
 		}
 	}
 }
@@ -71,8 +103,13 @@ func TestCompactFocusUsesOnlyActivePane(t *testing.T) {
 	}
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m = next.(Model)
+	if m.Focus != FocusCollectionActions || m.ActionIndex != 1 {
+		t.Fatalf("collection second Tab focus/index=%s/%d", m.Focus, m.ActionIndex)
+	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = next.(Model)
 	if m.Focus != FocusNavigation {
-		t.Fatalf("collection second Tab focus=%s", m.Focus)
+		t.Fatalf("collection third Tab focus=%s", m.Focus)
 	}
 
 	m.Detail, m.Focus = true, FocusDetail
@@ -83,8 +120,13 @@ func TestCompactFocusUsesOnlyActivePane(t *testing.T) {
 	}
 	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
 	m = next.(Model)
+	if m.Focus != FocusDetailActions || m.ActionIndex != 1 {
+		t.Fatalf("detail second Tab focus/index=%s/%d", m.Focus, m.ActionIndex)
+	}
+	next, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = next.(Model)
 	if m.Focus != FocusNavigation {
-		t.Fatalf("detail second Tab focus=%s", m.Focus)
+		t.Fatalf("detail third Tab focus=%s", m.Focus)
 	}
 }
 

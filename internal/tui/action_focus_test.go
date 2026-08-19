@@ -167,8 +167,13 @@ func TestActionFocusTabLeftRightEnterAndEsc(t *testing.T) {
 	}
 	next, _ = m.Update(actionKey(tea.KeyTab))
 	m = next.(Model)
-	if m.Focus != FocusDetail || m.ActionIndex != 0 {
+	if m.Focus != FocusCollectionActions || m.ActionIndex != 1 {
 		t.Fatalf("Tab within actions focus=%s action=%d", m.Focus, m.ActionIndex)
+	}
+	next, _ = m.Update(actionKey(tea.KeyTab))
+	m = next.(Model)
+	if m.Focus != FocusDetail || m.ActionIndex != 0 {
+		t.Fatalf("Tab after final collection action focus=%s action=%d", m.Focus, m.ActionIndex)
 	}
 	next, _ = m.Update(actionKey(tea.KeyEsc))
 	m = next.(Model)
