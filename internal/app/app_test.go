@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/silenceper/aikit/internal/library"
@@ -211,6 +212,27 @@ func TestAddOnlyAndAddWithEnable(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertLink(t, filepath.Join(userHome, ".cursor", "skills", "two"))
+}
+
+func TestAddExactDuplicateIsReportedAsSkippedWithoutCommit(t *testing.T) {
+	_, paths, userHome, _ := testApp(t)
+	existing := config.Skill{ID: "local/demo", Name: "demo", Hash: "hash"}
+	fake := &fakeLibrary{root: paths.LibrarySkills, added: existing}
+	application := New(Dependencies{Store: config.Store{Paths: paths}, Paths: paths, UserHome: userHome, Library: fake})
+
+	result, err := application.Add(context.Background(), AddRequest{Source: "same-source"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Changed || len(result.Skills) != 0 || len(result.Skipped) != 1 || result.Skipped[0].ID != existing.ID {
+		t.Fatalf("duplicate result = %+v", result)
+	}
+	if fake.commits != 0 || fake.aborts != 1 {
+		t.Fatalf("duplicate mutation commits=%d aborts=%d", fake.commits, fake.aborts)
+	}
+	if len(result.Warnings) != 1 || !strings.Contains(result.Warnings[0], "Already in Library") {
+		t.Fatalf("duplicate warning = %v", result.Warnings)
+	}
 }
 
 func TestAddPreflightFailureAbortsWithoutCommittingLibrary(t *testing.T) {

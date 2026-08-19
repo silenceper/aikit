@@ -15,6 +15,7 @@ import (
 )
 
 type fakeService struct {
+	add         app.Result
 	update      app.Result
 	updateFunc  func(app.UpdateRequest) (app.Result, error)
 	updates     []app.UpdateRequest
@@ -75,7 +76,7 @@ func (f *fakeService) ValidateConfiguration(context.Context) (app.ConfigurationV
 func (f *fakeService) Add(_ context.Context, request app.AddRequest) (app.Result, error) {
 	f.last = "add"
 	f.lastAdd = request
-	return app.Result{}, nil
+	return f.add, nil
 }
 func (f *fakeService) Remove(context.Context, app.RemoveRequest) (app.Result, error) {
 	f.last = "remove"
@@ -209,6 +210,22 @@ func TestAddSingleRootCandidateSelectsByName(t *testing.T) {
 	}
 	if len(service.lastAdd.Skills) != 1 || service.lastAdd.Skills[0] != "demo" {
 		t.Fatalf("add selections = %#v, want demo", service.lastAdd.Skills)
+	}
+}
+
+func TestAddDuplicatePrintsExplicitSkippedSummary(t *testing.T) {
+	skipped := config.Skill{ID: "anthropics/skills/frontend-design", Name: "frontend-design"}
+	service := &fakeService{add: app.Result{Skipped: []config.Skill{skipped}, Warnings: []string{"Already in Library: " + skipped.ID + " · skipped"}}}
+	output := &bytes.Buffer{}
+	root := NewRoot(Dependencies{Service: service, IsTTY: func() bool { return false }})
+	root.SetOut(output)
+	root.SetErr(&bytes.Buffer{})
+	root.SetArgs([]string{"add", "https://skills.sh/anthropics/skills/frontend-design", "--skill", "frontend-design"})
+	if err := root.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if got := output.String(); !strings.Contains(got, "Already in Library") || !strings.Contains(got, "skipped 1") {
+		t.Fatalf("duplicate add output=%q", got)
 	}
 }
 

@@ -273,6 +273,8 @@ type Model struct {
 	ProjectPreview          app.ProjectEditPreview
 	ProjectRegistration     app.ProjectRegistrationPreview
 	ProjectResult           app.Result
+	OperationResult         app.Result
+	OperationName           string
 	Picker                  pickerState
 	RecoveryPreview         app.RecoveryPreview
 	RecoveryResult          app.RecoveryResult
@@ -366,7 +368,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return next, expiry
 	case activityTickMsg:
-		if msg.Generation != m.activityGeneration || (m.Activity.Kind != ActivityReading && m.Activity.Kind != ActivityNetwork) {
+		if msg.Generation != m.activityGeneration || (m.Activity.Kind != ActivityReading && m.Activity.Kind != ActivityNetwork && m.Activity.Kind != ActivityMutating) {
 			return m, nil
 		}
 		m.Activity.Frame = (m.Activity.Frame + 1) % len(activitySpinnerFrames)
@@ -708,6 +710,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, snapshotCmd(m.ctx, m.service)
 	case operationMsg:
 		m.Busy, m.MutationBusy = false, false
+		m.OperationResult, m.OperationName = msg.result, msg.name
 		if msg.err != nil {
 			if pending, ok := pendingRecoveryFromError(msg.err); ok {
 				return m.openRecoveryPreview(pending.Operations)
@@ -717,7 +720,13 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.Err = ""
-		if msg.name == "update" {
+		if msg.name == "add" && len(msg.result.Skipped) > 0 {
+			if len(msg.result.Skills) == 0 {
+				m.Status = fmt.Sprintf("Already in Library · skipped %d skill(s)", len(msg.result.Skipped))
+			} else {
+				m.Status = fmt.Sprintf("Added %d skill(s) · skipped %d already in Library", len(msg.result.Skills), len(msg.result.Skipped))
+			}
+		} else if msg.name == "update" {
 			m.Status = "Updated selected skills"
 		} else {
 			m.Status = title(msg.name) + " completed"
@@ -731,6 +740,9 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.forceAcknowledged = false
 		if msg.name != "preset" || m.ActiveView != ViewPresets || m.Scope.Level != "preset-skills" {
 			m.Selected = make(map[string]bool)
+		}
+		if msg.name == "add" && !msg.result.Changed {
+			return m, nil
 		}
 		return m, snapshotCmd(m.ctx, m.service)
 	case batchOperationMsg:

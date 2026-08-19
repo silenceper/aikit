@@ -18,7 +18,7 @@ func TestActivityKindsKeepDistinctSemanticMarkers(t *testing.T) {
 	}{
 		{ActivityReading, "⠋"},
 		{ActivityNetwork, "⠋"},
-		{ActivityMutating, "●"},
+		{ActivityMutating, "⠋"},
 		{ActivitySuccess, "✓"},
 		{ActivityWarning, "!"},
 		{ActivityError, "×"},
@@ -159,6 +159,35 @@ func TestBeginActivityCommandEmitsTicksUntilTypedResult(t *testing.T) {
 	}
 	if _, ok := result.Message.(configurationValidationMsg); !ok {
 		t.Fatalf("typed result=%T", result.Message)
+	}
+}
+
+func TestMutatingActivityKeepsAnimatingUntilCommandReturns(t *testing.T) {
+	m := NewModel(context.Background(), &fakeService{}, &fakeMigration{}, ViewLibrary, ActionNone)
+	release := make(chan struct{})
+	cmd := m.beginActivity(ActivityMutating, "Adding selected skills", "", func() tea.Msg {
+		<-release
+		return operationMsg{name: "add"}
+	})
+	if cmd == nil || !m.MutationBusy {
+		t.Fatalf("mutation activity did not start: busy=%v cmd=%v", m.MutationBusy, cmd != nil)
+	}
+
+	tick, ok := cmd().(activityTickMsg)
+	if !ok {
+		t.Fatalf("slow mutation first message=%T, want activityTickMsg", cmd())
+	}
+	next, follow := m.Update(tick)
+	m = next.(Model)
+	if m.Activity.Frame != 1 || follow == nil {
+		t.Fatalf("mutation did not animate: frame=%d follow=%v", m.Activity.Frame, follow != nil)
+	}
+	close(release)
+	if _, ok := follow().(activityResultMsg); !ok {
+		t.Fatalf("mutation follow message=%T", follow())
+	}
+	if got := stripANSI(renderActivity(m.Activity, 80, newSemanticTheme(themeDark))); !strings.Contains(got, activitySpinnerFrames[1]) {
+		t.Fatalf("mutation activity rendered without spinner frame: %q", got)
 	}
 }
 

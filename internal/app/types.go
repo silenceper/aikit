@@ -425,6 +425,7 @@ const (
 
 type Result struct {
 	Skills   []config.Skill
+	Skipped  []config.Skill
 	Updates  updatecheck.CheckReport
 	Plan     link.Plan
 	Link     link.Result

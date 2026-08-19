@@ -215,6 +215,28 @@ func TestActivityResultChoosesTruthfulTerminalStateAndReview(t *testing.T) {
 	}
 }
 
+func TestDuplicateAddCompletionIsVisibleAndReviewable(t *testing.T) {
+	m := readingActivityModel()
+	m.ActiveView = ViewLibrary
+	m.Activity = Activity{Kind: ActivityMutating, Label: "Adding selected skills", Generation: 21}
+	m.activityGeneration = 21
+	skipped := config.Skill{ID: "anthropics/skills/frontend-design", Name: "frontend-design"}
+
+	nextModel, command := m.Update(activityResultMsg{Generation: 21, Message: operationMsg{
+		name: "add", result: app.Result{Skipped: []config.Skill{skipped}, Warnings: []string{"Already in Library: anthropics/skills/frontend-design · skipped"}},
+	}})
+	next := nextModel.(Model)
+	if command != nil || next.Status != "Already in Library · skipped 1 skill(s)" {
+		t.Fatalf("duplicate add status=%q command=%v", next.Status, command != nil)
+	}
+	if next.Activity.Kind != ActivityWarning || next.Activity.Review.Kind != ReviewOperationResult {
+		t.Fatalf("duplicate add activity=%+v", next.Activity)
+	}
+	if lines := strings.Join(next.activityReviewLines(next.Activity.Review), "\n"); !strings.Contains(lines, skipped.ID) || !strings.Contains(lines, "Already in Library") {
+		t.Fatalf("duplicate add review=%q", lines)
+	}
+}
+
 func TestConfigurationReloadChainsIntoOfflineSnapshotActivity(t *testing.T) {
 	service := &fakeService{snapshot: testSnapshot(), configuration: app.ConfigurationDetail{Config: "/tmp/config.yaml"}}
 	m := configurationModel(service)

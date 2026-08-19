@@ -252,10 +252,8 @@ func renderActivity(activity Activity, width int, theme semanticTheme) string {
 	}
 	marker := ""
 	switch activity.Kind {
-	case ActivityReading, ActivityNetwork:
+	case ActivityReading, ActivityNetwork, ActivityMutating:
 		marker = activitySpinnerFrames[activity.Frame%len(activitySpinnerFrames)]
-	case ActivityMutating:
-		marker = "●"
 	case ActivitySuccess:
 		marker = "✓"
 	case ActivityWarning:

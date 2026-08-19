@@ -1,36 +1,92 @@
+**English** · [简体中文](README.zh-CN.md)
+
 # aikit
 
-`aikit` is a local-first skills manager for AI coding agents. It keeps one
-global ledger and one central skill library, then reconciles symlinks into the
-global and project workspaces used by Cursor, Claude Code, Codex, GitHub
-Copilot, and Windsurf.
+[![CI](https://github.com/silenceper/aikit/actions/workflows/ci.yml/badge.svg)](https://github.com/silenceper/aikit/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/silenceper/aikit?include_prereleases)](https://github.com/silenceper/aikit/releases)
+[![License](https://img.shields.io/github/license/silenceper/aikit)](LICENSE)
 
-The first release manages **Skills only**. Rules, MCP, Commands, Web UI,
-export/import, and cross-machine synchronization are intentionally out of
-scope.
+**aikit is a local-first skills manager for AI coding agents.** It keeps one
+authoritative ledger and one central skill library, then reconciles managed
+links into the global and project workspaces used by Cursor, Claude Code,
+Codex, GitHub Copilot, and Windsurf.
 
-## Why
+Use the full-screen, mouse-capable TUI for daily work or the deterministic CLI
+for scripts and CI.
 
-Agent skills are normally scattered across several IDE-specific directories.
-That makes it difficult to answer basic questions: which copy is authoritative,
-where a skill is enabled, whether two copies drifted, and how to update all
-consumers safely.
+## Why aikit
 
-`aikit` gives those concerns explicit owners:
+Agent skills tend to become scattered copies across IDE-specific directories.
+That makes basic questions surprisingly difficult:
 
-- `$AIKIT_HOME/config.yaml` is the single ledger.
+- Which copy is authoritative?
+- Where is a skill enabled?
+- Did a project copy drift from the library?
+- Can an update or cleanup finish safely after interruption?
+
+aikit gives each concern one owner:
+
+- `$AIKIT_HOME/config.yaml` is the durable ledger.
 - `$AIKIT_HOME/library/skills/<id>` is the central content library.
-- Agent directories contain managed symlinks, not independent copies.
-- Presets and project bindings store skill IDs and are reconciled from the
-  ledger.
-- Pending cleanup/adopt operations and library journals make interrupted
-  mutations recoverable.
+- Agent directories contain managed links instead of independent copies.
+- Global, project, and preset bindings refer to stable skill IDs.
+- Pending operations and library journals preserve explicit recovery state.
 
-When `AIKIT_HOME` is unset it defaults to `~/.aikit`.
+## Project status
 
-## Supported agents
+> [!IMPORTANT]
+> aikit is alpha software. Its safety model is production-oriented, but CLI,
+> TUI, configuration, and recovery metadata may still change before v1. Keep a
+> recoverable backup of important configuration and review dry-run output
+> before adopting existing directories.
 
-| Agent | Global skills | Project skills |
+This documentation describes the current `main` branch. The latest published
+alpha predates the current TUI, recovery, and workflow feature set. Build from
+source to use the behavior documented here; release archives remain available
+for evaluating the older published alpha.
+
+The current release manages **Skills only**. Rules, MCP configuration, command
+packs, a Web UI, export/import, cross-machine synchronization, and enterprise
+support are intentionally out of scope.
+
+macOS and Linux are the primary runtime targets. Release builds are configured
+for Linux, macOS, and Windows on amd64 and arm64, and CI cross-compiles each
+target. Cross-compilation is not native behavioral certification. In
+particular, authenticated link recovery that requires anchored Unix directory
+operations is unavailable on Windows and other unsupported platforms; those
+operations fail closed instead of continuing unsafely.
+
+See the [changelog](CHANGELOG.md) for release history and known evolution.
+
+## Features
+
+- **One central library** — discover, hash, add, inspect, update, compare, and
+  remove skills without treating agent directories as independent sources.
+- **Local and Git sources** — accept a local directory, Git URL, GitHub
+  `owner/repo` shorthand, or an exact `skills.sh/<owner>/<repo>/<skill>` URL.
+- **Global and project scopes** — enable skills globally, for project-common
+  use, or for a specific Agent in a registered project.
+- **Reusable presets** — maintain named skill sets and apply them to exact
+  global or project scopes.
+- **Interactive TUI** — keyboard and mouse navigation, responsive layouts,
+  previews, exact confirmations, filtering, multi-select actions, and readable
+  activity state.
+- **Offline local inventory** — startup scans supported global roots and every
+  registered project without fetching Git or mutating the ledger.
+- **Updates and pinned refs** — cache branch update checks; keep tag and commit
+  refs pinned; preserve the original Git transport.
+- **Explicit migration and recovery** — preview import/adopt decisions and
+  review pending recovery before new mutations proceed.
+- **Fail-closed cleanup** — preserve unknown or replaced content when managed
+  ownership cannot be proven.
+
+## Preview
+
+<!-- TUI screenshots will be added after the visual layout is frozen. -->
+
+## Supported agents and platforms
+
+| Agent ID | Global skill directory | Project skill directory |
 |---|---|---|
 | `cursor` | `~/.cursor/skills` | `<project>/.cursor/skills` |
 | `claude-code` | `~/.claude/skills` | `<project>/.claude/skills` |
@@ -38,29 +94,50 @@ When `AIKIT_HOME` is unset it defaults to `~/.aikit`.
 | `copilot` | `~/.copilot/skills` | `<project>/.agents/skills` |
 | `windsurf` | `~/.codeium/windsurf/skills` | `<project>/.windsurf/skills` |
 
+| Platform | Release build | Current support boundary |
+|---|---|---|
+| macOS amd64/arm64 | Yes | Primary runtime target |
+| Linux amd64/arm64 | Yes | Primary runtime target |
+| Windows amd64/arm64 | Yes | Builds and baseline workflows; anchored link recovery fails closed |
+
 ## Installation
 
-```bash
-brew tap silenceper/tap
-brew install aikit
-```
+### Build from source (recommended)
 
-Or build from source:
+Go 1.25 or newer is required. This is currently the supported way to run the
+feature set documented in this README.
 
 ```bash
+git clone https://github.com/silenceper/aikit.git
+cd aikit
 make build
 ./bin/aikit version
 ```
 
+### Published alpha archives
+
+Download the archive for your operating system and architecture from
+[GitHub Releases](https://github.com/silenceper/aikit/releases), then verify it
+against `checksums.txt` from the same release before placing `aikit` on your
+`PATH`. These archives currently contain the older published alpha and do not
+yet include every workflow documented for `main`.
+
+Release archives are `.tar.gz` on Linux and macOS and `.zip` on Windows.
+
+Homebrew publication is not documented until its release path has been
+verified end to end.
+
 ## Quick start
 
-Add a local skill to the library and enable it globally for Codex:
+### 1. Add a skill
+
+Add a local skill and enable it globally for Codex:
 
 ```bash
 aikit add ./my-skill --agent codex
 ```
 
-Add one or more skills from a Git repository:
+Add selected skills from a Git repository:
 
 ```bash
 aikit add vercel-labs/agent-skills --skill code-review
@@ -69,21 +146,34 @@ aikit add https://gitlab.example.com/team/skills.git \
   --skill review --skill release
 ```
 
-An exact `skills.sh/<owner>/<repo>/<skill>` page selects that page's skill by
-default; an explicit repeatable `--skill` always overrides the suggestion.
-`owner/repo` shorthand is cloned from GitHub. Aikit resolves `skills.sh` URLs
-locally and clones the underlying GitHub repository directly; it does not run
+An exact `skills.sh` page suggests that page's skill. A repeatable `--skill`
+always overrides the suggestion. GitHub `owner/repo` shorthand is resolved to
+GitHub. aikit clones the underlying repository directly and does not execute
 `npx` or depend on a marketplace API.
 
-Register a project, then enable a skill for one project agent:
+### 2. Register a project
 
 ```bash
-aikit project add . --name my-project --agent cursor --agent codex
-aikit enable vercel-labs/agent-skills/code-review \
-  --project my-project --agent codex
+aikit project add /path/to/project \
+  --name my-project \
+  --agent cursor \
+  --agent codex
 ```
 
-Create and apply a preset:
+The TUI offers a path-first workflow that derives the name and detects Agent
+directories automatically before showing an exact preview.
+
+### 3. Enable a project skill
+
+```bash
+aikit enable vercel-labs/agent-skills/code-review \
+  --project my-project \
+  --agent codex
+```
+
+Omit `--agent` with `--project` to target the project's common skill scope.
+
+### 4. Create and apply a preset
 
 ```bash
 aikit preset create essentials \
@@ -91,151 +181,207 @@ aikit preset create essentials \
 aikit enable --preset essentials --agent cursor
 ```
 
-Inspect and reconcile:
+### 5. Inspect and reconcile
 
 ```bash
-aikit status
+aikit status --offline
 aikit sync --dry-run
 aikit sync
 ```
 
-Running `aikit` without arguments opens the full-screen TUI when stdin is a
-TTY. On every launch it first renders the local ledger, then scans all
-supported global Agent roots and every registered project incrementally. This
-startup inventory is offline and read-only: it does not fetch Git sources,
-rewrite configuration, import skills, or adopt existing directories.
+## TUI
 
-The TUI is English-first and supports both keyboard and mouse input. The
-navigation rail displays `1`–`6` next to the matching sections; use those keys
-to switch sections, `j`/`k` or the arrow keys to move, `Tab` to move between the
-list, details, and actions, `Enter` to activate, `/` to filter, `?` for help,
-and the mouse wheel or clickable rows and buttons for the same operations.
-Mutating actions show a preview and explicit confirmation before writing.
-For a remote **Library > Add source**, the first confirmation only permits a
-temporary Git checkout. The resulting skills are shown as a multi-select list;
-the second confirmation adds the selected candidates. Cancelling either step
-does not change config or the Library.
+Run `aikit` without arguments from a terminal. Non-TTY environments must use an
+explicit CLI command and never fall into an interactive screen.
 
-Missing required arguments never open a TUI in CI or another non-TTY
-environment.
+The navigation rail provides these daily destinations:
 
-## TUI workspace
+- **Overview** — attention queue, update summary, and common entry points.
+- **Library** — managed skills, details, source addition, refs, updates, and
+  multi-select actions.
+- **Presets** — reusable sets, membership, duplication, rename, delete, and
+  exact-scope application.
+- **Global / Agents / Projects** — direct access to workspace bindings and
+  project management.
+- **Configuration** — resolved config, library, and cache paths plus read-only
+  validation and reload.
 
-The six top-level sections keep the first screen intentionally compact:
+Health details, local import review, and explicit recovery are available from
+the command palette when relevant.
 
-- **Overview** summarizes library size, unmanaged skills, drift, updates, and
-  pending recovery.
-- **Library** shows centrally managed skills, details, add, remove, and update
-  entry points.
-- **Workspaces** groups global Agents and registered projects, including common
-  and per-Agent bindings.
-- **Presets** manages reusable skill sets.
-- **Migration** presents exact local origins and the planned Import, Adopt,
-  Link-existing, or Ignore action before confirmation.
-- **Status** shows reconciliation issues and previews sync work.
+Common controls:
 
-Project setup in the TUI is path-first: open **Workspaces > Projects > Create
-project** and enter the existing project directory. Aikit derives the project
-name, detects supported Agent directories, and shows an exact preview. It asks
-for a separate name only when the derived name is invalid or already used.
-After registration, open **Common** or a declared Agent to toggle one skill or
-choose **Select skills** for a searchable atomic batch. **Manage agents** uses
-checkboxes; Rename and Change project directory are separate actions under
-**More**.
+| Key | Action |
+|---|---|
+| Mouse click / wheel | Select, activate, or scroll the same visible controls |
+| `j` / `k`, arrows | Move within the focused pane |
+| `Tab` / `Shift+Tab` | Move focus between navigation, list, details, and actions |
+| `Enter` | Open or activate the focused item |
+| `Space` | Select a row or toggle a binding where available |
+| `/` | Filter the current collection |
+| `Ctrl+P` or `:` | Open the command palette |
+| `Ctrl+K` | Open Configuration directly |
+| `Esc` | Go back or cancel; it does not quit from the main screen |
+| `Ctrl+Q` | Quit normally |
+| `Ctrl+C` | Emergency exit, including during an operation |
+| `?` | Open contextual help |
 
-Presets are visible in both directions. The **Presets** page shows each
-preset's member count and applied scopes. **Workspaces > Global** and Agent rows
-expose **Apply preset** directly. Inside a Project, select **Common** or an Agent
-and choose **Apply preset**; that selected scope is reused instead of asking for
-the target twice. If no Preset exists, the same workspace action becomes
-**Create preset**. No encoded `agent:name` or pipe-delimited project input is
-required.
+Startup first renders the local ledger, then incrementally inventories all
+supported global Agent roots and registered projects. Startup inventory is
+offline and read-only: it does not fetch Git, import content, adopt paths,
+rewrite configuration, or mutate the central library.
 
-Press `Ctrl+K` to open Configuration. The global YAML ledger is
-`$AIKIT_HOME/config.yaml`; when `AIKIT_HOME` is unset the path is
-`~/.aikit/config.yaml`. The configuration view also reports the resolved path,
-so changing `AIKIT_HOME` is visible before any operation.
+Mutating workflows build a typed preview and require explicit confirmation.
+For a remote **Add source**, the first confirmation permits only temporary Git
+discovery; a second screen selects exact candidates before anything is added.
 
-## Commands
+## CLI
+
+The CLI covers deterministic automation and supports global `--json` output.
 
 ```text
 aikit add <source-or-path> [--skill ...] [--agent ...] [--project ...]
-aikit list [--agent ...] [--project ...] [--preset ...]
-aikit remove <id> [--force]
-aikit enable <id> | --preset <name> --agent/--project
-aikit disable <id> | --preset <name> --agent/--project
+aikit list [--agent ...] [--project ...] [--preset ...] [--offline]
+aikit remove <id> [--force] [--yes]
+aikit enable [id] | --preset <name> --agent/--project
+aikit disable [id] | --preset <name> --agent/--project
 aikit preset create|add|remove|list
 aikit project add|edit|remove|list
 aikit sync [--agent ...] [--project ...] [--dry-run]
 aikit status [--offline] [--refresh]
-aikit update [id] [--check] [--yes] [--ref branch:...|tag:...|commit:...]
-aikit scan [--agent ...] [--project ...] [--adopt]
+aikit update [id] [--skill ...] [--check] [--yes]
+             [--ref branch:...|tag:...|commit:...]
+aikit scan [--agent ...] [--project ...] [--skill ...] [--all] [--adopt]
 aikit migrate [--project ...] [--dry-run] [--adopt]
 ```
 
-Use `aikit <command> --help` for the complete flags.
+Use `aikit <command> --help` for the authoritative flags.
 
-## Updates and refs
+The TUI currently exposes some advanced workflows that do not have a dedicated
+CLI command, including Configuration validation/reload, atomic multi-action
+Library batches, preset rename/duplicate, skill comparison, and explicit
+recovery review/resume. Presets can still be created, edited, listed, removed,
+and applied from the CLI.
 
-Remote skills store a canonical source, the skill's repository-relative
-`source_path`, a structured ref, and the full resolved object ID. Branch refs
-participate in update checks; tag and commit refs are pinned.
+### Updates and refs
+
+Remote skills record their canonical source, repository-relative source path,
+structured ref, and full resolved object ID. Branch refs participate in update
+checks; tag and commit refs remain pinned.
 
 ```bash
 aikit update --check
 aikit update --yes
-aikit update <id> --ref tag:v2.0.0 --yes
+aikit update <id> --ref tag:v2.0.0 --force --yes
 aikit status --offline
 ```
 
-In a non-TTY environment, an update without `--yes` is check-only. Exit code
-`2` means updates are available but nothing was changed. Exit code `1` means a
-partial result, drift, conflict, pending recovery, or another error.
+In a non-TTY environment, an update without `--yes` is check-only.
 
-## Scan, adopt, and migration
+### Exit codes
 
-`scan` discovers existing skills in supported agent directories and imports
-their content without replacing those directories. `scan --adopt` is the
-explicit authorization to replace a discovered directory with a managed
-symlink; interrupted adoption is recorded and recoverable.
+| Code | Meaning |
+|---|---|
+| `0` | Operation completed without a reported issue |
+| `1` | Error or partial result, including drift, conflict, or pending recovery |
+| `2` | Updates are available but nothing was changed |
 
-The previous `catalog.yaml` and project `.aikit.yaml` formats are not used as
-the live ledger. Migrate them explicitly:
+## Configuration and data
+
+`AIKIT_HOME` defaults to `~/.aikit` and must resolve to an absolute local path.
+
+| Path | Purpose |
+|---|---|
+| `$AIKIT_HOME/config.yaml` | Durable global ledger |
+| `$AIKIT_HOME/config.lock` | Cross-process mutation lock |
+| `$AIKIT_HOME/library/skills/<id>` | Central skill content |
+| `$AIKIT_HOME/cache/` | Git mirrors, temporary source data, and update cache |
+
+Set a separate home for testing or isolated profiles:
 
 ```bash
-aikit migrate --dry-run
-aikit migrate
-aikit migrate --project /path/to/project --adopt
+AIKIT_HOME=/absolute/path/to/aikit-home aikit status --offline
 ```
 
-Migration reads old files but does not delete them.
+Do not hand-edit the ledger while aikit is running. Keep a backup before manual
+repair, preserve pending-operation fields, and use TUI recovery review rather
+than deleting journal or quarantine files.
 
-## Safety model
+## Safety and recovery
 
-- All mutations are serialized by `$AIKIT_HOME/config.lock`.
-- The ledger is checkpointed atomically.
-- Library changes use staged, journaled mutations and ledger-directed crash
-  recovery.
-- Normal reconciliation never overwrites a real user directory.
-- Destructive cleanup verifies ownership and fails closed when content changed.
-- Update checks preserve the original Git transport without writing to the
-  persistent mirror.
-- Status and dry-run operations are read-only.
+aikit's filesystem model is designed to fail closed:
 
-## Development
+- mutations are serialized by `$AIKIT_HOME/config.lock`;
+- configuration checkpoints use atomic replacement;
+- Library changes use staged, journaled, ledger-directed mutations;
+- normal reconciliation does not overwrite a real directory or unknown file;
+- destructive cleanup authenticates expected managed objects and preserves
+  replaced or unrecognized content;
+- source discovery and content reads use containment and no-follow checks;
+- authorization headers, embedded credentials, and sensitive URLs are redacted
+  from errors;
+- preview, dry-run, status-offline, and startup inventory paths are read-only;
+- pending recovery blocks unrelated mutations until it is reviewed explicitly.
+
+No local filesystem tool can protect against every privileged or hostile
+same-user process. Keep operating-system backups for important work and inspect
+unexpected conflicts instead of deleting `.aikit-*` artifacts manually.
+
+## Troubleshooting
+
+### `aikit` says a command is required
+
+stdin is not a TTY, so aikit correctly refused to open the full-screen UI. Use
+an explicit command such as `aikit list --offline` or `aikit status --offline`.
+
+### A path is occupied or cleanup is blocked
+
+Run:
 
 ```bash
-make test
+aikit status --offline
+aikit sync --dry-run
+```
+
+aikit preserves unknown content instead of overwriting it. Inspect the reported
+path and move or reconcile it manually only after verifying ownership.
+
+### A pending recovery blocks changes
+
+Open the TUI and choose **Review recovery** from the command palette or
+attention queue. Review the exact operation IDs and paths before resuming.
+Do not delete pending ledger entries or `.aikit-*` artifacts by hand.
+
+### Remote update checks fail
+
+Use `aikit status --offline` to inspect local state without network access.
+Check that the same Git URL works with your normal Git credential helper or SSH
+agent. aikit rejects HTTP(S) sources with embedded userinfo; do not put tokens
+in source URLs.
+
+### aikit uses an unexpected configuration
+
+Check `AIKIT_HOME`, then press `Ctrl+K` in the TUI to view the resolved config,
+Library, and cache paths.
+
+## Contributing and support
+
+- Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
+- Use [SUPPORT.md](SUPPORT.md) to choose the correct support channel.
+- Report vulnerabilities privately according to [SECURITY.md](SECURITY.md).
+- All community participation follows the [Code of Conduct](CODE_OF_CONDUCT.md).
+- User-visible changes are tracked in [CHANGELOG.md](CHANGELOG.md).
+
+Development verification:
+
+```bash
+make check
 make test-e2e
-go vet ./...
 ```
 
 The end-to-end test uses only temporary local directories and a local skill; it
 does not require network access or alter real agent directories.
 
-The implementation specification is
-[`docs/superpowers/specs/2026-08-13-global-skills-manager-design.md`](docs/superpowers/specs/2026-08-13-global-skills-manager-design.md).
-
 ## License
 
-Apache-2.0
+aikit is licensed under the [Apache License 2.0](LICENSE).

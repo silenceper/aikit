@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -144,6 +145,93 @@ func TestPrepareGitSkillsSHSelectsPageSkillAndExplicitSelectionOverrides(t *test
 				t.Fatalf("clone did not use resolved GitHub source: %+v", runner.invocations)
 			}
 		})
+	}
+}
+
+func TestPrepareGitUsesFilteredMirrorAndManagedWorktree(t *testing.T) {
+	runnerCustomWrite = func(dir string) {
+		writeTestFileForRunner(filepath.Join(dir, "skills", "frontend-design", "SKILL.md"), "---\nname: frontend-design\n---\nbody")
+	}
+	defer func() { runnerCustomWrite = nil }()
+	runner := &fakeRunner{resolved: strings.Repeat("a", 40)}
+	service := Service{LibraryRoot: t.TempDir(), CacheRoot: t.TempDir(), Runner: runner}
+
+	mutation, err := service.PrepareGit(context.Background(), "https://github.com/anthropics/skills.git", GitAddOptions{Skills: []string{"frontend-design"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mutation.Abort()
+
+	var filteredMirror, worktree bool
+	for _, invocation := range runner.invocations {
+		if slices.Contains(invocation, "--mirror") && slices.Contains(invocation, "--filter=blob:none") {
+			filteredMirror = true
+		}
+		if slices.Contains(invocation, "worktree") && slices.Contains(invocation, "add") {
+			worktree = true
+		}
+	}
+	if !filteredMirror {
+		t.Fatalf("persistent clone did not use a filtered mirror: %+v", runner.invocations)
+	}
+	if !worktree {
+		t.Fatalf("filtered mirror was not checked out through a managed worktree: %+v", runner.invocations)
+	}
+}
+
+func TestPrepareGitSkipsExactDuplicateAndRejectsChangedDuplicate(t *testing.T) {
+	const skillBody = "---\nname: frontend-design\n---\nbody"
+	fixture := t.TempDir()
+	writeTestFile(t, filepath.Join(fixture, "skills", "frontend-design", "SKILL.md"), skillBody, 0o644)
+	writeTestFile(t, filepath.Join(fixture, "skills", "new-skill", "SKILL.md"), "---\nname: new-skill\n---\nnew", 0o644)
+	discovered, err := DiscoverGit(fixture)
+	if err != nil || len(discovered) != 2 {
+		t.Fatalf("discover fixture = %+v, %v", discovered, err)
+	}
+	var existingHash string
+	for _, candidate := range discovered {
+		if candidate.Name == "frontend-design" {
+			existingHash = candidate.Hash
+		}
+	}
+	existing := config.Skill{
+		ID: "anthropics/skills/frontend-design", Name: "frontend-design",
+		Source: "anthropics/skills", SourcePath: "skills/frontend-design",
+		Ref: &config.Ref{Kind: "branch", Value: "main"}, Resolved: strings.Repeat("a", 40), Hash: existingHash,
+	}
+	libraryRoot := t.TempDir()
+	writeTestFile(t, filepath.Join(libraryRoot, filepath.FromSlash(existing.ID), "SKILL.md"), skillBody, 0o644)
+	runnerCustomWrite = func(dir string) {
+		writeTestFileForRunner(filepath.Join(dir, "skills", "frontend-design", "SKILL.md"), skillBody)
+		writeTestFileForRunner(filepath.Join(dir, "skills", "new-skill", "SKILL.md"), "---\nname: new-skill\n---\nnew")
+	}
+	defer func() { runnerCustomWrite = nil }()
+	service := Service{LibraryRoot: libraryRoot, CacheRoot: t.TempDir(), Runner: &fakeRunner{resolved: strings.Repeat("b", 40)}}
+
+	mutation, err := service.PrepareGit(context.Background(), "https://github.com/anthropics/skills.git", GitAddOptions{
+		Skills: []string{"frontend-design", "new-skill"}, Existing: []config.Skill{existing},
+	})
+	if err != nil {
+		t.Fatalf("exact duplicate should be a no-op: %v", err)
+	}
+	defer mutation.Abort()
+	if len(mutation.Skills) != 2 || mutation.Skills[0].ID != existing.ID {
+		t.Fatalf("duplicate entries = %+v", mutation.Skills)
+	}
+	if err := mutation.Commit(context.Background()); err != nil {
+		t.Fatalf("duplicate no-op commit: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(libraryRoot, "anthropics", "skills", "new-skill", "SKILL.md")); err != nil {
+		t.Fatalf("new skill was not added beside skipped duplicate: %v", err)
+	}
+
+	changed := existing
+	changed.Hash = "different-hash"
+	_, err = service.PrepareGit(context.Background(), "https://github.com/anthropics/skills.git", GitAddOptions{
+		Skills: []string{"frontend-design"}, Existing: []config.Skill{changed},
+	})
+	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "use update") {
+		t.Fatalf("changed duplicate error = %v, want update guidance", err)
 	}
 }
 
@@ -316,27 +404,50 @@ func (f *fakeRunner) Run(_ context.Context, dir string, args ...string) (string,
 		return "", nil
 	case "fetch":
 		return "", nil
+	case "worktree":
+		if len(args) < 2 {
+			return "", errors.New("missing worktree command")
+		}
+		switch args[1] {
+		case "prune":
+			return "", nil
+		case "add":
+			dest := args[len(args)-2]
+			if err := os.MkdirAll(dest, 0o755); err != nil {
+				return "", err
+			}
+			f.populateCheckout(dest)
+			return "", nil
+		case "remove":
+			return "", os.RemoveAll(args[len(args)-1])
+		default:
+			return "", fmt.Errorf("unsupported worktree command %q", args[1])
+		}
 	case "symbolic-ref":
 		return "origin/main\n", nil
 	case "checkout":
-		if runnerCustomWrite != nil {
-			runnerCustomWrite(dir)
-			return "", nil
-		}
-		if f.empty {
-			return "", nil
-		}
-		name := f.name
-		if name == "" {
-			name = "remote-skill"
-		}
-		writeTestFileForRunner(filepath.Join(dir, "packages", "skill", "SKILL.md"), "---\nname: "+name+"\n---\nremote")
+		f.populateCheckout(dir)
 		return "", nil
 	case "rev-parse":
 		return f.resolved + "\n", nil
 	default:
 		return "", nil
 	}
+}
+
+func (f *fakeRunner) populateCheckout(dir string) {
+	if runnerCustomWrite != nil {
+		runnerCustomWrite(dir)
+		return
+	}
+	if f.empty {
+		return
+	}
+	name := f.name
+	if name == "" {
+		name = "remote-skill"
+	}
+	writeTestFileForRunner(filepath.Join(dir, "packages", "skill", "SKILL.md"), "---\nname: "+name+"\n---\nremote")
 }
 
 func (f *fakeRunner) sawArgument(value string) bool {
@@ -665,7 +776,7 @@ func TestUpdateRefCheckoutAndCopyFailuresKeepOldResult(t *testing.T) {
 		resolved    string
 		copyFailure bool
 	}{
-		{name: "checkout", fail: "checkout", resolved: strings.Repeat("b", 40)},
+		{name: "checkout", fail: "worktree", resolved: strings.Repeat("b", 40)},
 		{name: "short object id", resolved: "abc123"},
 		{name: "copy", resolved: strings.Repeat("b", 40), copyFailure: true},
 	} {

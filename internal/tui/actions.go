@@ -515,6 +515,9 @@ func (m Model) confirmAction() (tea.Model, tea.Cmd) {
 		})
 	case ActionAdd:
 		m.Status = "Adding selected skills..."
+		if m.pendingAdd.ExpectedResolved != "" {
+			m.Status = "Caching remote source and adding selected skills..."
+		}
 		return m, addCmd(m.ctx, m.service, m.pendingAdd)
 	case ActionPreset:
 		if m.pendingPreset.Operation == app.PresetDelete && m.Preview.RequiresForce && !m.pendingPreset.Force {

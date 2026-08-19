@@ -49,7 +49,18 @@ func newAddCommand(deps Dependencies) *cobra.Command {
 		if err != nil {
 			return err
 		}
-		if err := writeValue(cmd, result, fmt.Sprintf("Added %d skill(s)", len(result.Skills))); err != nil {
+		summary := fmt.Sprintf("Added %d skill(s)", len(result.Skills))
+		if len(result.Skipped) > 0 {
+			switch {
+			case len(result.Skills) == 0 && result.Changed:
+				summary = fmt.Sprintf("Already in Library: skipped %d skill(s); binding updated", len(result.Skipped))
+			case len(result.Skills) == 0:
+				summary = fmt.Sprintf("Already in Library: skipped %d skill(s)", len(result.Skipped))
+			default:
+				summary = fmt.Sprintf("Added %d skill(s); skipped %d already in Library", len(result.Skills), len(result.Skipped))
+			}
+		}
+		if err := writeValue(cmd, result, summary); err != nil {
 			return err
 		}
 		return resultError(result)

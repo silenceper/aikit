@@ -727,6 +727,16 @@ func (m Model) rowContext(current row) string {
 }
 
 func (m Model) detailLines() []string {
+	if m.OperationName == "add" && (len(m.OperationResult.Skipped) > 0 || len(m.OperationResult.Warnings) > 0) {
+		lines := []string{"Last add result"}
+		for _, skill := range m.OperationResult.Skipped {
+			lines = append(lines, "Skipped: "+skill.ID+" · Already in Library")
+		}
+		for _, warning := range m.OperationResult.Warnings {
+			lines = append(lines, "Warning: "+warning)
+		}
+		return lines
+	}
 	if m.ActiveView == ViewOverview {
 		lines := []string{fmt.Sprintf("Workspace needs attention: %d", len(m.attentionRows())), "Startup scans local paths only."}
 		for _, issue := range m.Inventory.Issues {

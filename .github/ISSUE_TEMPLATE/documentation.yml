@@ -1,0 +1,35 @@
+name: Documentation issue
+description: Report missing, unclear, or incorrect documentation
+title: "docs: "
+labels:
+  - documentation
+body:
+  - type: input
+    id: location
+    attributes:
+      label: Document or section
+      placeholder: README.md > Quick start
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is missing, unclear, outdated, or incorrect?
+    validations:
+      required: true
+  - type: textarea
+    id: correction
+    attributes:
+      label: Suggested correction
+  - type: dropdown
+    id: languages
+    attributes:
+      label: Affected language
+      multiple: true
+      options:
+        - English
+        - 简体中文
+        - Both
+    validations:
+      required: true

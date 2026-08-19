@@ -1,0 +1,54 @@
+name: Feature request
+description: Propose a user workflow or capability
+title: "feat: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user problem cannot be solved well today?
+    validations:
+      required: true
+  - type: textarea
+    id: workflow
+    attributes:
+      label: Desired workflow
+      description: Describe the outcome from the user's perspective.
+    validations:
+      required: true
+  - type: dropdown
+    id: interface
+    attributes:
+      label: Interface
+      multiple: true
+      options:
+        - TUI
+        - CLI
+        - Configuration
+        - Library and sources
+        - Workspaces and projects
+        - Presets
+        - Recovery and migration
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: textarea
+    id: safety
+    attributes:
+      label: Data, compatibility, or security considerations
+      description: Call out any filesystem writes, credential handling, migration, or compatibility impact.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched for an existing request.
+          required: true
+        - label: This request is within aikit's Skills management scope.
+          required: true

@@ -8,7 +8,7 @@ LDFLAGS := -s -w \
 	-X github.com/silenceper/aikit/cmd.commit=$(COMMIT) \
 	-X github.com/silenceper/aikit/cmd.date=$(DATE)
 
-.PHONY: build install clean test test-e2e run
+.PHONY: build install clean test test-e2e run check check-docs check-format check-mod check-build check-test check-vet check-cross
 
 build:
 	@mkdir -p $(BIN_DIR)
@@ -25,6 +25,35 @@ test:
 
 test-e2e: build
 	bash scripts/test-e2e.sh
+
+check-docs:
+	bash scripts/check-docs-test.sh
+	bash scripts/check-docs.sh
+
+check-format:
+	@files="$$(gofmt -l $$(git ls-files '*.go'))"; if [ -n "$$files" ]; then echo "Go files need formatting:"; echo "$$files"; exit 1; fi
+
+check-mod:
+	go mod tidy -diff
+
+check-build:
+	go build ./...
+
+check-test:
+	go test -race ./...
+
+check-vet:
+	go vet ./...
+
+check-cross:
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ./...
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build ./...
+	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build ./...
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build ./...
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build ./...
+	CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build ./...
+
+check: check-docs check-format check-mod check-build check-test check-vet check-cross
 
 run: build
 	./$(BIN_DIR)/$(BINARY_NAME) $(ARGS)

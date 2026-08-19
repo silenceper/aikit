@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"reflect"
 
 	"github.com/silenceper/aikit/internal/link"
 	"github.com/silenceper/aikit/pkg/config"
@@ -69,9 +70,15 @@ func (a *App) Add(ctx context.Context, request AddRequest) (Result, error) {
 		if (request.Agent != "" || request.Project != "") && len(added) != 1 {
 			return fmt.Errorf("add-and-enable requires exactly one selected skill")
 		}
+		changedSkills := make([]config.Skill, 0, len(added))
+		skipped := make([]config.Skill, 0, len(added))
 		for _, skill := range added {
 			index := skillIndex(tx.Config, skill.ID)
 			if index >= 0 {
+				if !request.Force && sameStoredSkill(tx.Config.Library.Skills[index], skill) {
+					skipped = append(skipped, tx.Config.Library.Skills[index])
+					continue
+				}
 				if !request.Force && tx.Config.Library.Skills[index].Hash != skill.Hash {
 					return fmt.Errorf("skill id %q already exists", skill.ID)
 				}
@@ -79,17 +86,30 @@ func (a *App) Add(ctx context.Context, request AddRequest) (Result, error) {
 			} else {
 				tx.Config.Library.Skills = append(tx.Config.Library.Skills, skill)
 			}
+			changedSkills = append(changedSkills, skill)
 		}
+		bindingChanged := false
 		if request.Agent != "" || request.Project != "" {
+			beforeBinding := cloneConfig(tx.Config)
 			if err := mutateBinding(tx.Config, BindingRequest{SkillID: added[0].ID, Agent: request.Agent, Project: request.Project}, true); err != nil {
 				return err
 			}
+			bindingChanged = !reflect.DeepEqual(beforeBinding, tx.Config)
 		}
+		configChanged := len(changedSkills) > 0 || bindingChanged
 		if err := tx.Config.Validate(); err != nil {
 			return err
 		}
 		if err := validateEffective(tx.Config); err != nil {
 			return err
+		}
+		warnings := make([]string, 0, len(skipped))
+		for _, skill := range skipped {
+			warnings = append(warnings, fmt.Sprintf("Already in Library: %s · skipped", skill.ID))
+		}
+		if !configChanged {
+			output = Result{Skipped: skipped, Warnings: warnings}
+			return nil
 		}
 		if err := tx.Checkpoint(); err != nil {
 			return err
@@ -118,10 +138,14 @@ func (a *App) Add(ctx context.Context, request AddRequest) (Result, error) {
 		if err := tx.Checkpoint(); err != nil {
 			return err
 		}
-		output = Result{Skills: added, Plan: plan, Link: executed, Changed: true, Exit: classify(executed)}
+		output = Result{Skills: changedSkills, Skipped: skipped, Plan: plan, Link: executed, Warnings: warnings, Changed: true, Exit: classify(executed)}
 		return nil
 	})
 	return output, err
+}
+
+func sameStoredSkill(left, right config.Skill) bool {
+	return left.ID == right.ID && left.Name == right.Name && left.Hash == right.Hash && left.Source == right.Source && left.SourcePath == right.SourcePath
 }
 
 func validateExpectedAdd(added []config.Skill, request AddRequest) error {

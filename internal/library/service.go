@@ -335,9 +335,9 @@ func (s Service) PrepareGit(ctx context.Context, rawSource string, options GitAd
 	if err != nil {
 		return nil, err
 	}
-	occupied := make(map[string]struct{}, len(options.Existing))
+	existingByID := make(map[string]config.Skill, len(options.Existing))
 	for _, skill := range options.Existing {
-		occupied[skill.ID] = struct{}{}
+		existingByID[skill.ID] = skill
 	}
 	type preparedSkill struct {
 		candidate   Candidate
@@ -345,16 +345,15 @@ func (s Service) PrepareGit(ctx context.Context, rawSource string, options GitAd
 		destination string
 	}
 	prepared := make([]preparedSkill, 0, len(candidates))
+	result := make([]config.Skill, 0, len(candidates))
 	plannedIDs := make(map[string]struct{}, len(candidates))
 	for _, candidate := range candidates {
 		id := canonical + "/" + candidate.Name
-		_, ledgerExists := occupied[id]
-		if ledgerExists && !options.Force {
-			return nil, fmt.Errorf("skill id %q already exists", id)
-		}
+		existing, ledgerExists := existingByID[id]
 		if _, duplicate := plannedIDs[id]; duplicate {
 			return nil, fmt.Errorf("multiple discovered skills produce id %q", id)
 		}
+		plannedIDs[id] = struct{}{}
 		lexical, err := lexicalLibraryPath(s.LibraryRoot, id)
 		if err != nil {
 			return nil, err
@@ -373,8 +372,32 @@ func (s Service) PrepareGit(ctx context.Context, rawSource string, options GitAd
 		} else if statErr != nil && !os.IsNotExist(statErr) {
 			return nil, statErr
 		}
+		if ledgerExists && !options.Force {
+			if existing.Hash != candidate.Hash || existing.Source != canonical || existing.SourcePath != candidate.RelativePath {
+				return nil, fmt.Errorf("skill id %q already exists with different content; use update to refresh it or force to replace it", id)
+			}
+			actualHash, hashErr := HashSkill(destination)
+			if hashErr != nil {
+				return nil, fmt.Errorf("verify existing skill %q: %w", id, hashErr)
+			}
+			if actualHash != existing.Hash {
+				return nil, fmt.Errorf("library content for %q differs from its ledger hash; review status before adding", id)
+			}
+			result = append(result, existing)
+			continue
+		}
 		prepared = append(prepared, preparedSkill{candidate: candidate, id: id, destination: destination})
-		plannedIDs[id] = struct{}{}
+	}
+	for _, item := range prepared {
+		refCopy := *ref
+		result = append(result, config.Skill{
+			ID: item.id, Name: item.candidate.Name, Description: item.candidate.Description,
+			Source: canonical, SourcePath: item.candidate.RelativePath, Ref: &refCopy,
+			Resolved: resolved, Hash: item.candidate.Hash,
+		})
+	}
+	if len(prepared) == 0 {
+		return &Mutation{Skills: result}, nil
 	}
 	specs := make([]CopySpec, 0, len(prepared))
 	for _, item := range prepared {
@@ -385,15 +408,6 @@ func (s Service) PrepareGit(ctx context.Context, rawSource string, options GitAd
 		return nil, err
 	}
 	batch.SyncDirectory = s.syncDirectory
-	result := make([]config.Skill, 0, len(prepared))
-	for _, item := range prepared {
-		refCopy := *ref
-		result = append(result, config.Skill{
-			ID: item.id, Name: item.candidate.Name, Description: item.candidate.Description,
-			Source: canonical, SourcePath: item.candidate.RelativePath, Ref: &refCopy,
-			Resolved: resolved, Hash: item.candidate.Hash,
-		})
-	}
 	if err := s.configureBatchSkills(batch, result, options.Existing); err != nil {
 		_ = batch.Abort()
 		return nil, err
@@ -575,12 +589,11 @@ func (s Service) checkout(ctx context.Context, canonical, rawSource string, requ
 	if err != nil {
 		return "", nil, "", func() {}, err
 	}
-	cleanup := func() { _ = os.RemoveAll(checkout) }
-	if err := os.Remove(checkout); err != nil {
-		cleanup()
-		return "", nil, "", func() {}, err
+	cleanup := func() {
+		_, _ = s.Runner.Run(context.Background(), repository, "worktree", "remove", "--force", checkout)
+		_ = os.RemoveAll(checkout)
 	}
-	if _, err := s.Runner.Run(ctx, s.CacheRoot, "clone", "--no-checkout", "--", repository, checkout); err != nil {
+	if err := os.Remove(checkout); err != nil {
 		cleanup()
 		return "", nil, "", func() {}, err
 	}
@@ -603,11 +616,15 @@ func (s Service) checkout(ctx context.Context, canonical, rawSource string, requ
 	target := ref.Value
 	switch ref.Kind {
 	case "branch":
-		target = "refs/remotes/origin/" + ref.Value
+		target = "refs/heads/" + ref.Value
 	case "tag":
 		target = "refs/tags/" + ref.Value
 	}
-	if _, err := s.Runner.Run(ctx, checkout, "checkout", "--detach", target); err != nil {
+	if _, err := s.Runner.Run(ctx, repository, "worktree", "prune"); err != nil {
+		cleanup()
+		return "", nil, "", func() {}, err
+	}
+	if _, err := s.Runner.Run(ctx, repository, "worktree", "add", "--detach", checkout, target); err != nil {
 		cleanup()
 		return "", nil, "", func() {}, err
 	}
@@ -660,7 +677,7 @@ func (s Service) ensureRepository(ctx context.Context, canonical, rawSource stri
 	}
 	_ = os.Remove(temporary)
 	defer os.RemoveAll(temporary)
-	if _, err := s.Runner.Run(ctx, repositories, "clone", "--mirror", "--", rawSource, temporary); err != nil {
+	if _, err := s.Runner.Run(ctx, repositories, "clone", "--mirror", "--filter=blob:none", "--", rawSource, temporary); err != nil {
 		return "", err
 	}
 	if err := s.rename(temporary, destination); err != nil {
