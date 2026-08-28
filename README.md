@@ -2,9 +2,10 @@
 
 # aikit
 
-[![CI](https://github.com/silenceper/aikit/actions/workflows/ci.yml/badge.svg)](https://github.com/silenceper/aikit/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/silenceper/aikit?include_prereleases)](https://github.com/silenceper/aikit/releases)
-[![License](https://img.shields.io/github/license/silenceper/aikit)](LICENSE)
+[![CI](https://img.shields.io/github/actions/workflow/status/silenceper/aikit/ci.yml?branch=main&style=flat-square&label=CI&logo=githubactions&logoColor=white)](https://github.com/silenceper/aikit/actions/workflows/ci.yml)
+[![Version](https://img.shields.io/github/v/release/silenceper/aikit?include_prereleases&sort=semver&style=flat-square&label=Version)](https://github.com/silenceper/aikit/releases)
+[![Homebrew](https://img.shields.io/badge/Homebrew-silenceper%2Ftap-FBB040?style=flat-square&logo=homebrew&logoColor=black)](https://github.com/silenceper/homebrew-tap/blob/main/Formula/aikit.rb)
+[![License](https://img.shields.io/github/license/silenceper/aikit?style=flat-square)](LICENSE)
 
 **aikit is a local-first skills manager for AI coding agents.** It keeps one
 authoritative ledger and one central skill library, then reconciles managed
@@ -40,10 +41,9 @@ aikit gives each concern one owner:
 > recoverable backup of important configuration and review dry-run output
 > before adopting existing directories.
 
-This documentation describes the current `main` branch. The latest published
-alpha predates the current TUI, recovery, and workflow feature set. Build from
-source to use the behavior documented here; release archives remain available
-for evaluating the older published alpha.
+This documentation describes the current `main` branch. Tagged alpha releases
+are published through Homebrew and GitHub Releases and capture the exact
+feature set at their tagged revision; `main` may contain newer changes.
 
 The current release manages **Skills only**. Rules, MCP configuration, command
 packs, a Web UI, export/import, cross-machine synchronization, and enterprise
@@ -102,10 +102,34 @@ See the [changelog](CHANGELOG.md) for release history and known evolution.
 
 ## Installation
 
-### Build from source (recommended)
+### Homebrew (recommended)
 
-Go 1.25 or newer is required. This is currently the supported way to run the
-feature set documented in this README.
+The formula is published in [`silenceper/tap`](https://github.com/silenceper/homebrew-tap).
+Homebrew requires explicit trust for third-party taps, so trust only the aikit
+formula before installing it:
+
+```bash
+brew tap silenceper/tap
+brew trust --formula silenceper/tap/aikit
+brew install silenceper/tap/aikit
+aikit version
+```
+
+Upgrade or remove aikit with:
+
+```bash
+brew update
+brew upgrade aikit
+
+brew uninstall aikit
+brew untrust --formula silenceper/tap/aikit
+brew untap silenceper/tap
+```
+
+### Build from source
+
+Go 1.25 or newer is required. Use a source build when developing aikit or
+testing changes that have not reached a tagged release.
 
 ```bash
 git clone https://github.com/silenceper/aikit.git
@@ -114,18 +138,14 @@ make build
 ./bin/aikit version
 ```
 
-### Published alpha archives
+### Release archives
 
 Download the archive for your operating system and architecture from
 [GitHub Releases](https://github.com/silenceper/aikit/releases), then verify it
 against `checksums.txt` from the same release before placing `aikit` on your
-`PATH`. These archives currently contain the older published alpha and do not
-yet include every workflow documented for `main`.
+`PATH`.
 
 Release archives are `.tar.gz` on Linux and macOS and `.zip` on Windows.
-
-Homebrew publication is not documented until its release path has been
-verified end to end.
 
 ## Quick start
 

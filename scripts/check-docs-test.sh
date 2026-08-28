@@ -27,6 +27,9 @@ write_fixture() {
 		'## Troubleshooting' \
 		'## Contributing and support' \
 		'## License' \
+		'brew tap silenceper/tap' \
+		'brew trust --formula silenceper/tap/aikit' \
+		'brew install silenceper/tap/aikit' \
 		'[License](LICENSE)' >"$root/README.md"
 
 	printf '%s\n' \
@@ -45,6 +48,9 @@ write_fixture() {
 		'## 故障排查' \
 		'## 贡献与支持' \
 		'## 许可证' \
+		'brew tap silenceper/tap' \
+		'brew trust --formula silenceper/tap/aikit' \
+		'brew install silenceper/tap/aikit' \
 		'[许可证](LICENSE)' >"$root/README.zh-CN.md"
 
 	for relative_path in CONTRIBUTING.md SECURITY.md CODE_OF_CONDUCT.md SUPPORT.md CHANGELOG.md LICENSE .github/ISSUE_TEMPLATE/bug_report.yml .github/ISSUE_TEMPLATE/feature_request.yml .github/ISSUE_TEMPLATE/documentation.yml .github/ISSUE_TEMPLATE/config.yml .github/pull_request_template.md; do
@@ -61,8 +67,7 @@ expect_failure() {
 	cp -R "$test_root/good" "$fixture"
 	case "$name" in
 		broken-link) printf '\n[Broken](missing.md)\n' >>"$fixture/README.md" ;;
-		brew-command) printf '\n```bash\nbrew install aikit\n```\n' >>"$fixture/README.md" ;;
-		brew-command-support) printf '\n```bash\n$ brew install aikit\n```\n' >>"$fixture/SUPPORT.md" ;;
+		missing-brew-command) grep -Fv 'brew install silenceper/tap/aikit' "$fixture/README.md" >"$fixture/README.md.next" && mv "$fixture/README.md.next" "$fixture/README.md" ;;
 		missing-language-link) grep -Fv '[English](README.md)' "$fixture/README.zh-CN.md" >"$fixture/README.zh-CN.md.next" && mv "$fixture/README.zh-CN.md.next" "$fixture/README.zh-CN.md" ;;
 		missing-english-heading) grep -Fvx '## Features' "$fixture/README.md" >"$fixture/README.md.next" && mv "$fixture/README.md.next" "$fixture/README.md" ;;
 		missing-chinese-heading) grep -Fvx '## 核心能力' "$fixture/README.zh-CN.md" >"$fixture/README.zh-CN.md.next" && mv "$fixture/README.zh-CN.md.next" "$fixture/README.zh-CN.md" ;;
@@ -84,8 +89,7 @@ write_fixture "$test_root/good"
 bash "$checker" "$test_root/good" >/dev/null
 
 expect_failure broken-link 'broken relative link: missing.md'
-expect_failure brew-command 'advertises an unverified Homebrew command'
-expect_failure brew-command-support 'SUPPORT.md advertises an unverified Homebrew command'
+expect_failure missing-brew-command 'README.md is missing: brew install silenceper/tap/aikit'
 expect_failure missing-language-link 'README.zh-CN.md is missing: [English](README.md)'
 expect_failure missing-english-heading 'README.md is missing: ## Features'
 expect_failure missing-chinese-heading 'README.zh-CN.md is missing: ## 核心能力'

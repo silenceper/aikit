@@ -2,9 +2,10 @@
 
 # aikit
 
-[![CI](https://github.com/silenceper/aikit/actions/workflows/ci.yml/badge.svg)](https://github.com/silenceper/aikit/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/silenceper/aikit?include_prereleases)](https://github.com/silenceper/aikit/releases)
-[![License](https://img.shields.io/github/license/silenceper/aikit)](LICENSE)
+[![CI](https://img.shields.io/github/actions/workflow/status/silenceper/aikit/ci.yml?branch=main&style=flat-square&label=CI&logo=githubactions&logoColor=white)](https://github.com/silenceper/aikit/actions/workflows/ci.yml)
+[![Version](https://img.shields.io/github/v/release/silenceper/aikit?include_prereleases&sort=semver&style=flat-square&label=Version)](https://github.com/silenceper/aikit/releases)
+[![Homebrew](https://img.shields.io/badge/Homebrew-silenceper%2Ftap-FBB040?style=flat-square&logo=homebrew&logoColor=black)](https://github.com/silenceper/homebrew-tap/blob/main/Formula/aikit.rb)
+[![License](https://img.shields.io/github/license/silenceper/aikit?style=flat-square)](LICENSE)
 
 **aikit 是一个面向 AI 编程 Agent 的本地优先 Skills 管理器。** 它使用一份
 权威配置账本和一个中央 Skill Library，再把受管链接同步到 Cursor、Claude
@@ -37,9 +38,8 @@ aikit 为这些问题明确了唯一归属：
 > 恢复元数据在 v1 之前仍可能变化。请为重要配置保留可恢复备份，并在收归
 > 现有目录之前先检查 dry-run 结果。
 
-本文档描述当前 `main` 分支。最新已发布 Alpha 早于目前的 TUI、恢复机制与
-完整工作流；如需使用本文描述的能力，请从源码构建。Release 压缩包仍可用于
-评估较早的已发布 Alpha。
+本文档描述当前 `main` 分支。带 Tag 的 Alpha 版本会通过 Homebrew 与 GitHub
+Releases 发布，并对应其 Tag 所在提交的准确功能集；`main` 可能包含更新改动。
 
 当前版本仅管理 **Skills**。Rules、MCP 配置、命令包、Web UI、导入导出、
 跨设备同步以及企业级支持目前都不在范围内。
@@ -92,9 +92,33 @@ macOS 和 Linux 是当前主要运行目标。Release 配置会为 Linux、macOS
 
 ## 安装
 
-### 从源码构建（推荐）
+### Homebrew（推荐）
 
-需要 Go 1.25 或更高版本。这是当前获得本文所述完整功能的受支持方式。
+Formula 发布在 [`silenceper/tap`](https://github.com/silenceper/homebrew-tap)。
+Homebrew 要求显式信任第三方 Tap，安装前只信任 aikit Formula 即可：
+
+```bash
+brew tap silenceper/tap
+brew trust --formula silenceper/tap/aikit
+brew install silenceper/tap/aikit
+aikit version
+```
+
+升级或卸载 aikit：
+
+```bash
+brew update
+brew upgrade aikit
+
+brew uninstall aikit
+brew untrust --formula silenceper/tap/aikit
+brew untap silenceper/tap
+```
+
+### 从源码构建
+
+需要 Go 1.25 或更高版本。开发 aikit 或测试尚未进入 Tag Release 的改动时，
+可以从源码构建。
 
 ```bash
 git clone https://github.com/silenceper/aikit.git
@@ -103,16 +127,13 @@ make build
 ./bin/aikit version
 ```
 
-### 已发布 Alpha 压缩包
+### Release 压缩包
 
 从 [GitHub Releases](https://github.com/silenceper/aikit/releases) 下载与你的
 操作系统和架构匹配的压缩包，并使用同一 Release 中的 `checksums.txt` 校验后，
-再把 `aikit` 放入 `PATH`。这些压缩包目前是较早的已发布 Alpha，尚未包含
-`main` 文档中的全部工作流。
+再把 `aikit` 放入 `PATH`。
 
 Linux 与 macOS 使用 `.tar.gz`，Windows 使用 `.zip`。
-
-Homebrew 发布链路完成端到端验证前，本文档暂不提供其安装命令。
 
 ## 快速开始
 

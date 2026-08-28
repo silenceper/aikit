@@ -48,6 +48,16 @@ done
 require_literal README.md '[简体中文](README.zh-CN.md)'
 require_literal README.zh-CN.md '[English](README.md)'
 
+homebrew_commands=(
+	'brew tap silenceper/tap'
+	'brew trust --formula silenceper/tap/aikit'
+	'brew install silenceper/tap/aikit'
+)
+for command in "${homebrew_commands[@]}"; do
+	require_literal README.md "$command"
+	require_literal README.zh-CN.md "$command"
+done
+
 english_headings=(
 	'## Why aikit'
 	'## Project status'
@@ -85,13 +95,6 @@ for heading in "${english_headings[@]}"; do
 done
 for heading in "${chinese_headings[@]}"; do
 	require_literal README.zh-CN.md "$heading"
-done
-
-public_docs=(README.md README.zh-CN.md CONTRIBUTING.md SECURITY.md CODE_OF_CONDUCT.md SUPPORT.md CHANGELOG.md)
-for document in "${public_docs[@]}"; do
-	if [[ -f "$repo_root/$document" ]] && grep -Eq '^[[:space:]]*([$][[:space:]]+)?brew[[:space:]]+(tap|install)([[:space:]]|$)' "$repo_root/$document"; then
-		fail "$document advertises an unverified Homebrew command"
-	fi
 done
 
 check_relative_links() {
