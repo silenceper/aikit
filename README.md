@@ -15,6 +15,13 @@ Codex, GitHub Copilot, and Windsurf.
 Use the full-screen, mouse-capable TUI for daily work or the deterministic CLI
 for scripts and CI.
 
+## Preview
+
+![aikit TUI demo: import and manage local Skills](docs/assets/aikit-demo.gif)
+
+_Import local Skills, inspect exact changes, and enable a Skill for Codex — all
+from the TUI._
+
 ## Why aikit
 
 Agent skills tend to become scattered copies across IDE-specific directories.
@@ -32,31 +39,6 @@ aikit gives each concern one owner:
 - Agent directories contain managed links instead of independent copies.
 - Global, project, and preset bindings refer to stable skill IDs.
 - Pending operations and library journals preserve explicit recovery state.
-
-## Project status
-
-> [!IMPORTANT]
-> aikit is alpha software. Its safety model is production-oriented, but CLI,
-> TUI, configuration, and recovery metadata may still change before v1. Keep a
-> recoverable backup of important configuration and review dry-run output
-> before adopting existing directories.
-
-This documentation describes the current `main` branch. Tagged alpha releases
-are published through Homebrew and GitHub Releases and capture the exact
-feature set at their tagged revision; `main` may contain newer changes.
-
-The current release manages **Skills only**. Rules, MCP configuration, command
-packs, a Web UI, export/import, cross-machine synchronization, and enterprise
-support are intentionally out of scope.
-
-macOS and Linux are the primary runtime targets. Release builds are configured
-for Linux, macOS, and Windows on amd64 and arm64, and CI cross-compiles each
-target. Cross-compilation is not native behavioral certification. In
-particular, authenticated link recovery that requires anchored Unix directory
-operations is unavailable on Windows and other unsupported platforms; those
-operations fail closed instead of continuing unsafely.
-
-See the [changelog](CHANGELOG.md) for release history and known evolution.
 
 ## Features
 
@@ -79,10 +61,6 @@ See the [changelog](CHANGELOG.md) for release history and known evolution.
   review pending recovery before new mutations proceed.
 - **Fail-closed cleanup** — preserve unknown or replaced content when managed
   ownership cannot be proven.
-
-## Preview
-
-<!-- TUI screenshots will be added after the visual layout is frozen. -->
 
 ## Supported agents and platforms
 

@@ -13,6 +13,12 @@ Code、Codex、GitHub Copilot 与 Windsurf 的全局或项目工作区。
 
 日常操作可以使用支持鼠标的全屏 TUI，脚本和 CI 则可以使用确定性的 CLI。
 
+## 界面预览
+
+![aikit TUI 演示：导入并管理本地 Skills](docs/assets/aikit-demo.gif)
+
+_从本地 Skills 导入、精确变更确认，到为 Codex 启用 Skill，全部在 TUI 中完成。_
+
 ## 为什么选择 aikit
 
 Agent Skills 很容易散落在不同 IDE 的目录里，逐渐形成多份互不一致的副本，
@@ -30,26 +36,6 @@ aikit 为这些问题明确了唯一归属：
 - Agent 目录保存受管链接，而不是各自维护独立副本。
 - 全局、项目与 Preset 绑定引用稳定的 Skill ID。
 - Pending Operation 与 Library Journal 保存显式恢复状态。
-
-## 项目状态
-
-> [!IMPORTANT]
-> aikit 目前仍是 Alpha 软件。它采用面向生产安全的设计，但 CLI、TUI、配置与
-> 恢复元数据在 v1 之前仍可能变化。请为重要配置保留可恢复备份，并在收归
-> 现有目录之前先检查 dry-run 结果。
-
-本文档描述当前 `main` 分支。带 Tag 的 Alpha 版本会通过 Homebrew 与 GitHub
-Releases 发布，并对应其 Tag 所在提交的准确功能集；`main` 可能包含更新改动。
-
-当前版本仅管理 **Skills**。Rules、MCP 配置、命令包、Web UI、导入导出、
-跨设备同步以及企业级支持目前都不在范围内。
-
-macOS 和 Linux 是当前主要运行目标。Release 配置会为 Linux、macOS、Windows
-的 amd64 与 arm64 构建产物，CI 也会交叉编译这些目标；但交叉编译并不等于
-原生行为认证。尤其是依赖 Unix 锚定目录操作的受认证链接恢复在 Windows 及
-其他不支持的平台上不可用，相关操作会 fail closed，而不是冒险继续写入。
-
-版本历史与变化请查看 [CHANGELOG](CHANGELOG.md)。
 
 ## 核心能力
 
@@ -69,10 +55,6 @@ macOS 和 Linux 是当前主要运行目标。Release 配置会为 Linux、macOS
 - **显式迁移与恢复** — 在确认前预览 Import/Adopt，并在新写操作前审查待恢复
   事务。
 - **Fail-closed 清理** — 无法证明受管归属时保留未知或已被替换的内容。
-
-## 界面预览
-
-<!-- TUI 视觉布局稳定后再补充真实截图。 -->
 
 ## 支持的 Agent 与平台
 

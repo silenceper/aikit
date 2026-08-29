@@ -4,6 +4,8 @@ set -euo pipefail
 
 repo_root="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 failures=0
+demo_asset='docs/assets/aikit-demo.gif'
+demo_max_bytes=$((10 * 1024 * 1024))
 
 fail() {
 	printf 'docs check: %s\n' "$*" >&2
@@ -25,6 +27,31 @@ require_literal() {
 	fi
 }
 
+forbid_literal() {
+	local relative_path="$1"
+	local literal="$2"
+	if [[ -f "$repo_root/$relative_path" ]] && grep -Fq -- "$literal" "$repo_root/$relative_path"; then
+		fail "$relative_path must not contain: $literal"
+	fi
+}
+
+require_heading_order() {
+	local relative_path="$1"
+	local first="$2"
+	local second="$3"
+	local third="$4"
+	local first_line second_line third_line
+
+	[[ -f "$repo_root/$relative_path" ]] || return
+	first_line="$(awk -v heading="$first" '$0 == heading { print NR; exit }' "$repo_root/$relative_path")"
+	second_line="$(awk -v heading="$second" '$0 == heading { print NR; exit }' "$repo_root/$relative_path")"
+	third_line="$(awk -v heading="$third" '$0 == heading { print NR; exit }' "$repo_root/$relative_path")"
+	[[ -n "$first_line" && -n "$second_line" && -n "$third_line" ]] || return
+	if ! ((first_line < second_line && second_line < third_line)); then
+		fail "$relative_path headings must appear in order: $first -> $second -> $third"
+	fi
+}
+
 required_files=(
 	README.md
 	README.zh-CN.md
@@ -39,6 +66,7 @@ required_files=(
 	.github/ISSUE_TEMPLATE/documentation.yml
 	.github/ISSUE_TEMPLATE/config.yml
 	.github/pull_request_template.md
+	"$demo_asset"
 )
 
 for relative_path in "${required_files[@]}"; do
@@ -47,6 +75,19 @@ done
 
 require_literal README.md '[简体中文](README.zh-CN.md)'
 require_literal README.zh-CN.md '[English](README.md)'
+require_literal README.md "$demo_asset"
+require_literal README.zh-CN.md "$demo_asset"
+forbid_literal README.md '## Project status'
+forbid_literal README.zh-CN.md '## 项目状态'
+
+if [[ -f "$repo_root/$demo_asset" ]]; then
+	demo_size="$(wc -c <"$repo_root/$demo_asset" | tr -d '[:space:]')"
+	if ((demo_size == 0)); then
+		fail "demo GIF is empty: $demo_asset"
+	elif ((demo_size >= demo_max_bytes)); then
+		fail "demo GIF must be smaller than 10 MiB: $demo_asset"
+	fi
+fi
 
 homebrew_commands=(
 	'brew tap silenceper/tap'
@@ -59,8 +100,8 @@ for command in "${homebrew_commands[@]}"; do
 done
 
 english_headings=(
+	'## Preview'
 	'## Why aikit'
-	'## Project status'
 	'## Features'
 	'## Supported agents and platforms'
 	'## Installation'
@@ -75,8 +116,8 @@ english_headings=(
 )
 
 chinese_headings=(
+	'## 界面预览'
 	'## 为什么选择 aikit'
-	'## 项目状态'
 	'## 核心能力'
 	'## 支持的 Agent 与平台'
 	'## 安装'
@@ -96,6 +137,9 @@ done
 for heading in "${chinese_headings[@]}"; do
 	require_literal README.zh-CN.md "$heading"
 done
+
+require_heading_order README.md '## Preview' '## Why aikit' '## Features'
+require_heading_order README.zh-CN.md '## 界面预览' '## 为什么选择 aikit' '## 核心能力'
 
 check_relative_links() {
 	local relative_path="$1"

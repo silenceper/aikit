@@ -24,9 +24,21 @@ func (m Model) overlayLines() []string {
 	case m.Mode == ModeErrorDetail:
 		return []string{activeStyle.Render(firstNonEmpty(m.FullDetailTitle, "Error details")), m.FullError}
 	case m.Mode == ModeConfirm:
+		selected := len(m.selectedIDs())
+		confirmTitle := "Confirm " + string(m.confirm)
+		if m.confirm == ActionScan {
+			request := m.scanConfirmationRequest()
+			selected = len(request.Selectors)
+			if selected == 0 {
+				selected = len(request.Targets)
+			}
+			if !request.Adopt {
+				confirmTitle = "Confirm import"
+			}
+		}
 		lines := []string{
-			activeStyle.Render("Confirm " + string(m.confirm)),
-			firstNonEmpty(m.Preview.Summary, fmt.Sprintf("%d selected item(s). This action may change local files.", len(m.selectedIDs()))),
+			activeStyle.Render(confirmTitle),
+			firstNonEmpty(m.Preview.Summary, fmt.Sprintf("%d selected item(s). This action may change local files.", selected)),
 		}
 		if m.confirm == ActionRecovery {
 			lines[0] = activeStyle.Render("Review recovery")

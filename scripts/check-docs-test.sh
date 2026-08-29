@@ -9,13 +9,14 @@ trap 'rm -rf "$test_root"' EXIT
 
 write_fixture() {
 	local root="$1"
-	mkdir -p "$root/.github/ISSUE_TEMPLATE"
+	mkdir -p "$root/.github/ISSUE_TEMPLATE" "$root/docs/assets"
 
 	printf '%s\n' \
 		'[简体中文](README.zh-CN.md)' \
 		'# Fixture' \
+		'## Preview' \
+		'![Demo](docs/assets/aikit-demo.gif)' \
 		'## Why aikit' \
-		'## Project status' \
 		'## Features' \
 		'## Supported agents and platforms' \
 		'## Installation' \
@@ -35,8 +36,9 @@ write_fixture() {
 	printf '%s\n' \
 		'[English](README.md)' \
 		'# 测试' \
+		'## 界面预览' \
+		'![演示](docs/assets/aikit-demo.gif)' \
 		'## 为什么选择 aikit' \
-		'## 项目状态' \
 		'## 核心能力' \
 		'## 支持的 Agent 与平台' \
 		'## 安装' \
@@ -52,6 +54,7 @@ write_fixture() {
 		'brew trust --formula silenceper/tap/aikit' \
 		'brew install silenceper/tap/aikit' \
 		'[许可证](LICENSE)' >"$root/README.zh-CN.md"
+	printf 'GIF89a' >"$root/docs/assets/aikit-demo.gif"
 
 	for relative_path in CONTRIBUTING.md SECURITY.md CODE_OF_CONDUCT.md SUPPORT.md CHANGELOG.md LICENSE .github/ISSUE_TEMPLATE/bug_report.yml .github/ISSUE_TEMPLATE/feature_request.yml .github/ISSUE_TEMPLATE/documentation.yml .github/ISSUE_TEMPLATE/config.yml .github/pull_request_template.md; do
 		: >"$root/$relative_path"
@@ -71,6 +74,22 @@ expect_failure() {
 		missing-language-link) grep -Fv '[English](README.md)' "$fixture/README.zh-CN.md" >"$fixture/README.zh-CN.md.next" && mv "$fixture/README.zh-CN.md.next" "$fixture/README.zh-CN.md" ;;
 		missing-english-heading) grep -Fvx '## Features' "$fixture/README.md" >"$fixture/README.md.next" && mv "$fixture/README.md.next" "$fixture/README.md" ;;
 		missing-chinese-heading) grep -Fvx '## 核心能力' "$fixture/README.zh-CN.md" >"$fixture/README.zh-CN.md.next" && mv "$fixture/README.zh-CN.md.next" "$fixture/README.zh-CN.md" ;;
+		missing-demo-reference) grep -Fv 'docs/assets/aikit-demo.gif' "$fixture/README.md" >"$fixture/README.md.next" && mv "$fixture/README.md.next" "$fixture/README.md" ;;
+		missing-demo-gif) rm "$fixture/docs/assets/aikit-demo.gif" ;;
+		empty-demo-gif) : >"$fixture/docs/assets/aikit-demo.gif" ;;
+		oversized-demo-gif) dd if=/dev/zero of="$fixture/docs/assets/aikit-demo.gif" bs=1048576 count=10 2>/dev/null ;;
+		restored-english-status) printf '\n## Project status\n' >>"$fixture/README.md" ;;
+		restored-chinese-status) printf '\n## 项目状态\n' >>"$fixture/README.zh-CN.md" ;;
+		misordered-english-preview)
+			grep -Fvx '## Preview' "$fixture/README.md" >"$fixture/README.md.next"
+			printf '\n## Preview\n' >>"$fixture/README.md.next"
+			mv "$fixture/README.md.next" "$fixture/README.md"
+			;;
+		misordered-chinese-preview)
+			grep -Fvx '## 界面预览' "$fixture/README.zh-CN.md" >"$fixture/README.zh-CN.md.next"
+			printf '\n## 界面预览\n' >>"$fixture/README.zh-CN.md.next"
+			mv "$fixture/README.zh-CN.md.next" "$fixture/README.zh-CN.md"
+			;;
 		*) printf 'unknown fixture: %s\n' "$name" >&2; exit 1 ;;
 	esac
 
@@ -93,5 +112,13 @@ expect_failure missing-brew-command 'README.md is missing: brew install silencep
 expect_failure missing-language-link 'README.zh-CN.md is missing: [English](README.md)'
 expect_failure missing-english-heading 'README.md is missing: ## Features'
 expect_failure missing-chinese-heading 'README.zh-CN.md is missing: ## 核心能力'
+expect_failure missing-demo-reference 'README.md is missing: docs/assets/aikit-demo.gif'
+expect_failure missing-demo-gif 'missing required file: docs/assets/aikit-demo.gif'
+expect_failure empty-demo-gif 'demo GIF is empty: docs/assets/aikit-demo.gif'
+expect_failure oversized-demo-gif 'demo GIF must be smaller than 10 MiB: docs/assets/aikit-demo.gif'
+expect_failure restored-english-status 'README.md must not contain: ## Project status'
+expect_failure restored-chinese-status 'README.zh-CN.md must not contain: ## 项目状态'
+expect_failure misordered-english-preview 'README.md headings must appear in order: ## Preview -> ## Why aikit -> ## Features'
+expect_failure misordered-chinese-preview 'README.zh-CN.md headings must appear in order: ## 界面预览 -> ## 为什么选择 aikit -> ## 核心能力'
 
 printf 'docs checker self-test: PASS\n'

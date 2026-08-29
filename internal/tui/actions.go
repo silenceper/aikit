@@ -494,10 +494,7 @@ func (m Model) confirmAction() (tea.Model, tea.Cmd) {
 		return m, updateCmd(m.ctx, m.service, m.updateRequest())
 	case ActionScan:
 		m.Status = "Applying selected migration action..."
-		request := m.pendingScan
-		if len(request.Selectors) == 0 {
-			request = app.ScanRequest{Adopt: true, Selectors: m.selectedSelectors(), Targets: m.selectedTargets()}
-		}
+		request := m.scanConfirmationRequest()
 		request.DryRun = false
 		return m, adoptCmd(m.ctx, m.migration, request)
 	case ActionBinding:
@@ -588,6 +585,14 @@ func (m Model) confirmAction() (tea.Model, tea.Cmd) {
 		m.Busy, m.MutationBusy = false, false
 	}
 	return m, nil
+}
+
+func (m Model) scanConfirmationRequest() app.ScanRequest {
+	request := m.pendingScan
+	if len(request.Selectors) == 0 {
+		request = app.ScanRequest{Adopt: true, Selectors: m.selectedSelectors(), Targets: m.selectedTargets()}
+	}
+	return request
 }
 
 func (m Model) selectedAddCandidates() []app.ExpectedAddCandidate {

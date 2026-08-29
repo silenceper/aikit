@@ -540,6 +540,30 @@ func TestHelpDocumentsAndScrollsEveryInputPath(t *testing.T) {
 	}
 }
 
+func TestMigrationConfirmSummaryUsesPendingSelectors(t *testing.T) {
+	m := NewModel(nil, &fakeService{}, &fakeMigration{}, ViewMigration, ActionNone)
+	m.Mode, m.confirm = ModeConfirm, ActionScan
+	m.pendingScan.Selectors = []app.ScanSelector{{Key: "one"}, {Key: "two"}, {Key: "three"}}
+
+	got := strings.Join(m.overlayLines(), "\n")
+	if !strings.Contains(got, "Confirm import") || !strings.Contains(got, "3 selected item(s)") {
+		t.Fatalf("import confirmation ignored action or pending selectors:\n%s", got)
+	}
+	m.pendingScan.Adopt = true
+	if got = strings.Join(m.overlayLines(), "\n"); !strings.Contains(got, "Confirm adopt") {
+		t.Fatalf("adopt confirmation lost its action label:\n%s", got)
+	}
+
+	legacy := NewModel(nil, &fakeService{}, &fakeMigration{}, ViewMigration, ActionNone)
+	legacy.Mode, legacy.confirm = ModeConfirm, ActionScan
+	legacy.Scan.Items = []app.ScanItem{{Key: "legacy", Target: "/tmp/legacy", Action: app.ScanActionAdopt}}
+	legacy.Selected["legacy"] = true
+	got = strings.Join(legacy.overlayLines(), "\n")
+	if !strings.Contains(got, "Confirm adopt") || !strings.Contains(got, "1 selected item(s)") {
+		t.Fatalf("legacy scan confirmation diverged from its adopt execution:\n%s", got)
+	}
+}
+
 func moveCursorToPrefix(t *testing.T, m *Model, prefix string) {
 	t.Helper()
 	for index, current := range m.rows() {
